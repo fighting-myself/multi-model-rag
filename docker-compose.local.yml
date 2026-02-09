@@ -1,0 +1,56 @@
+# 本地可启动：仅跑后端，数据库/Redis/Qdrant/MinIO 全部使用远程（.env 中配置）
+# 使用方式: docker-compose -f docker-compose.local.yml up -d --build
+# 或本地不跑 Docker，直接: cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000
+
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://localhost:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://localhost:6379/2}
+      - QDRANT_URL=${QDRANT_URL:-http://localhost:6333}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_SECURE=${MINIO_SECURE:-true}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-rag-files}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - LLM_MODEL=${LLM_MODEL}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Redis 未配置时可注释掉 celery-worker；配置了远程 Redis 后可启用
+  # celery-worker:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   env_file: [.env]
+  #   environment:
+  #     - DATABASE_URL=${DATABASE_URL}
+  #     - REDIS_URL=${REDIS_URL}
+  #     - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+  #     - QDRANT_URL=${QDRANT_URL}
+  #     - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+  #     - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+  #     - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+  #   volumes: [./backend:/app]
+  #   command: celery -A app.celery_app worker --loglevel=info
+  #   depends_on: [backend]
