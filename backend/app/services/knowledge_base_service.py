@@ -159,7 +159,7 @@ class KnowledgeBaseService:
     
     @staticmethod
     def _extract_text(content: bytes, file_type: str) -> str:
-        """从文件内容提取纯文本（支持 txt、pdf、docx、pptx）"""
+        """从文件内容提取纯文本（支持 txt、pdf、docx、pptx、xlsx）"""
         ft = (file_type or "").lower()
         if ft == "txt":
             return content.decode("utf-8", errors="ignore").strip()
@@ -208,6 +208,22 @@ class KnowledgeBaseService:
                 return "\n".join(parts).strip() if parts else ""
             except Exception as e:
                 logging.warning(f"pptx 文本提取失败: {e}")
+                return ""
+        if ft == "xlsx":
+            try:
+                from openpyxl import load_workbook
+                wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+                parts = []
+                for name in wb.sheetnames:
+                    sheet = wb[name]
+                    for row in sheet.iter_rows(values_only=True):
+                        for cell in row:
+                            if cell is not None and str(cell).strip():
+                                parts.append(str(cell).strip())
+                wb.close()
+                return "\n".join(parts).strip() if parts else ""
+            except Exception as e:
+                logging.warning(f"xlsx 文本提取失败: {e}")
                 return ""
         return ""
 
