@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     
     # 文件上传配置
     MAX_FILE_SIZE: int = 104857600  # 100MB
-    ALLOWED_FILE_TYPES: str = "pdf,ppt,txt,xlsx,docx,jpeg,jpg,png"
+    ALLOWED_FILE_TYPES: str = "pdf,ppt,pptx,txt,xlsx,docx,jpeg,jpg,png"
     
     @property
     def allowed_file_types_list(self) -> List[str]:

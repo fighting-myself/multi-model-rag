@@ -159,7 +159,7 @@ class KnowledgeBaseService:
     
     @staticmethod
     def _extract_text(content: bytes, file_type: str) -> str:
-        """从文件内容提取纯文本（支持 txt、pdf、docx）"""
+        """从文件内容提取纯文本（支持 txt、pdf、docx、pptx）"""
         ft = (file_type or "").lower()
         if ft == "txt":
             return content.decode("utf-8", errors="ignore").strip()
@@ -189,6 +189,25 @@ class KnowledgeBaseService:
                 return "\n".join(parts).strip() if parts else ""
             except Exception as e:
                 logging.warning(f"docx 文本提取失败: {e}")
+                return ""
+        if ft == "pptx":
+            try:
+                from pptx import Presentation
+                prs = Presentation(io.BytesIO(content))
+                parts = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text and shape.text.strip():
+                            parts.append(shape.text.strip())
+                        # 表格
+                        if shape.has_table:
+                            for row in shape.table.rows:
+                                for cell in row.cells:
+                                    if cell.text and cell.text.strip():
+                                        parts.append(cell.text.strip())
+                return "\n".join(parts).strip() if parts else ""
+            except Exception as e:
+                logging.warning(f"pptx 文本提取失败: {e}")
                 return ""
         return ""
 
