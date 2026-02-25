@@ -190,17 +190,23 @@ class FileService:
         await self.db.commit()
     
     async def download_file(self, file_id: int, user_id: int) -> Optional[dict]:
-        """下载文件"""
+        """下载文件：读入完整字节并返回，便于前端展示/下载"""
         file = await self.get_file(file_id, user_id)
         if not file:
             return None
-        
         try:
             response = self.minio_client.get_object(settings.MINIO_BUCKET_NAME, file.storage_path)
+            data = response.read()
+            response.close()
+            ft = (file.file_type or "").lower()
+            if ft in ("jpeg", "jpg", "png", "gif", "webp"):
+                content_type = f"image/{ft}" if ft != "jpg" else "image/jpeg"
+            else:
+                content_type = f"application/{file.file_type}"
             return {
-                "content": response,
+                "content": data,
                 "filename": file.original_filename,
-                "content_type": f"application/{file.file_type}"
+                "content_type": content_type,
             }
         except Exception:
             return None

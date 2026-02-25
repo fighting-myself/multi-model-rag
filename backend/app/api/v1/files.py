@@ -1,8 +1,9 @@
 """
 文件相关API
 """
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -49,6 +50,29 @@ async def batch_upload_files(
     return file_records
 
 
+@router.get("/{file_id}/download")
+async def download_file(
+    file_id: int,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """下载/预览文件（图片会返回正确 Content-Type 便于展示）"""
+    file_service = FileService(db)
+    file_stream = await file_service.download_file(file_id, current_user.id)
+    if not file_stream:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    filename = file_stream["filename"] or "download"
+    # 使用 RFC 5987 编码，避免中文等非 ASCII 导致 latin-1 报错
+    encoded_filename = quote(filename, safe="")
+    return Response(
+        content=file_stream["content"],
+        media_type=file_stream["content_type"],
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
+        },
+    )
+
+
 @router.get("", response_model=FileListResponse)
 async def get_files(
     page: int = 1,
@@ -90,22 +114,3 @@ async def delete_file(
     file_service = FileService(db)
     await file_service.delete_file(file_id, current_user.id)
     return None
-
-
-@router.get("/{file_id}/download")
-async def download_file(
-    file_id: int,
-    current_user: UserResponse = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """下载文件"""
-    file_service = FileService(db)
-    file_stream = await file_service.download_file(file_id, current_user.id)
-    if not file_stream:
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    return StreamingResponse(
-        file_stream["content"],
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{file_stream["filename"]}"'}
-    )

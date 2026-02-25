@@ -3,7 +3,7 @@
 """
 import io
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -12,7 +12,7 @@ from app.models.file import File
 from app.models.chunk import Chunk
 from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseResponse, KnowledgeBaseListResponse
 from app.services.file_service import FileService
-from app.services.embedding_service import get_embeddings
+from app.services.embedding_service import get_embeddings, get_embedding
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.ocr_service import extract_text_from_image
 from app.core.config import settings
@@ -553,3 +553,69 @@ class KnowledgeBaseService:
                     logging.error(f"清理向量失败: {cleanup_error}")
             
             raise ValueError(f"添加文件到知识库失败: {e}")
+
+    async def search_images_by_text(
+        self,
+        query: str,
+        user_id: int,
+        knowledge_base_id: Optional[int] = None,
+        top_k: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """以文搜图：根据文本在知识库中检索匹配的图片文件。
+        
+        使用查询文本的向量在向量库中检索，再过滤出 file_type 为 jpeg/jpg/png 的文件，
+        按相似度排序后去重（同一文件只返回一次），返回文件信息及片段。
+        """
+        if not (query and query.strip()):
+            return []
+        try:
+            query_vec = await get_embedding(query.strip())
+            vs = get_vector_client()
+            filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+            hits = vs.search(query_vector=query_vec, top_k=min(80, top_k * 4), filter_expr=filter_expr) or []
+        except Exception as e:
+            logging.warning(f"以文搜图向量检索失败: {e}")
+            return []
+
+        vector_ids = []
+        for h in hits if isinstance(hits, list) else []:
+            if not isinstance(h, dict):
+                continue
+            vid = h.get("id") or (h.get("entity") or {}).get("id") if isinstance(h.get("entity"), dict) else None
+            if vid is not None:
+                vector_ids.append(str(vid))
+        if not vector_ids:
+            return []
+
+        # Chunk join File，只保留图片类型且属于当前用户的文件
+        stmt = (
+            select(Chunk, File)
+            .join(File, Chunk.file_id == File.id)
+            .where(
+                Chunk.vector_id.in_(vector_ids),
+                File.file_type.in_(("jpeg", "jpg", "png")),
+                File.user_id == user_id,
+            )
+        )
+        if knowledge_base_id is not None:
+            stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        # 按向量检索顺序排序，同一 file_id 只保留第一次出现（最佳匹配）
+        seen_file_ids = set()
+        ordered_files: List[Dict[str, Any]] = []
+        vid_order = {vid: i for i, vid in enumerate(vector_ids)}
+        for chunk, file in rows:
+            if file.id in seen_file_ids:
+                continue
+            seen_file_ids.add(file.id)
+            rank = vid_order.get(chunk.vector_id, 9999)
+            ordered_files.append({
+                "rank": rank,
+                "file_id": file.id,
+                "original_filename": file.original_filename or file.filename,
+                "file_type": file.file_type,
+                "snippet": (chunk.content or "")[:200],
+            })
+        ordered_files.sort(key=lambda x: x["rank"])
+        return ordered_files[:top_k]

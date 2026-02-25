@@ -36,3 +36,16 @@ class KnowledgeBaseListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ImageSearchItem(BaseModel):
+    """以文搜图单条结果"""
+    file_id: int
+    original_filename: str
+    file_type: str
+    snippet: Optional[str] = None
+
+
+class ImageSearchResponse(BaseModel):
+    """以文搜图响应"""
+    files: List[ImageSearchItem]
