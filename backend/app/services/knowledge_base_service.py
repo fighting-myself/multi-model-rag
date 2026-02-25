@@ -2,6 +2,7 @@
 知识库服务：创建知识库、添加文件并做 RAG 切分与向量化
 """
 import io
+import logging
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -158,7 +159,7 @@ class KnowledgeBaseService:
     
     @staticmethod
     def _extract_text(content: bytes, file_type: str) -> str:
-        """从文件内容提取纯文本（支持 txt、pdf）"""
+        """从文件内容提取纯文本（支持 txt、pdf、docx）"""
         ft = (file_type or "").lower()
         if ft == "txt":
             return content.decode("utf-8", errors="ignore").strip()
@@ -171,6 +172,23 @@ class KnowledgeBaseService:
                     for page in reader.pages
                 ).strip()
             except Exception:
+                return ""
+        if ft == "docx":
+            try:
+                from docx import Document
+                doc = Document(io.BytesIO(content))
+                parts = []
+                for para in doc.paragraphs:
+                    if para.text.strip():
+                        parts.append(para.text.strip())
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            if cell.text.strip():
+                                parts.append(cell.text.strip())
+                return "\n".join(parts).strip() if parts else ""
+            except Exception as e:
+                logging.warning(f"docx 文本提取失败: {e}")
                 return ""
         return ""
 
