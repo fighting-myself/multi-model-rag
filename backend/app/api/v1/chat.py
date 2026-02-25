@@ -1,6 +1,7 @@
 """
 问答相关API
 """
+import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,20 +50,30 @@ async def chat_completion_stream(
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """发送消息（流式）"""
+    """发送消息（流式），每个 token 单独推送，禁用缓冲以真正逐字输出。"""
     chat_service = ChatService(db)
-    
+
     async def generate():
-        async for chunk in chat_service.chat_stream(
+        async for event in chat_service.chat_stream(
             user_id=current_user.id,
             message=message.content,
             conversation_id=conversation_id,
             knowledge_base_id=knowledge_base_id or message.knowledge_base_id
         ):
-            yield f"data: {chunk}\n\n"
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
         yield "data: [DONE]\n\n"
-    
-    return StreamingResponse(generate(), media_type="text/event-stream")
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream; charset=utf-8",
+        },
+    )
 
 
 @router.get("/conversations", response_model=ConversationListResponse)

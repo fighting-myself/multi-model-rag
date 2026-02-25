@@ -1,16 +1,18 @@
 """
 问答服务：支持基于知识库的 RAG（向量检索 + LLM）
 """
-from typing import Optional, AsyncGenerator, List
+import json as _json
+from typing import Optional, AsyncGenerator, List, Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime
 
 from app.models.conversation import Conversation, Message
 from app.models.chunk import Chunk
-from app.schemas.chat import ChatResponse, ConversationResponse, ConversationListResponse
+from app.models.file import File
+from app.schemas.chat import ChatResponse, ConversationResponse, ConversationListResponse, SourceItem
 from app.services.embedding_service import get_embedding
-from app.services.llm_service import chat_completion as llm_chat
+from app.services.llm_service import chat_completion as llm_chat, chat_completion_stream as llm_chat_stream
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.rerank_service import rerank
 from app.core.config import settings
@@ -89,18 +91,14 @@ class ChatService:
         # 返回前 top_k 个，并添加排名（从1开始）
         return [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k])]
     
-    async def _rag_context(self, message: str, knowledge_base_id: int, top_k: int = 10) -> tuple[str, float, Optional[str]]:
+    async def _rag_context(
+        self, message: str, knowledge_base_id: int, top_k: int = 10
+    ) -> tuple[str, float, Optional[str], List[Chunk]]:
         """根据用户问题在知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。
         
-        流程：
-        1. 向量检索：获取向量相似度结果
-        2. 全文匹配：使用 SQL LIKE 进行关键词匹配
-        3. RRF 混合打分：合并两种检索结果的排名
-        4. Rerank 重排序：使用 rerank 模型对候选结果重排序
-        
         Returns:
-            (context: str, confidence: float, max_confidence_context: Optional[str]): 
-            上下文内容、最高置信度（0-1，1表示完全相似）、最高置信度对应的单个上下文
+            (context, confidence, max_confidence_context, selected_chunks): 
+            上下文、置信度、最高置信度对应单段、用于溯源的 chunk 列表
         """
         import logging
         
@@ -175,8 +173,8 @@ class ChatService:
             if all_chunks:
                 context = "\n\n".join(c.content for c in all_chunks if c.content)[:8000]
                 max_conf_context = all_chunks[0].content if all_chunks else None
-                return (context, 0.5, max_conf_context)
-            return ("", 0.0, None)
+                return (context, 0.5, max_conf_context, all_chunks)
+            return ("", 0.0, None, [])
         
         # 3. RRF 混合打分
         chunk_rrf_scores = {}  # chunk_id -> RRF_score
@@ -200,14 +198,13 @@ class ChatService:
         )[:top_k * 2]
         
         if not candidate_chunks:
-            return ("", 0.0, None)
+            return ("", 0.0, None, [])
         
         # 4. Rerank 重排序
         try:
             documents = [chunk.content for chunk, _ in candidate_chunks]
             reranked = await rerank(query=message, documents=documents, top_n=min(top_k, len(documents)))
             
-            # 构建最终结果
             final_chunks = []
             for item in reranked:
                 idx = item["index"]
@@ -215,43 +212,34 @@ class ChatService:
                     chunk, rrf_score = candidate_chunks[idx]
                     relevance_score = item.get("relevance_score", 0.0)
                     final_chunks.append((chunk, relevance_score, rrf_score))
-            
-            # 如果没有 rerank 结果，使用 RRF 排序的结果
             if not final_chunks:
                 final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
         except Exception as e:
             logging.warning(f"Rerank 失败: {e}，使用 RRF 排序结果")
-            # Rerank 失败时，使用 RRF 排序的结果
             final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
         
-        # 取前 top_k 个结果
         selected_chunks = final_chunks[:top_k]
         if not selected_chunks:
-            return ("", 0.0, None)
+            return ("", 0.0, None, [])
         
-        # 构建上下文
         context = "\n\n".join(c.content for c, _, _ in selected_chunks if c.content)[:8000]
-        
-        # 最高置信度（使用 rerank 的 relevance_score，如果没有则使用 RRF 分数归一化）
         max_conf = max((rel_score for _, rel_score, _ in selected_chunks), default=0.0)
         if max_conf == 0.0:
-            # 如果没有 rerank 分数，使用 RRF 分数归一化
             max_rrf = max((rrf_score for _, _, rrf_score in selected_chunks), default=0.0)
             if max_rrf > 0:
-                max_conf = min(1.0, max_rrf * k)  # 粗略归一化到 0-1
-        
-        # 最高置信度对应的单个上下文
+                max_conf = min(1.0, max_rrf * k)
         max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        
-        return (context, max_conf, max_conf_context)
+        chunk_list = [c for c, _, _ in selected_chunks]
+        return (context, max_conf, max_conf_context, chunk_list)
 
-    async def _rag_context_all_kbs(self, message: str, user_id: int, top_k: int = 10) -> tuple[str, float, Optional[str]]:
+    async def _rag_context_all_kbs(
+        self, message: str, user_id: int, top_k: int = 10
+    ) -> tuple[str, float, Optional[str], List[Chunk]]:
         """在所有知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。
         
         Returns:
-            (context: str, confidence: float, max_confidence_context: Optional[str]): 
-            上下文内容、最高置信度（0-1）、最高置信度对应的单个上下文
+            (context, confidence, max_confidence_context, selected_chunks)
         """
         import logging
         from app.models.knowledge_base import KnowledgeBase
@@ -264,10 +252,10 @@ class ChatService:
             kb_ids = [kb_id for kb_id in kb_result.scalars().all()]
         except Exception as e:
             logging.warning(f"获取用户知识库列表失败: {e}")
-            return ("", 0.0, None)
+            return ("", 0.0, None, [])
         
         if not kb_ids:
-            return ("", 0.0, None)
+            return ("", 0.0, None, [])
         
         # 1. 向量检索
         vector_results = []  # List[tuple[Chunk, rank, confidence]]
@@ -359,7 +347,7 @@ class ChatService:
         
         # 如果没有检索到任何结果
         if not vector_results and not fulltext_results:
-            return ("", 0.0, None)
+            return ("", 0.0, None, [])
         
         # 3. RRF 混合打分
         chunk_rrf_scores = {}
@@ -381,7 +369,7 @@ class ChatService:
         )[:top_k * 2]
         
         if not candidate_chunks:
-            return ("", 0.0, None)
+            return ("", 0.0, None, [])
         
         # 4. Rerank 重排序
         try:
@@ -395,17 +383,15 @@ class ChatService:
                     chunk, rrf_score = candidate_chunks[idx]
                     relevance_score = item.get("relevance_score", 0.0)
                     final_chunks.append((chunk, relevance_score, rrf_score))
-            
             if not final_chunks:
                 final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
         except Exception as e:
             logging.warning(f"Rerank 失败: {e}，使用 RRF 排序结果")
             final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
         
-        # 取前 top_k 个结果
         selected_chunks = final_chunks[:top_k]
         if not selected_chunks:
-            return ("", 0.0, None)
+            return ("", 0.0, None, [])
         
         context = "\n\n".join(c.content for c, _, _ in selected_chunks if c.content)[:8000]
         max_conf = max((rel_score for _, rel_score, _ in selected_chunks), default=0.0)
@@ -413,11 +399,10 @@ class ChatService:
             max_rrf = max((rrf_score for _, _, rrf_score in selected_chunks), default=0.0)
             if max_rrf > 0:
                 max_conf = min(1.0, max_rrf * k)
-        
         max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        
-        return (context, max_conf, max_conf_context)
+        chunk_list = [c for c, _, _ in selected_chunks]
+        return (context, max_conf, max_conf_context, chunk_list)
 
     async def _load_conversation_history(self, conversation_id: int, max_messages: int = None) -> List[Message]:
         """加载对话历史消息（最近 N 条）"""
@@ -434,23 +419,22 @@ class ChatService:
         return messages
 
     async def _summarize_old_messages(self, messages: List[Message]) -> str:
-        """用 LLM 总结旧消息（超过上下文条数时）"""
+        """用 LLM 总结旧消息（超过上下文条数时），便于多轮对话延续。"""
         if len(messages) <= settings.CHAT_CONTEXT_MESSAGE_COUNT:
             return ""
-        # 取前 N 条用于总结，保留后 M 条（M = CONTEXT_MESSAGE_COUNT）
         to_summarize = messages[:-settings.CHAT_CONTEXT_MESSAGE_COUNT]
-        summary_prompt = "请用简洁的语言总结以下对话历史，保留关键信息：\n\n"
+        summary_prompt = "请简要总结以下对话历史，保留：1）用户主要问题与已得到的结论；2）关键事实或数据；3）未解决或待延续的话题。\n\n"
         summary_prompt += "\n".join(
-            f"{'用户' if m.role == 'user' else '助手'}: {m.content[:200]}"
+            f"{'用户' if m.role == 'user' else '助手'}: {m.content[:300]}"
             for m in to_summarize
         )
         try:
             summary = await llm_chat(
                 user_content=summary_prompt,
-                system_content="你是一个对话总结助手，请用简洁的语言总结对话历史，保留关键信息。",
+                system_content="你是对话总结助手。输出简洁的总结，便于后续回答时保持上下文连贯。",
                 context="",
             )
-            return summary[:500]
+            return (summary or "").strip()[:600]
         except Exception:
             return ""
 
@@ -470,6 +454,30 @@ class ChatService:
             role_name = "用户" if m.role == "user" else "助手"
             history_lines.append(f"{role_name}: {m.content}")
         return "\n\n".join(history_lines)
+
+    async def _build_sources_from_chunks(self, chunks: List[Chunk]) -> List[SourceItem]:
+        """从 RAG 选中的 chunks 构建引用来源列表（含文件名、片段）。"""
+        if not chunks:
+            return []
+        file_ids = list({c.file_id for c in chunks if c.file_id})
+        if not file_ids:
+            return []
+        result = await self.db.execute(select(File).where(File.id.in_(file_ids)))
+        files = {f.id: f for f in result.scalars().all()}
+        sources = []
+        for c in chunks:
+            f = files.get(c.file_id) if c.file_id else None
+            name = f.original_filename if f else f"file_{c.file_id}"
+            snippet = (c.content or "")[:200]
+            sources.append(
+                SourceItem(
+                    file_id=c.file_id,
+                    original_filename=name,
+                    chunk_index=c.chunk_index or 0,
+                    snippet=snippet,
+                )
+            )
+        return sources
 
     async def chat(
         self,
@@ -536,6 +544,7 @@ class ChatService:
                 confidence=None,
                 retrieved_context=None,
                 max_confidence_context=None,
+                sources=None,
             )
 
     async def _chat_after_user_message(
@@ -552,11 +561,11 @@ class ChatService:
         low_confidence_warning = ""
         retrieved_context_original = ""  # 保存原始检索上下文（不含警告）
         
-        max_confidence_context = None  # 最高置信度对应的单个上下文
+        max_confidence_context = None
+        selected_chunks: List[Chunk] = []
         if knowledge_base_id:
-            # 指定了知识库，只在该知识库中检索
-            rag_context, rag_confidence, max_confidence_context = await self._rag_context(message, knowledge_base_id, top_k=10)
-            retrieved_context_original = rag_context  # 保存原始上下文
+            rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(message, knowledge_base_id, top_k=10)
+            retrieved_context_original = rag_context
             if not rag_context.strip():
                 try:
                     fallback = await self.db.execute(
@@ -569,20 +578,20 @@ class ChatService:
                     if chunks:
                         rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
                         retrieved_context_original = rag_context
-                        rag_confidence = 0.5  # 兜底时给中等置信度
+                        rag_confidence = 0.5
+                        selected_chunks = chunks
                 except Exception:
                     pass
             if not rag_context.strip():
                 rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
         else:
-            # 未指定知识库，在所有知识库中检索
             try:
-                rag_context, rag_confidence, max_confidence_context = await self._rag_context_all_kbs(message, conv.user_id, top_k=10)
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_all_kbs(message, conv.user_id, top_k=10)
             except Exception as e:
                 import logging
                 logging.warning(f"全知识库检索失败: {e}，将使用空上下文继续对话")
-                rag_context, rag_confidence, max_confidence_context = "", 0.0, None
-            retrieved_context_original = rag_context  # 保存原始上下文
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+            retrieved_context_original = rag_context
             if rag_context and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
                 # 置信度低于阈值，提示用户并使用 LLM 自身知识
                 low_confidence_warning = f"[系统提示：当前内部知识库检索结果的置信度为 {rag_confidence:.2f}，低于阈值 {settings.RAG_CONFIDENCE_THRESHOLD}。请明确告知用户「当前内部知识库置信度比较低，将使用AI自身知识解答问题」，然后结合检索到的上下文（如有）和AI自身知识回答问题。]"
@@ -618,7 +627,9 @@ class ChatService:
              not retrieved_context_original.startswith("[系统提示：")) or
             (max_confidence_context and max_confidence_context.strip())
         )
-        
+        sources = await self._build_sources_from_chunks(selected_chunks)
+        sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
+
         assistant_msg = Message(
             conversation_id=conv.id,
             role="assistant",
@@ -628,6 +639,7 @@ class ChatService:
             confidence=str(rag_confidence) if has_real_retrieval else None,  # 存储为字符串
             retrieved_context=retrieved_context_original if (has_real_retrieval and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD) else None,
             max_confidence_context=max_confidence_context if max_confidence_context else None,
+            sources=sources_json,
         )
         self.db.add(assistant_msg)
         # 更新对话标题（第一条消息时）和更新时间（模型有 onupdate，但显式更新更可靠）
@@ -667,7 +679,8 @@ class ChatService:
             created_at=datetime.utcnow(),
             confidence=return_confidence,
             retrieved_context=return_context,
-            max_confidence_context=max_confidence_context  # 总是返回最高置信度对应的单个上下文（如果有）
+            max_confidence_context=max_confidence_context,
+            sources=sources,
         )
     
     async def chat_stream(
@@ -676,11 +689,125 @@ class ChatService:
         message: str,
         conversation_id: Optional[int] = None,
         knowledge_base_id: Optional[int] = None
-    ) -> AsyncGenerator[str, None]:
-        """流式发送消息"""
-        # TODO: 实现流式响应
-        response = await self.chat(user_id, message, conversation_id, knowledge_base_id)
-        yield response.message
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）。"""
+        import logging
+        conv = None
+        try:
+            if conversation_id:
+                conv = await self.get_conversation(conversation_id, user_id)
+                if not conv:
+                    raise ValueError("对话不存在")
+            else:
+                conv = Conversation(
+                    user_id=user_id,
+                    knowledge_base_id=knowledge_base_id,
+                    title=message[:50] if len(message) > 50 else message,
+                )
+                self.db.add(conv)
+                await self.db.commit()
+                await self.db.refresh(conv)
+        except Exception as e:
+            logging.exception("获取或创建对话失败")
+            yield {"type": "error", "message": str(e)}
+            return
+
+        user_msg = Message(conversation_id=conv.id, role="user", content=message)
+        self.db.add(user_msg)
+        await self.db.flush()
+
+        # 与 _chat_after_user_message 一致的 RAG + 历史上下文
+        rag_context = ""
+        rag_confidence = 0.0
+        low_confidence_warning = ""
+        max_confidence_context = None
+        selected_chunks: List[Chunk] = []
+        if knowledge_base_id:
+            rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(
+                message, knowledge_base_id, top_k=10
+            )
+            if not rag_context.strip():
+                try:
+                    fallback = await self.db.execute(
+                        select(Chunk).where(
+                            Chunk.knowledge_base_id == knowledge_base_id,
+                            Chunk.content != "",
+                        ).order_by(Chunk.id).limit(20)
+                    )
+                    chunks = fallback.scalars().all()
+                    if chunks:
+                        rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
+                        rag_confidence = 0.5
+                        selected_chunks = chunks
+                except Exception:
+                    pass
+            if not rag_context.strip():
+                rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」。]"
+        else:
+            try:
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_all_kbs(
+                    message, conv.user_id, top_k=10
+                )
+            except Exception as e:
+                logging.warning(f"全知识库检索失败: {e}")
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+            if rag_context and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
+                low_confidence_warning = (
+                    f"[系统提示：当前内部知识库检索结果的置信度为 {rag_confidence:.2f}，低于阈值 {settings.RAG_CONFIDENCE_THRESHOLD}。"
+                    "请明确告知用户「当前内部知识库置信度比较低，将使用AI自身知识解答问题」，然后结合检索到的上下文（如有）和AI自身知识回答问题。]"
+                )
+                rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
+
+        history_context = await self._build_chat_history_context(conv.id)
+        full_context = ""
+        if rag_context:
+            if low_confidence_warning and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
+                full_context += f"【知识库上下文（置信度较低，请结合AI自身知识）】\n{rag_context}\n\n"
+            else:
+                full_context += f"【知识库上下文】\n{rag_context}\n\n"
+        if history_context:
+            full_context += f"【对话历史】\n{history_context}\n\n"
+
+        full_content: List[str] = []
+        try:
+            async for delta in llm_chat_stream(user_content=message, context=full_context.strip()):
+                full_content.append(delta)
+                yield {"type": "token", "content": delta}
+        except Exception as e:
+            logging.exception("流式生成失败")
+            full_content.append("抱歉，生成回答时遇到问题，请稍后重试。")
+            yield {"type": "token", "content": "抱歉，生成回答时遇到问题，请稍后重试。"}
+
+        assistant_content = "".join(full_content)
+        sources = await self._build_sources_from_chunks(selected_chunks)
+        sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
+        assistant_msg = Message(
+            conversation_id=conv.id,
+            role="assistant",
+            content=assistant_content,
+            tokens=len(assistant_content) // 2,
+            model=settings.LLM_MODEL,
+            confidence=str(rag_confidence) if rag_context and rag_context.strip() and not rag_context.startswith("[系统提示：") else None,
+            retrieved_context=None,
+            max_confidence_context=max_confidence_context,
+            sources=sources_json,
+        )
+        self.db.add(assistant_msg)
+        if not conv.title or conv.title == message[:50]:
+            conv.title = message[:50] if len(message) > 50 else message
+        await self.db.commit()
+        await self.db.refresh(conv)
+        has_real = (
+            (rag_context and rag_context.strip() and not rag_context.startswith("[系统提示：")) or
+            (max_confidence_context and max_confidence_context.strip())
+        )
+        return_confidence = rag_confidence if has_real else None
+        yield {
+            "type": "done",
+            "conversation_id": conv.id,
+            "confidence": return_confidence,
+            "sources": [s.model_dump() for s in sources],
+        }
     
     async def get_conversations(
         self,

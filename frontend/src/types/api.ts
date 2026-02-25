@@ -103,6 +103,14 @@ export interface PlanListResponse {
   total: number
 }
 
+/** 引用来源（溯源） */
+export interface SourceItem {
+  file_id: number
+  original_filename: string
+  chunk_index: number
+  snippet: string
+}
+
 export interface MessageItem {
   id: number
   role: 'user' | 'assistant' | 'system'
@@ -113,6 +121,7 @@ export interface MessageItem {
   confidence?: number  // 检索置信度（0-1）
   retrieved_context?: string  // 检索到的上下文内容
   max_confidence_context?: string  // 最高置信度对应的单个上下文
+  sources?: SourceItem[]  // 引用来源列表
 }
 
 export interface ConversationItem {
@@ -140,4 +149,5 @@ export interface ChatCompletionResponse {
   confidence?: number  // 检索置信度（0-1）
   retrieved_context?: string  // 检索到的上下文内容
   max_confidence_context?: string  // 最高置信度对应的单个上下文
+  sources?: SourceItem[]  // 引用来源列表
 }

@@ -40,6 +40,7 @@ class Message(Base):
     confidence = Column(Text, nullable=True)  # 检索置信度（JSON 字符串，存储 float）
     retrieved_context = Column(Text, nullable=True)  # 检索到的上下文内容
     max_confidence_context = Column(Text, nullable=True)  # 最高置信度对应的单个上下文
+    sources = Column(Text, nullable=True)  # 引用来源 JSON：[{"file_id", "original_filename", "chunk_index", "snippet"}]
     
     # 关系
     conversation = relationship("Conversation", back_populates="messages")

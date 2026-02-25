@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, message, Select, Popconfirm, Drawer, Space } from 'antd'
-import { PlusOutlined, FileAddOutlined, FolderOpenOutlined, DeleteOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, message, Select, Popconfirm, Drawer, Space, Progress, List } from 'antd'
+import { PlusOutlined, FileAddOutlined, FolderOpenOutlined, DeleteOutlined, ReloadOutlined, EyeOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import api from '../services/api'
+import { useAuthStore } from '../stores/authStore'
 import type {
   KnowledgeBaseItem,
   KnowledgeBaseListResponse,
@@ -32,6 +33,8 @@ export default function KnowledgeBases() {
   const [chunks, setChunks] = useState<ChunkItem[]>([])
   const [chunksModalTitle, setChunksModalTitle] = useState('')
   const [form] = Form.useForm()
+  /** 添加文件流式进度：{ file_id, filename, status: 'pending'|'processing'|'done'|'skip', reason?, chunk_count? } */
+  const [addFilesProgress, setAddFilesProgress] = useState<{ file_id: number; filename: string; status: 'pending' | 'processing' | 'done' | 'skip'; reason?: string; chunk_count?: number }[]>([])
 
   const fetchKnowledgeBases = async () => {
     setLoading(true)
@@ -82,27 +85,94 @@ export default function KnowledgeBases() {
       message.warning('请选择要添加的文件')
       return
     }
+    const fileNames = selectedFileIds.map((id) => {
+      const f = files.find((x) => x.id === id)
+      return f?.original_filename ?? f?.filename ?? `文件 ${id}`
+    })
+    setAddFilesProgress(
+      selectedFileIds.map((file_id, i) => ({
+        file_id,
+        filename: fileNames[i] ?? `文件 ${file_id}`,
+        status: 'pending' as const,
+      }))
+    )
     setAddFilesLoading(true)
+    const token = useAuthStore.getState().token
     try {
-      const res = await api.post<AddFilesToKnowledgeBaseResponse>(
-        `/knowledge-bases/${currentKb.id}/files`,
-        { file_ids: selectedFileIds }
-      )
-      if (res.skipped && res.skipped.length > 0) {
-        const detail = res.skipped.map((s) => `${s.original_filename}: ${s.reason}`).join('；')
-        message.warning({
-          content: `部分文件未添加：${detail}`,
-          duration: 6,
-        })
-      } else {
-        message.success('已添加文件，正在后台进行 RAG 切分与向量化')
+      const res = await fetch(`/api/v1/knowledge-bases/${currentKb.id}/files/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ file_ids: selectedFileIds }),
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.detail || res.statusText)
       }
-      setAddFilesModalVisible(false)
-      setCurrentKb(null)
-      fetchKnowledgeBases()
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6).trim()
+            if (data === '[DONE]') continue
+            try {
+              const event = JSON.parse(data) as {
+                type: string
+                file_id?: number
+                filename?: string
+                reason?: string
+                chunk_count?: number
+                message?: string
+              }
+              if (event.type === 'file_start') {
+                setAddFilesProgress((prev) =>
+                  prev.map((p) =>
+                    p.file_id === event.file_id ? { ...p, status: 'processing' as const } : p
+                  )
+                )
+              } else if (event.type === 'file_done') {
+                setAddFilesProgress((prev) =>
+                  prev.map((p) =>
+                    p.file_id === event.file_id
+                      ? { ...p, status: 'done' as const, chunk_count: event.chunk_count }
+                      : p
+                  )
+                )
+              } else if (event.type === 'file_skip') {
+                setAddFilesProgress((prev) =>
+                  prev.map((p) =>
+                    p.file_id === event.file_id
+                      ? { ...p, status: 'skip' as const, reason: event.reason }
+                      : p
+                  )
+                )
+              } else if (event.type === 'done') {
+                message.success('添加完成')
+                fetchKnowledgeBases()
+                setAddFilesLoading(false)
+              } else if (event.type === 'error') {
+                message.error(event.message || '添加失败')
+              }
+            } catch {
+              // ignore parse error
+            }
+          }
+        }
+      }
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      message.error(err.response?.data?.detail || '添加失败')
+      const msg = e instanceof Error ? e.message : '添加失败'
+      message.error(msg)
+      setAddFilesProgress([])
     } finally {
       setAddFilesLoading(false)
     }
@@ -267,23 +337,78 @@ export default function KnowledgeBases() {
       </Modal>
 
       <Modal
-        title={`添加文件到知识库「${currentKb?.name}」`}
+        title={addFilesProgress.length > 0 ? `添加进度 · ${currentKb?.name}` : `添加文件到知识库「${currentKb?.name}」`}
         open={addFilesModalVisible}
-        onCancel={() => { setAddFilesModalVisible(false); setCurrentKb(null) }}
+        onCancel={() => {
+          if (!addFilesLoading) {
+            setAddFilesModalVisible(false)
+            setCurrentKb(null)
+            setAddFilesProgress([])
+          }
+        }}
         onOk={handleAddFiles}
         confirmLoading={addFilesLoading}
-        okText="添加并切分"
+        okText={addFilesProgress.length > 0 ? '添加并切分' : '添加并切分'}
+        okButtonProps={{ style: { display: addFilesProgress.length > 0 ? 'none' : undefined } }}
       >
-        <p style={{ marginBottom: 8 }}>选择已上传的文件，将进行 RAG 切分与向量化后供智能问答检索。</p>
-        <Select
-          mode="multiple"
-          placeholder="选择文件"
-          value={selectedFileIds}
-          onChange={setSelectedFileIds}
-          style={{ width: '100%' }}
-          optionLabelProp="label"
-          options={files.map((f: FileItem) => ({ value: f.id, label: f.original_filename || f.filename }))}
-        />
+        {addFilesProgress.length === 0 ? (
+          <>
+            <p style={{ marginBottom: 8 }}>选择已上传的文件，将进行 RAG 切分与向量化后供智能问答检索。</p>
+            <Select
+              mode="multiple"
+              placeholder="选择文件"
+              value={selectedFileIds}
+              onChange={setSelectedFileIds}
+              style={{ width: '100%' }}
+              optionLabelProp="label"
+              options={files.map((f: FileItem) => ({ value: f.id, label: f.original_filename || f.filename }))}
+            />
+          </>
+        ) : (
+          <div style={{ minHeight: 280 }}>
+            <p style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>
+              {addFilesLoading ? '正在切分与向量化，请稍候…' : '处理完成'}
+            </p>
+            <List
+              size="small"
+              bordered
+              style={{ maxHeight: 320, overflow: 'auto' }}
+              dataSource={addFilesProgress}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space align="start" style={{ width: '100%' }}>
+                    <span style={{ width: 24, display: 'inline-flex', justifyContent: 'center' }}>
+                      {item.status === 'pending' && <LoadingOutlined spin style={{ color: '#bfbfbf' }} />}
+                      {item.status === 'processing' && <LoadingOutlined spin style={{ color: '#1890ff' }} />}
+                      {item.status === 'done' && <CheckCircleOutlined style={{ color: '#52c41a' }} />}
+                      {item.status === 'skip' && <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, marginBottom: 2 }}>{item.filename}</div>
+                      <div style={{ fontSize: 12, color: '#666' }}>
+                        {item.status === 'pending' && <span style={{ color: '#999' }}>等待中</span>}
+                        {item.status === 'processing' && <span style={{ color: '#1890ff' }}>处理中</span>}
+                        {item.status === 'done' && item.chunk_count != null && (
+                          <span style={{ color: '#52c41a' }}>成功 · {item.chunk_count} 块</span>
+                        )}
+                        {item.status === 'skip' && item.reason && (
+                          <span style={{ color: '#ff4d4f' }}>跳过：{item.reason}</span>
+                        )}
+                      </div>
+                    </div>
+                  </Space>
+                </List.Item>
+              )}
+            />
+            {!addFilesLoading && addFilesProgress.length > 0 && (
+              <div style={{ marginTop: 16, textAlign: 'right' }}>
+                <Button type="primary" onClick={() => { setAddFilesModalVisible(false); setCurrentKb(null); setAddFilesProgress([]); fetchKnowledgeBases() }}>
+                  关闭
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <Drawer

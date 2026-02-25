@@ -3,7 +3,7 @@
 """
 import io
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
 
@@ -587,6 +587,167 @@ class KnowledgeBaseService:
                     logging.error(f"清理向量失败: {cleanup_error}")
             
             raise ValueError(f"添加文件到知识库失败: {e}")
+
+    async def add_files_stream(
+        self, kb_id: int, file_ids: List[int], user_id: int
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """添加文件到知识库（流式进度）。依次 yield file_start / file_done / file_skip，最后 yield done。"""
+        import logging
+        from sqlalchemy.exc import SQLAlchemyError
+
+        skipped: List[Dict[str, Any]] = []
+        kb = await self.get_knowledge_base(kb_id, user_id)
+        if not kb:
+            yield {"type": "error", "message": "知识库不存在"}
+            return
+
+        file_service = FileService(self.db)
+        vector_store = get_vector_client()
+        actual_dim = None
+        try:
+            test_embedding = await get_embeddings(["test"])
+            if test_embedding and len(test_embedding) > 0:
+                actual_dim = len(test_embedding[0])
+        except Exception as e:
+            logging.warning(f"无法预先获取向量维度: {e}")
+        try:
+            vector_store.ensure_collection(actual_dim=actual_dim)
+        except Exception as e:
+            yield {"type": "error", "message": str(e)}
+            return
+
+        added_kb_files = []
+        added_chunks = []
+        updated_files = []
+
+        try:
+            for file_id in file_ids:
+                file_result = await self.db.execute(
+                    select(File).where(File.id == file_id, File.user_id == user_id)
+                )
+                file = file_result.scalar_one_or_none()
+                if not file:
+                    yield {"type": "file_skip", "file_id": file_id, "filename": f"文件 {file_id}", "reason": "文件不存在或无权访问"}
+                    continue
+                filename = file.original_filename or file.filename or ""
+                yield {"type": "file_start", "file_id": file_id, "filename": filename}
+
+                existing_result = await self.db.execute(
+                    select(KnowledgeBaseFile).where(
+                        KnowledgeBaseFile.knowledge_base_id == kb_id,
+                        KnowledgeBaseFile.file_id == file_id,
+                    )
+                )
+                if existing_result.scalars().first():
+                    skipped.append({"file_id": file_id, "original_filename": filename, "reason": "已在知识库中"})
+                    yield {"type": "file_skip", "file_id": file_id, "filename": filename, "reason": "已在知识库中"}
+                    continue
+
+                kb_file = KnowledgeBaseFile(knowledge_base_id=kb_id, file_id=file_id)
+                self.db.add(kb_file)
+                await self.db.flush()
+                added_kb_files.append(kb_file)
+
+                content, content_error = await file_service.get_file_content(file_id, user_id)
+                if not content:
+                    await self.db.delete(kb_file)
+                    await self.db.flush()
+                    skipped.append({"file_id": file_id, "original_filename": filename, "reason": content_error or "内容为空"})
+                    yield {"type": "file_skip", "file_id": file_id, "filename": filename, "reason": content_error or "内容为空"}
+                    continue
+
+                ft = (file.file_type or "").lower()
+                if ft in ("jpeg", "jpg", "png"):
+                    text = await extract_text_from_image(content, file.file_type)
+                else:
+                    text = self._extract_text(content, file.file_type)
+                if not text:
+                    await self.db.delete(kb_file)
+                    await self.db.flush()
+                    skipped.append({"file_id": file_id, "original_filename": filename, "reason": "提取文本为空"})
+                    yield {"type": "file_skip", "file_id": file_id, "filename": filename, "reason": "提取文本为空"}
+                    continue
+
+                text_chunks = self._chunk_text(
+                    text,
+                    chunk_size=settings.CHUNK_SIZE,
+                    overlap=settings.CHUNK_OVERLAP,
+                    max_expand_ratio=settings.CHUNK_MAX_EXPAND_RATIO,
+                )
+                if not text_chunks:
+                    await self.db.delete(kb_file)
+                    await self.db.flush()
+                    skipped.append({"file_id": file_id, "original_filename": filename, "reason": "切分后无文本块"})
+                    yield {"type": "file_skip", "file_id": file_id, "filename": filename, "reason": "切分后无文本块"}
+                    continue
+
+                chunks = []
+                for idx, chunk_text in enumerate(text_chunks):
+                    chunk = Chunk(
+                        file_id=file_id,
+                        knowledge_base_id=kb_id,
+                        content=chunk_text,
+                        chunk_index=idx,
+                    )
+                    self.db.add(chunk)
+                    chunks.append(chunk)
+                await self.db.flush()
+                added_chunks.extend(chunks)
+
+                try:
+                    embeddings = await get_embeddings([c.content for c in chunks])
+                    if len(embeddings) != len(chunks):
+                        raise ValueError("向量数量与文本块数量不匹配")
+                    metadatas = []
+                    for c, emb in zip(chunks, embeddings):
+                        c.vector_id = chunk_id_to_vector_id(c.id)
+                        metadatas.append({
+                            "chunk_id": c.id,
+                            "content": c.content[:1000],
+                            "file_id": c.file_id,
+                            "knowledge_base_id": c.knowledge_base_id,
+                            "chunk_index": c.chunk_index,
+                        })
+                    vector_store.insert(
+                        ids=[str(c.id) for c in chunks],
+                        vectors=embeddings,
+                        metadatas=metadatas,
+                    )
+                except Exception as e:
+                    logging.error(f"文件 {file_id} 向量化失败: {e}")
+                    await self.db.delete(kb_file)
+                    await self.db.flush()
+                    skipped.append({"file_id": file_id, "original_filename": filename, "reason": f"向量化失败: {e}"})
+                    yield {"type": "file_skip", "file_id": file_id, "filename": filename, "reason": f"向量化失败: {str(e)}"}
+                    continue
+
+                old_chunk_count = file.chunk_count or 0
+                file.chunk_count = old_chunk_count + len(chunks)
+                updated_files.append((file, old_chunk_count))
+                yield {"type": "file_done", "file_id": file_id, "filename": filename, "chunk_count": len(chunks)}
+
+            for file, old_count in updated_files:
+                kb.chunk_count = (kb.chunk_count or 0) + (file.chunk_count - old_count)
+            count_result = await self.db.execute(
+                select(func.count()).select_from(KnowledgeBaseFile).where(
+                    KnowledgeBaseFile.knowledge_base_id == kb_id
+                )
+            )
+            kb.file_count = count_result.scalar() or 0
+            await self.db.commit()
+            await self.db.refresh(kb)
+            yield {
+                "type": "done",
+                "knowledge_base": KnowledgeBaseResponse.model_validate(kb).model_dump(mode="json"),
+                "skipped": skipped,
+            }
+        except Exception as e:
+            logging.exception("add_files_stream 失败")
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+            yield {"type": "error", "message": str(e)}
 
     async def get_files_in_knowledge_base(
         self,

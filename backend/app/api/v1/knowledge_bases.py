@@ -1,7 +1,9 @@
 """
 知识库相关API
 """
+import json
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -137,6 +139,30 @@ async def add_files_to_knowledge_base(
         **base.model_dump(),
         skipped=[SkippedFileItem(**s) for s in skipped],
     )
+
+
+@router.post("/{kb_id}/files/stream")
+async def add_files_to_knowledge_base_stream(
+    kb_id: int,
+    body: AddFilesToKnowledgeBase,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """添加文件到知识库（流式进度）。SSE 事件：file_start / file_done / file_skip / done / error。"""
+    kb_service = KnowledgeBaseService(db)
+
+    def _json_serial(obj):
+        from datetime import datetime
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+    async def generate():
+        async for event in kb_service.add_files_stream(kb_id, body.file_ids, current_user.id):
+            yield f"data: {json.dumps(event, ensure_ascii=False, default=_json_serial)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.delete("/{kb_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)

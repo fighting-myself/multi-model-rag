@@ -1,7 +1,8 @@
 """
 问答相关Schema
 """
-from pydantic import BaseModel
+import json as _json
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from typing import Optional, List
 
@@ -11,6 +12,14 @@ class ChatMessage(BaseModel):
     content: str
     knowledge_base_id: Optional[int] = None
     conversation_id: Optional[int] = None
+
+
+class SourceItem(BaseModel):
+    """引用来源（用于溯源）"""
+    file_id: int
+    original_filename: str
+    chunk_index: int
+    snippet: str  # 片段，约前 200 字
 
 
 class ChatResponse(BaseModel):
@@ -23,6 +32,7 @@ class ChatResponse(BaseModel):
     confidence: Optional[float] = None  # 检索置信度（0-1）
     retrieved_context: Optional[str] = None  # 检索到的上下文内容
     max_confidence_context: Optional[str] = None  # 最高置信度对应的单个上下文
+    sources: Optional[List[SourceItem]] = None  # 引用来源列表
 
 
 class MessageResponse(BaseModel):
@@ -36,19 +46,37 @@ class MessageResponse(BaseModel):
     confidence: Optional[float] = None  # 检索置信度（0-1）
     retrieved_context: Optional[str] = None  # 检索到的上下文内容
     max_confidence_context: Optional[str] = None  # 最高置信度对应的单个上下文
-    
+    sources: Optional[List[SourceItem]] = None  # 引用来源（溯源）
+
+    @field_validator("sources", mode="before")
     @classmethod
-    def model_validate(cls, obj, **kwargs):
-        """自定义验证，处理 confidence 字段从字符串转换为 float"""
-        if hasattr(obj, 'confidence') and obj.confidence:
+    def parse_sources(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
             try:
-                # 如果 confidence 是字符串，转换为 float
-                if isinstance(obj.confidence, str):
-                    obj.confidence = float(obj.confidence)
+                data = _json.loads(v)
+                return [SourceItem(**x) for x in data] if data else []
+            except Exception:
+                return []
+        return None
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def parse_confidence(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v)
             except (ValueError, TypeError):
-                obj.confidence = None
-        return super().model_validate(obj, **kwargs)
-    
+                return None
+        return None
+
     class Config:
         from_attributes = True
 

@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # 对话历史配置
     CHAT_HISTORY_MAX_COUNT: int = 100
     CHAT_HISTORY_DEFAULT_COUNT: int = 50
-    CHAT_CONTEXT_MESSAGE_COUNT: int = 5
+    CHAT_CONTEXT_MESSAGE_COUNT: int = 8  # 最近 N 条完整保留，更早的用总结替代
     
     # RAG检索配置
     RAG_CONFIDENCE_THRESHOLD: float = 0.6

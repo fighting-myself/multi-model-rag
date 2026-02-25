@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm } from 'antd'
-import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse } from 'antd'
+import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
 import api from '../services/api'
-import type { KnowledgeBaseListResponse, ChatCompletionResponse, ConversationItem, ConversationListResponse, MessageItem } from '../types/api'
+import { useAuthStore } from '../stores/authStore'
+import type { KnowledgeBaseListResponse, ConversationItem, ConversationListResponse, MessageItem, SourceItem } from '../types/api'
 
 export default function Chat() {
   const [messages, setMessages] = useState<MessageItem[]>([])
@@ -125,52 +126,116 @@ export default function Chat() {
     setInputValue('')
     setLoading(true)
 
-    try {
-      const payload: { content: string; knowledge_base_id?: number; conversation_id?: number } = {
-        content: messageContent,
-      }
-      if (selectedKbId) payload.knowledge_base_id = selectedKbId
-      if (currentConvId) payload.conversation_id = currentConvId
-      // 聊天接口含 RAG 检索 + LLM，可能较慢，超时设为 2 分钟
-      const response = await api.post<ChatCompletionResponse>('/chat/completions', payload, { timeout: 120000 })
-      const data = response && typeof response === 'object' ? response : null
-      const assistantMessage: MessageItem = {
-        id: Date.now() + 1,
+    const tempAssistantId = Date.now() + 1
+    setMessages((prev: MessageItem[]) => [
+      ...prev,
+      {
+        id: tempAssistantId,
         role: 'assistant',
-        content: data?.message ?? '',
-        tokens: data?.tokens ?? 0,
-        model: data?.model ?? '',
-        created_at: data?.created_at != null ? String(data.created_at) : new Date().toISOString(),
-        confidence: data?.confidence,
-        retrieved_context: data?.retrieved_context,
-        max_confidence_context: data?.max_confidence_context,
+        content: '',
+        tokens: 0,
+        created_at: new Date().toISOString(),
+      } as MessageItem,
+    ])
+
+    try {
+      const token = useAuthStore.getState().token
+      const res = await fetch('/api/v1/chat/completions/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          content: messageContent,
+          knowledge_base_id: selectedKbId ?? null,
+          conversation_id: currentConvId ?? null,
+        }),
+      })
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}))
+        throw new Error(errBody.detail || res.statusText)
       }
-      setMessages((prev: MessageItem[]) => [...prev, assistantMessage])
-      
-      // 标记刚刚发送了消息
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let newConvId: number | null = null
+      let confidence: number | null = null
+      let sources: SourceItem[] = []
+      const tokenQueue: string[] = []
+      let drainScheduled = false
+      const drainTokenQueue = () => {
+        drainScheduled = false
+        if (tokenQueue.length === 0) return
+        const token = tokenQueue.shift()!
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAssistantId ? { ...m, content: (m.content || '') + token } : m
+          )
+        )
+        if (tokenQueue.length > 0) {
+          drainScheduled = true
+          requestAnimationFrame(drainTokenQueue)
+        }
+      }
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6).trim()
+            if (data === '[DONE]') continue
+            try {
+              const event = JSON.parse(data) as { type: string; content?: string; conversation_id?: number; confidence?: number; sources?: SourceItem[] }
+              if (event.type === 'token' && event.content) {
+                tokenQueue.push(event.content)
+                if (!drainScheduled) {
+                  drainScheduled = true
+                  requestAnimationFrame(drainTokenQueue)
+                }
+              } else if (event.type === 'done') {
+                newConvId = event.conversation_id ?? null
+                confidence = event.confidence ?? null
+                sources = event.sources ?? []
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === tempAssistantId
+                      ? { ...m, confidence: confidence ?? undefined, sources: sources.length ? sources : undefined }
+                      : m
+                  )
+                )
+              } else if (event.type === 'error') {
+                throw new Error((event as { message?: string }).message || '流式返回错误')
+              }
+            } catch (e) {
+              if (e instanceof SyntaxError) continue
+              throw e
+            }
+          }
+        }
+      }
+
       justSentMessageRef.current = true
-      
-      // 更新当前对话 ID（新对话时），但不触发重新加载消息
-      const newConvId = data?.conversation_id
       if (!currentConvId && newConvId) {
         setCurrentConvId(newConvId)
       }
-      
-      // 刷新对话列表（跳过自动选择，避免覆盖刚设置的 currentConvId）
       try {
         if (currentConvId || newConvId) {
           await loadConversations(true)
         }
       } catch {
-        // 仅刷新列表失败，不提示发送失败
+        // ignore
       }
     } catch (err: unknown) {
       console.error('发送消息失败:', err)
-      const ax = err as { response?: { data?: { detail?: string }; status?: number }; message?: string }
-      const detail = ax?.response?.data?.detail ?? ax?.message
-      message.error(detail || '发送消息失败')
-      // 移除刚添加的用户消息（发送失败时）
-      setMessages((prev) => prev.slice(0, -1))
+      const msg = err instanceof Error ? err.message : '发送消息失败'
+      message.error(msg)
+      setMessages((prev) => prev.filter((m) => m.id !== tempAssistantId))
     } finally {
       setLoading(false)
     }
@@ -265,8 +330,8 @@ export default function Chat() {
                         <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: (item.max_confidence_context || item.retrieved_context) ? 12 : 0 }}>
                           {item.content}
                         </div>
-                        {/* 显示最高置信度对应的上下文（总是显示，如果有） */}
-                        {item.max_confidence_context && (
+                        {/* 有参考来源时以溯源为主；无 sources 时再显示最高置信度上下文（兼容旧数据） */}
+                        {item.max_confidence_context && !(item.sources && item.sources.length > 0) && (
                           <div style={{
                             marginTop: 12,
                             padding: 12,
@@ -314,6 +379,47 @@ export default function Chat() {
                               {item.retrieved_context}
                             </div>
                           </div>
+                        )}
+                        {/* 引用与溯源：参考来源 */}
+                        {item.sources && item.sources.length > 0 && (
+                          <Collapse
+                            size="small"
+                            style={{ marginTop: 12 }}
+                            items={[
+                              {
+                                key: 'sources',
+                                label: (
+                                  <span style={{ fontSize: 12, color: '#1890ff' }}>
+                                    <FileTextOutlined /> 参考来源（{item.sources.length} 条）
+                                  </span>
+                                ),
+                                children: (
+                                  <div style={{ fontSize: 12, color: '#666' }}>
+                                    {item.sources.map((s: SourceItem, i: number) => (
+                                      <div
+                                        key={`${s.file_id}-${s.chunk_index}-${i}`}
+                                        style={{
+                                          marginBottom: 8,
+                                          padding: 8,
+                                          backgroundColor: '#f5f5f5',
+                                          borderRadius: 4,
+                                          borderLeft: '3px solid #1890ff',
+                                        }}
+                                      >
+                                        <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                                          {s.original_filename} · 第 {s.chunk_index + 1} 段
+                                        </div>
+                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                          {s.snippet}
+                                          {s.snippet.length >= 200 ? '…' : ''}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ),
+                              },
+                            ]}
+                          />
                         )}
                       </div>
                     }
