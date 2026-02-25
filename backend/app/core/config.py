@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "qwen3-vl-embedding"
     LLM_MODEL: str = "qwen3-vl-plus"
     RERANK_MODEL: str = "qwen3-rerank"  # Rerank模型
+    OCR_MODEL: str = "qwen-vl-ocr-2025-11-20"  # 图片 OCR 模型（阿里百炼）
     
     # 阿里云百炼平台配置
     DASHSCOPE_API_KEY: str = ""

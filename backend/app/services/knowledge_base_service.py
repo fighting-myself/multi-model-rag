@@ -14,6 +14,7 @@ from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseRespons
 from app.services.file_service import FileService
 from app.services.embedding_service import get_embeddings
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
+from app.services.ocr_service import extract_text_from_image
 from app.core.config import settings
 
 
@@ -442,8 +443,13 @@ class KnowledgeBaseService:
                 if not content:
                     logging.warning(f"文件 {file_id} 内容为空，跳过")
                     continue
-                    
-                text = self._extract_text(content, file.file_type)
+
+                # 图片使用 OCR 提取文本，其余使用 _extract_text
+                ft = (file.file_type or "").lower()
+                if ft in ("jpeg", "jpg", "png"):
+                    text = await extract_text_from_image(content, file.file_type)
+                else:
+                    text = self._extract_text(content, file.file_type)
                 if not text:
                     logging.warning(f"文件 {file_id} 提取文本为空，跳过")
                     continue
