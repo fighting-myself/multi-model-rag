@@ -5,12 +5,20 @@ import io
 import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 
 from app.models.knowledge_base import KnowledgeBase, KnowledgeBaseFile
 from app.models.file import File
 from app.models.chunk import Chunk
-from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseResponse, KnowledgeBaseListResponse
+from app.schemas.knowledge_base import (
+    KnowledgeBaseCreate,
+    KnowledgeBaseResponse,
+    KnowledgeBaseListResponse,
+    KnowledgeBaseFileItem,
+    KnowledgeBaseFileListResponse,
+    ChunkItem,
+    ChunkListResponse,
+)
 from app.services.file_service import FileService
 from app.services.embedding_service import get_embeddings, get_embedding
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
@@ -165,15 +173,32 @@ class KnowledgeBaseService:
         if ft == "txt":
             return content.decode("utf-8", errors="ignore").strip()
         if ft == "pdf":
+            # 先用 PyPDF2，若提取为空再用 pdfplumber 尝试（兼容性更好，部分 PDF 需后者）
+            text = ""
             try:
                 from PyPDF2 import PdfReader
                 reader = PdfReader(io.BytesIO(content))
-                return "\n".join(
+                text = "\n".join(
                     (page.extract_text() or "").strip()
                     for page in reader.pages
                 ).strip()
-            except Exception:
-                return ""
+            except Exception as e:
+                logging.warning(f"PyPDF2 提取 PDF 失败: {e}")
+            if not text:
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(io.BytesIO(content)) as pdf:
+                        parts = []
+                        for page in pdf.pages:
+                            t = page.extract_text()
+                            if t and t.strip():
+                                parts.append(t.strip())
+                        text = "\n".join(parts).strip() if parts else ""
+                    if text:
+                        logging.info("PDF 文本由 pdfplumber 提取（PyPDF2 未提取到内容）")
+                except Exception as e:
+                    logging.warning(f"pdfplumber 提取 PDF 失败: {e}")
+            return text
         if ft == "docx":
             try:
                 from docx import Document
@@ -371,27 +396,24 @@ class KnowledgeBaseService:
         
         return chunks
 
-    async def add_files(self, kb_id: int, file_ids: List[int], user_id: int) -> Optional[KnowledgeBase]:
-        """添加文件到知识库并执行 RAG 切分与向量化
-        
-        事务性处理：如果切分或向量化失败，会回滚所有操作，确保数据一致性。
-        文档块原文和向量都会保存到 Milvus 中。
-        """
+    async def add_files(
+        self, kb_id: int, file_ids: List[int], user_id: int
+    ) -> tuple[Optional[KnowledgeBase], List[Dict[str, Any]]]:
+        """添加文件到知识库并执行 RAG 切分与向量化。返回 (知识库, 被跳过的文件列表)。"""
         import logging
         from sqlalchemy.exc import SQLAlchemyError
-        
+
+        skipped: List[Dict[str, Any]] = []
         kb = await self.get_knowledge_base(kb_id, user_id)
         if not kb:
-            return None
+            return None, []
 
         file_service = FileService(self.db)
         vector_store = get_vector_client()
         
         # 在开始处理文件之前，先获取一个向量来确定实际维度
-        # 然后使用实际维度创建集合（如果不存在）
         actual_dim = None
         try:
-            # 测试获取一个向量的维度
             test_embedding = await get_embeddings(["test"])
             if test_embedding and len(test_embedding) > 0:
                 actual_dim = len(test_embedding[0])
@@ -399,7 +421,6 @@ class KnowledgeBaseService:
         except Exception as e:
             logging.warning(f"无法预先获取向量维度: {e}，将使用配置的维度")
         
-        # 确保向量集合存在，使用实际维度创建
         try:
             vector_store.ensure_collection(actual_dim=actual_dim)
             logging.info(f"向量集合已确保存在，准备处理文件")
@@ -407,14 +428,12 @@ class KnowledgeBaseService:
             logging.error(f"创建向量集合失败: {e}")
             raise ValueError(f"无法创建向量集合，请检查 Zilliz 配置: {e}")
 
-        # 记录需要回滚的数据
         added_kb_files = []
         added_chunks = []
         updated_files = []
         
         try:
             for file_id in file_ids:
-                # 校验文件归属
                 file_result = await self.db.execute(
                     select(File).where(File.id == file_id, File.user_id == user_id)
                 )
@@ -422,7 +441,6 @@ class KnowledgeBaseService:
                 if not file:
                     continue
 
-                # 是否已关联到该知识库
                 existing_result = await self.db.execute(
                     select(KnowledgeBaseFile).where(
                         KnowledgeBaseFile.knowledge_base_id == kb_id,
@@ -432,19 +450,23 @@ class KnowledgeBaseService:
                 if existing_result.scalars().first():
                     continue
 
-                # 添加知识库文件关联
                 kb_file = KnowledgeBaseFile(knowledge_base_id=kb_id, file_id=file_id)
                 self.db.add(kb_file)
                 await self.db.flush()
                 added_kb_files.append(kb_file)
 
-                # 拉取文件内容并切分
-                content = await file_service.get_file_content(file_id, user_id)
+                content, content_error = await file_service.get_file_content(file_id, user_id)
                 if not content:
-                    logging.warning(f"文件 {file_id} 内容为空，跳过")
+                    logging.warning(f"文件 {file_id} 无法读取: {content_error}")
+                    await self.db.delete(kb_file)
+                    await self.db.flush()
+                    skipped.append({
+                        "file_id": file_id,
+                        "original_filename": file.original_filename or file.filename,
+                        "reason": content_error or "内容为空",
+                    })
                     continue
 
-                # 图片使用 OCR 提取文本，其余使用 _extract_text
                 ft = (file.file_type or "").lower()
                 if ft in ("jpeg", "jpg", "png"):
                     text = await extract_text_from_image(content, file.file_type)
@@ -452,9 +474,15 @@ class KnowledgeBaseService:
                     text = self._extract_text(content, file.file_type)
                 if not text:
                     logging.warning(f"文件 {file_id} 提取文本为空，跳过")
+                    await self.db.delete(kb_file)
+                    await self.db.flush()
+                    skipped.append({
+                        "file_id": file_id,
+                        "original_filename": file.original_filename or file.filename,
+                        "reason": "提取文本为空（可能为扫描版 PDF 或格式不支持）",
+                    })
                     continue
                     
-                # 使用配置的分块参数
                 text_chunks = self._chunk_text(
                     text,
                     chunk_size=settings.CHUNK_SIZE,
@@ -463,6 +491,13 @@ class KnowledgeBaseService:
                 )
                 if not text_chunks:
                     logging.warning(f"文件 {file_id} 切分后无文本块，跳过")
+                    await self.db.delete(kb_file)
+                    await self.db.flush()
+                    skipped.append({
+                        "file_id": file_id,
+                        "original_filename": file.original_filename or file.filename,
+                        "reason": "切分后无文本块",
+                    })
                     continue
 
                 # 创建 Chunk 记录
@@ -527,11 +562,10 @@ class KnowledgeBaseService:
             )
             kb.file_count = count_result.scalar() or 0
             
-            # 提交所有更改
             await self.db.commit()
             await self.db.refresh(kb)
-            logging.info(f"成功处理 {len(added_kb_files)} 个文件，共 {len(added_chunks)} 个文本块")
-            return kb
+            logging.info(f"成功处理 {len(added_kb_files)} 个文件，共 {len(added_chunks)} 个文本块；跳过 {len(skipped)} 个")
+            return kb, skipped
             
         except Exception as e:
             # 发生错误，回滚所有操作
@@ -553,6 +587,139 @@ class KnowledgeBaseService:
                     logging.error(f"清理向量失败: {cleanup_error}")
             
             raise ValueError(f"添加文件到知识库失败: {e}")
+
+    async def get_files_in_knowledge_base(
+        self,
+        kb_id: int,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> KnowledgeBaseFileListResponse:
+        """查询知识库内的文件列表（含该文件在本库中的分块数）"""
+        kb = await self.get_knowledge_base(kb_id, user_id)
+        if not kb:
+            raise ValueError("知识库不存在")
+        offset = (page - 1) * page_size
+        # 总数：知识库内且属于当前用户的文件数
+        total_result = await self.db.execute(
+            select(func.count())
+            .select_from(KnowledgeBaseFile)
+            .join(File, KnowledgeBaseFile.file_id == File.id)
+            .where(
+                KnowledgeBaseFile.knowledge_base_id == kb_id,
+                File.user_id == user_id,
+            )
+        )
+        total = total_result.scalar() or 0
+        # 列表：KnowledgeBaseFile join File
+        result = await self.db.execute(
+            select(KnowledgeBaseFile, File)
+            .join(File, KnowledgeBaseFile.file_id == File.id)
+            .where(
+                KnowledgeBaseFile.knowledge_base_id == kb_id,
+                File.user_id == user_id,
+            )
+            .order_by(KnowledgeBaseFile.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        rows = result.all()
+        items = []
+        for kb_file, file in rows:
+            chunk_count_result = await self.db.execute(
+                select(func.count()).select_from(Chunk).where(
+                    Chunk.knowledge_base_id == kb_id,
+                    Chunk.file_id == file.id,
+                )
+            )
+            chunk_count_in_kb = chunk_count_result.scalar() or 0
+            items.append(
+                KnowledgeBaseFileItem(
+                    file_id=file.id,
+                    original_filename=file.original_filename or file.filename,
+                    file_type=file.file_type,
+                    file_size=file.file_size,
+                    chunk_count_in_kb=chunk_count_in_kb,
+                    added_at=kb_file.created_at,
+                )
+            )
+        return KnowledgeBaseFileListResponse(files=items, total=total, page=page, page_size=page_size)
+
+    async def get_chunks_for_file_in_kb(
+        self, kb_id: int, file_id: int, user_id: int
+    ) -> ChunkListResponse:
+        """查询某文件在知识库中的分块列表（按 chunk_index 排序）"""
+        kb = await self.get_knowledge_base(kb_id, user_id)
+        if not kb:
+            raise ValueError("知识库不存在")
+        kb_file_result = await self.db.execute(
+            select(KnowledgeBaseFile).where(
+                KnowledgeBaseFile.knowledge_base_id == kb_id,
+                KnowledgeBaseFile.file_id == file_id,
+            )
+        )
+        if not kb_file_result.scalar_one_or_none():
+            raise ValueError("该文件不在本知识库中")
+        file_result = await self.db.execute(select(File).where(File.id == file_id, File.user_id == user_id))
+        if not file_result.scalar_one_or_none():
+            raise ValueError("文件不存在或无权操作")
+        result = await self.db.execute(
+            select(Chunk)
+            .where(Chunk.knowledge_base_id == kb_id, Chunk.file_id == file_id)
+            .order_by(Chunk.chunk_index)
+        )
+        chunks = result.scalars().all()
+        return ChunkListResponse(
+            chunks=[ChunkItem(id=c.id, chunk_index=c.chunk_index, content=c.content or "") for c in chunks]
+        )
+
+    async def remove_file_from_knowledge_base(self, kb_id: int, file_id: int, user_id: int) -> None:
+        """从知识库中移除文件：删除该文件在本库中的分块与向量，更新统计"""
+        kb = await self.get_knowledge_base(kb_id, user_id)
+        if not kb:
+            raise ValueError("知识库不存在")
+        kb_file_result = await self.db.execute(
+            select(KnowledgeBaseFile).where(
+                KnowledgeBaseFile.knowledge_base_id == kb_id,
+                KnowledgeBaseFile.file_id == file_id,
+            )
+        )
+        kb_file = kb_file_result.scalar_one_or_none()
+        if not kb_file:
+            raise ValueError("该文件不在本知识库中")
+        file_result = await self.db.execute(select(File).where(File.id == file_id, File.user_id == user_id))
+        file = file_result.scalar_one_or_none()
+        if not file:
+            raise ValueError("文件不存在或无权操作")
+        chunks_result = await self.db.execute(
+            select(Chunk).where(Chunk.knowledge_base_id == kb_id, Chunk.file_id == file_id)
+        )
+        chunks = list(chunks_result.scalars().all())
+        vector_store = get_vector_client()
+        if chunks:
+            try:
+                if vector_store.client.has_collection(vector_store._collection):
+                    vector_ids = [int(chunk_id_to_vector_id(c.id)) for c in chunks]
+                    vector_store.client.delete(collection_name=vector_store._collection, ids=vector_ids)
+                    logging.info(f"从向量库删除了 {len(vector_ids)} 个向量")
+            except Exception as e:
+                logging.warning(f"删除向量失败: {e}，继续删除数据库记录")
+        await self.db.execute(delete(Chunk).where(Chunk.knowledge_base_id == kb_id, Chunk.file_id == file_id))
+        await self.db.flush()
+        await self.db.delete(kb_file)
+        await self.db.flush()
+        chunk_delta = len(chunks)
+        file.chunk_count = max(0, (file.chunk_count or 0) - chunk_delta)
+        kb.file_count = max(0, (kb.file_count or 0) - 1)
+        kb.chunk_count = max(0, (kb.chunk_count or 0) - chunk_delta)
+        await self.db.commit()
+        logging.info(f"已从知识库 {kb_id} 移除文件 {file_id}，删除 {chunk_delta} 个分块")
+
+    async def reindex_file_in_knowledge_base(self, kb_id: int, file_id: int, user_id: int) -> Optional[KnowledgeBase]:
+        """重新索引：先移除该文件在本库中的分块与向量，再重新切分与向量化"""
+        await self.remove_file_from_knowledge_base(kb_id, file_id, user_id)
+        kb, _ = await self.add_files(kb_id, [file_id], user_id)
+        return kb
 
     async def search_images_by_text(
         self,

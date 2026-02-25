@@ -39,6 +39,46 @@ export interface KnowledgeBaseListResponse {
   page_size: number
 }
 
+/** 知识库内单条文件（含该文件在本库中的分块数） */
+export interface KnowledgeBaseFileItem {
+  file_id: number
+  original_filename: string
+  file_type: string
+  file_size: number
+  chunk_count_in_kb: number
+  added_at?: string
+}
+
+export interface KnowledgeBaseFileListResponse {
+  files: KnowledgeBaseFileItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/** 添加文件到知识库时被跳过的项 */
+export interface SkippedFileItem {
+  file_id: number
+  original_filename: string
+  reason: string
+}
+
+/** 添加文件到知识库的响应 */
+export interface AddFilesToKnowledgeBaseResponse extends KnowledgeBaseItem {
+  skipped: SkippedFileItem[]
+}
+
+/** 单条分块（查看分块内容） */
+export interface ChunkItem {
+  id: number
+  chunk_index: number
+  content: string
+}
+
+export interface ChunkListResponse {
+  chunks: ChunkItem[]
+}
+
 export interface UsageResponse {
   file_uploads: number
   storage_mb: number

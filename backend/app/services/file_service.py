@@ -211,15 +211,26 @@ class FileService:
         except Exception:
             return None
 
-    async def get_file_content(self, file_id: int, user_id: int) -> Optional[bytes]:
-        """获取文件原始字节（供解析/切分用，内部调用需已校验权限）"""
+    async def get_file_content(
+        self, file_id: int, user_id: int
+    ) -> tuple[Optional[bytes], Optional[str]]:
+        """获取文件原始字节。返回 (content, error_reason)：成功时 error_reason 为 None，失败时 content 为 None 且 error_reason 为可展示原因。"""
+        import logging
         file = await self.get_file(file_id, user_id)
         if not file:
-            return None
+            logging.warning(f"get_file_content: 文件 {file_id} 不存在或无权访问 (user_id={user_id})")
+            return None, "文件不存在或无权访问"
         try:
             response = self.minio_client.get_object(settings.MINIO_BUCKET_NAME, file.storage_path)
             data = response.read()
             response.close()
-            return data
-        except Exception:
-            return None
+            if not data or len(data) == 0:
+                logging.warning(f"get_file_content: 文件 {file_id} MinIO 对象为空 (path={file.storage_path})")
+                return None, "对象存储中文件为空"
+            return data, None
+        except Exception as e:
+            err_str = str(e).lower()
+            logging.warning(f"get_file_content: 文件 {file_id} 读取失败 path={file.storage_path} err={e}")
+            if "nosuchkey" in err_str or "not found" in err_str or "does not exist" in err_str:
+                return None, "对象存储中不存在该文件，请重新上传后再添加到知识库"
+            return None, f"读取失败: {e}"
