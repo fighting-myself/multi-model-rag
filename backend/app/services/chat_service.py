@@ -12,9 +12,10 @@ from app.models.chunk import Chunk
 from app.models.file import File
 from app.schemas.chat import ChatResponse, ConversationResponse, ConversationListResponse, SourceItem
 from app.services.embedding_service import get_embedding
-from app.services.llm_service import chat_completion as llm_chat, chat_completion_stream as llm_chat_stream
+from app.services.llm_service import chat_completion as llm_chat, chat_completion_stream as llm_chat_stream, query_expand
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.rerank_service import rerank
+from app.services.bm25_service import bm25_score
 from app.core.config import settings
 from sqlalchemy.orm import selectinload
 from sqlalchemy import or_
@@ -37,33 +38,46 @@ class ChatService:
             RRF 分数
         """
         return 1.0 / (k + rank)
+
+    async def _expand_chunks_with_window(self, chunks: List[Chunk], window: int) -> List[Chunk]:
+        """检索到的 chunk 向左右各扩展 window 个相邻块（同 file），合并去重后按 file_id、chunk_index 排序。"""
+        if not chunks or window <= 0:
+            return chunks
+        from sqlalchemy import and_
+        seen_ids: set = set()
+        expanded: List[Chunk] = []
+        # 按 file 分组，求每 file 的 index 范围
+        by_file: Dict[int, List[int]] = {}
+        for c in chunks:
+            fid = c.file_id or 0
+            idx = c.chunk_index if c.chunk_index is not None else 0
+            by_file.setdefault(fid, []).append(idx)
+        for fid, indices in by_file.items():
+            lo = max(0, min(indices) - window)
+            hi = max(indices) + window
+            r = await self.db.execute(
+                select(Chunk).where(
+                    and_(Chunk.file_id == fid, Chunk.chunk_index >= lo, Chunk.chunk_index <= hi)
+                ).order_by(Chunk.chunk_index)
+            )
+            for c in r.scalars().all():
+                if c.id not in seen_ids:
+                    seen_ids.add(c.id)
+                    expanded.append(c)
+        expanded.sort(key=lambda c: (c.file_id or 0, c.chunk_index or 0))
+        return expanded
     
     async def _full_text_search(self, query: str, knowledge_base_id: int, top_k: int = 50) -> List[tuple]:
-        """全文匹配搜索：使用 SQL LIKE 进行关键词匹配。
-        
-        Args:
-            query: 查询文本
-            knowledge_base_id: 知识库ID
-            top_k: 返回前 k 个结果
-        
-        Returns:
-            List[tuple[Chunk, int]]: (chunk, rank) 列表，rank 从 1 开始
+        """全文匹配：关键词 LIKE 取候选，再用 BM25（或关键词计数）排序。
+        返回 List[tuple[Chunk, int]]: (chunk, rank)，rank 从 1 开始。
         """
-        # 提取查询关键词（简单分词，去除常见停用词）
         import re
         keywords = [w.strip() for w in re.split(r'[，。！？\s]+', query) if len(w.strip()) > 1]
         if not keywords:
             keywords = [query]
-        
-        # 构建 LIKE 查询条件
-        conditions = []
-        for keyword in keywords[:5]:  # 最多使用前5个关键词
-            conditions.append(Chunk.content.like(f"%{keyword}%"))
-        
+        conditions = [Chunk.content.like(f"%{kw}%") for kw in keywords[:8]]
         if not conditions:
             return []
-        
-        # 执行查询
         result = await self.db.execute(
             select(Chunk)
             .where(
@@ -71,24 +85,22 @@ class ChatService:
                 Chunk.content != "",
                 or_(*conditions)
             )
-            .limit(top_k * 2)  # 多取一些，后续会 rerank
+            .limit(top_k * 3)
         )
         chunks = result.scalars().all()
-        
-        # 计算匹配分数（匹配的关键词数量）
+        if not chunks:
+            return []
+        if settings.RAG_USE_BM25:
+            chunk_content = [(c, c.content or "") for c in chunks]
+            scored = bm25_score(query, chunk_content)
+            scored = [(c, s) for c, s in scored if s > 0]
+            return [(chunk, idx + 1) for idx, (chunk, _) in enumerate(scored[:top_k])]
         chunk_scores = []
         for chunk in chunks:
-            score = 0
-            for keyword in keywords:
-                if keyword.lower() in chunk.content.lower():
-                    score += 1
+            score = sum(1 for kw in keywords if kw.lower() in (chunk.content or "").lower())
             if score > 0:
                 chunk_scores.append((chunk, score))
-        
-        # 按匹配分数排序
         chunk_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # 返回前 top_k 个，并添加排名（从1开始）
         return [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k])]
     
     async def _rag_context(
@@ -102,67 +114,61 @@ class ChatService:
         """
         import logging
         
-        # 1. 向量检索
-        vector_results = []  # List[tuple[Chunk, rank, confidence]]
-        vector_chunk_map = {}  # chunk_id -> Chunk
-        try:
-            query_vec = await get_embedding(message)
-            vs = get_vector_client()
-            hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
-            
-            # 提取 vector_ids 和置信度
-            vector_ids = []
-            vector_id_to_confidence = {}
-            for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
-                if not isinstance(h, dict):
-                    continue
-                distance = h.get("distance") or h.get("score")
-                entity = h.get("entity") or h.get("payload") or h.get("data") or {}
-                if distance is None and isinstance(entity, dict):
-                    distance = entity.get("distance") or entity.get("score")
-                if distance is None:
-                    distance = 2.0
-                
-                confidence = max(0.0, min(1.0, 1.0 - distance)) if isinstance(distance, (int, float)) else 0.0
-                vid = h.get("id") or (entity.get("id") if isinstance(entity, dict) else None)
-                if vid is not None:
-                    vid_str = str(vid)
-                    vector_ids.append(vid_str)
-                    vector_id_to_confidence[vid_str] = (rank, confidence)
-            
-            # 查询对应的 chunks
-            if vector_ids:
-                result = await self.db.execute(
-                    select(Chunk).where(
-                        Chunk.vector_id.in_(vector_ids),
-                        Chunk.knowledge_base_id == knowledge_base_id,
-                    )
-                )
-                chunks = result.scalars().all()
-                vid_to_chunk = {c.vector_id: c for c in chunks}
-                
-                # 构建向量检索结果（按原始排名）
-                for vid in vector_ids:
-                    if vid in vid_to_chunk:
-                        chunk = vid_to_chunk[vid]
-                        rank, conf = vector_id_to_confidence[vid]
-                        vector_results.append((chunk, rank, conf))
-                        vector_chunk_map[chunk.id] = chunk
-        except Exception as e:
-            logging.warning(f"向量检索失败: {e}")
+        # 多查询：原问 + 改写/子问题（可选）
+        queries = [message]
+        if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
+            try:
+                extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
+                queries.extend(extra)
+            except Exception:
+                pass
         
-        # 2. 全文匹配
-        fulltext_results = []  # List[tuple[Chunk, rank]]
-        try:
-            fulltext_results = await self._full_text_search(message, knowledge_base_id, top_k=top_k * 3)
-            for chunk, rank in fulltext_results:
-                if chunk.id not in vector_chunk_map:
+        k = settings.RRF_K
+        chunk_rrf_scores: Dict[int, float] = {}
+        vector_chunk_map: Dict[int, Chunk] = {}
+        
+        # 1. 向量检索（多查询合并 RRF）
+        for q in queries:
+            try:
+                query_vec = await get_embedding(q)
+                vs = get_vector_client()
+                hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
+                vector_ids = []
+                vector_id_to_rank = {}
+                for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
+                    if not isinstance(h, dict):
+                        continue
+                    vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id") if isinstance(h.get("entity"), dict) else None
+                    if vid is not None:
+                        vid_str = str(vid)
+                        vector_ids.append(vid_str)
+                        vector_id_to_rank[vid_str] = rank
+                if vector_ids:
+                    result = await self.db.execute(
+                        select(Chunk).where(
+                            Chunk.vector_id.in_(vector_ids),
+                            Chunk.knowledge_base_id == knowledge_base_id,
+                        )
+                    )
+                    for c in result.scalars().all():
+                        vector_chunk_map[c.id] = c
+                        rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
+                        chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
+            except Exception as e:
+                logging.warning(f"向量检索失败: {e}")
+        
+        # 2. 全文匹配（多查询合并 RRF）
+        for q in queries:
+            try:
+                fulltext_results = await self._full_text_search(q, knowledge_base_id, top_k=top_k * 3)
+                for chunk, rank in fulltext_results:
                     vector_chunk_map[chunk.id] = chunk
-        except Exception as e:
-            logging.warning(f"全文匹配失败: {e}")
+                    chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
+            except Exception as e:
+                logging.warning(f"全文匹配失败: {e}")
         
         # 如果没有检索到任何结果，走兜底逻辑
-        if not vector_results and not fulltext_results:
+        if not chunk_rrf_scores:
             result = await self.db.execute(
                 select(Chunk).where(
                     Chunk.knowledge_base_id == knowledge_base_id,
@@ -175,20 +181,6 @@ class ChatService:
                 max_conf_context = all_chunks[0].content if all_chunks else None
                 return (context, 0.5, max_conf_context, all_chunks)
             return ("", 0.0, None, [])
-        
-        # 3. RRF 混合打分
-        chunk_rrf_scores = {}  # chunk_id -> RRF_score
-        k = settings.RRF_K
-        
-        # 向量检索结果的 RRF 分数
-        for chunk, rank, conf in vector_results:
-            rrf_score = self._rrf_score(rank, k)
-            chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + rrf_score
-        
-        # 全文匹配结果的 RRF 分数
-        for chunk, rank in fulltext_results:
-            rrf_score = self._rrf_score(rank, k)
-            chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + rrf_score
         
         # 按 RRF 分数排序，取前 top_k * 2 作为 rerank 候选
         candidate_chunks = sorted(
@@ -221,8 +213,10 @@ class ChatService:
         selected_chunks = final_chunks[:top_k]
         if not selected_chunks:
             return ("", 0.0, None, [])
-        
-        context = "\n\n".join(c.content for c, _, _ in selected_chunks if c.content)[:8000]
+        chunk_list = [c for c, _, _ in selected_chunks]
+        window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
+        chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
+        context = "\n\n".join(c.content for c in chunks_for_context if c.content)[:8000]
         max_conf = max((rel_score for _, rel_score, _ in selected_chunks), default=0.0)
         if max_conf == 0.0:
             max_rrf = max((rrf_score for _, _, rrf_score in selected_chunks), default=0.0)
@@ -230,7 +224,6 @@ class ChatService:
                 max_conf = min(1.0, max_rrf * k)
         max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        chunk_list = [c for c, _, _ in selected_chunks]
         return (context, max_conf, max_conf_context, chunk_list)
 
     async def _rag_context_all_kbs(
@@ -257,111 +250,89 @@ class ChatService:
         if not kb_ids:
             return ("", 0.0, None, [])
         
-        # 1. 向量检索
-        vector_results = []  # List[tuple[Chunk, rank, confidence]]
-        vector_chunk_map = {}  # chunk_id -> Chunk
-        try:
-            query_vec = await get_embedding(message)
-            vs = get_vector_client()
-            hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
-            
-            # 提取 vector_ids 和置信度
-            vector_ids = []
-            vector_id_to_confidence = {}
-            for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
-                if not isinstance(h, dict):
-                    continue
-                distance = h.get("distance") or h.get("score")
-                entity = h.get("entity") or h.get("payload") or h.get("data") or {}
-                if distance is None and isinstance(entity, dict):
-                    distance = entity.get("distance") or entity.get("score")
-                if distance is None:
-                    distance = 2.0
-                
-                confidence = max(0.0, min(1.0, 1.0 - distance)) if isinstance(distance, (int, float)) else 0.0
-                vid = h.get("id") or (entity.get("id") if isinstance(entity, dict) else None)
-                if vid is not None:
-                    vid_str = str(vid)
-                    vector_ids.append(vid_str)
-                    vector_id_to_confidence[vid_str] = (rank, confidence)
-            
-            # 查询对应的 chunks（过滤属于用户知识库的）
-            if vector_ids:
-                result = await self.db.execute(
-                    select(Chunk).where(
-                        Chunk.vector_id.in_(vector_ids),
-                        Chunk.knowledge_base_id.in_(kb_ids),
-                    )
-                )
-                chunks = result.scalars().all()
-                vid_to_chunk = {c.vector_id: c for c in chunks}
-                
-                # 构建向量检索结果（按原始排名）
-                for vid in vector_ids:
-                    if vid in vid_to_chunk:
-                        chunk = vid_to_chunk[vid]
-                        rank, conf = vector_id_to_confidence[vid]
-                        vector_results.append((chunk, rank, conf))
-                        vector_chunk_map[chunk.id] = chunk
-        except Exception as e:
-            logging.warning(f"向量检索失败: {e}")
+        queries = [message]
+        if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
+            try:
+                extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
+                queries.extend(extra)
+            except Exception:
+                pass
+        k = settings.RRF_K
+        chunk_rrf_scores = {}
+        vector_chunk_map = {}
         
-        # 2. 全文匹配（在所有知识库中搜索）
-        fulltext_results = []  # List[tuple[Chunk, rank]]
-        try:
-            import re
-            keywords = [w.strip() for w in re.split(r'[，。！？\s]+', message) if len(w.strip()) > 1]
-            if not keywords:
-                keywords = [message]
-            
-            conditions = []
-            for keyword in keywords[:5]:
-                conditions.append(Chunk.content.like(f"%{keyword}%"))
-            
-            if conditions:
-                result = await self.db.execute(
-                    select(Chunk)
-                    .where(
-                        Chunk.knowledge_base_id.in_(kb_ids),
-                        Chunk.content != "",
-                        or_(*conditions)
+        for q in queries:
+            try:
+                query_vec = await get_embedding(q)
+                vs = get_vector_client()
+                hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
+                vector_ids = []
+                vector_id_to_rank = {}
+                for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
+                    if not isinstance(h, dict):
+                        continue
+                    vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id") if isinstance(h.get("entity"), dict) else None
+                    if vid is not None:
+                        vid_str = str(vid)
+                        vector_ids.append(vid_str)
+                        vector_id_to_rank[vid_str] = rank
+                if vector_ids:
+                    result = await self.db.execute(
+                        select(Chunk).where(
+                            Chunk.vector_id.in_(vector_ids),
+                            Chunk.knowledge_base_id.in_(kb_ids),
+                        )
                     )
-                    .limit(top_k * 3)
-                )
-                chunks = result.scalars().all()
-                
-                chunk_scores = []
-                for chunk in chunks:
-                    score = sum(1 for keyword in keywords if keyword.lower() in chunk.content.lower())
-                    if score > 0:
-                        chunk_scores.append((chunk, score))
-                
-                chunk_scores.sort(key=lambda x: x[1], reverse=True)
-                fulltext_results = [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k * 3])]
-                
-                for chunk, rank in fulltext_results:
-                    if chunk.id not in vector_chunk_map:
-                        vector_chunk_map[chunk.id] = chunk
-        except Exception as e:
-            logging.warning(f"全文匹配失败: {e}")
+                    for c in result.scalars().all():
+                        vector_chunk_map[c.id] = c
+                        rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
+                        chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
+            except Exception as e:
+                logging.warning(f"向量检索失败: {e}")
         
-        # 如果没有检索到任何结果
-        if not vector_results and not fulltext_results:
+        for q in queries:
+            try:
+                import re
+                keywords = [w.strip() for w in re.split(r'[，。！？\s]+', q) if len(w.strip()) > 1]
+                if not keywords:
+                    keywords = [q]
+                conditions = [Chunk.content.like(f"%{kw}%") for kw in keywords[:8]]
+                if conditions:
+                    result = await self.db.execute(
+                        select(Chunk)
+                        .where(
+                            Chunk.knowledge_base_id.in_(kb_ids),
+                            Chunk.content != "",
+                            or_(*conditions)
+                        )
+                        .limit(top_k * 4)
+                    )
+                    chunks = result.scalars().all()
+                    if chunks:
+                        if settings.RAG_USE_BM25:
+                            chunk_content = [(c, c.content or "") for c in chunks]
+                            scored = bm25_score(q, chunk_content)
+                            scored = [(c, s) for c, s in scored if s > 0]
+                            local_ft = [(chunk, idx + 1) for idx, (chunk, _) in enumerate(scored[:top_k * 3])]
+                        else:
+                            chunk_scores = []
+                            for chunk in chunks:
+                                score = sum(1 for kw in keywords if kw.lower() in (chunk.content or "").lower())
+                                if score > 0:
+                                    chunk_scores.append((chunk, score))
+                            chunk_scores.sort(key=lambda x: x[1], reverse=True)
+                            local_ft = [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k * 3])]
+                    else:
+                        local_ft = []
+                    for chunk, rank in local_ft:
+                        vector_chunk_map[chunk.id] = chunk
+                        chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
+            except Exception as e:
+                logging.warning(f"全文匹配失败: {e}")
+        
+        if not chunk_rrf_scores:
             return ("", 0.0, None, [])
         
-        # 3. RRF 混合打分
-        chunk_rrf_scores = {}
-        k = settings.RRF_K
-        
-        for chunk, rank, conf in vector_results:
-            rrf_score = self._rrf_score(rank, k)
-            chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + rrf_score
-        
-        for chunk, rank in fulltext_results:
-            rrf_score = self._rrf_score(rank, k)
-            chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + rrf_score
-        
-        # 按 RRF 分数排序，取前 top_k * 2 作为 rerank 候选
         candidate_chunks = sorted(
             [(vector_chunk_map[chunk_id], score) for chunk_id, score in chunk_rrf_scores.items()],
             key=lambda x: x[1],
@@ -392,8 +363,10 @@ class ChatService:
         selected_chunks = final_chunks[:top_k]
         if not selected_chunks:
             return ("", 0.0, None, [])
-        
-        context = "\n\n".join(c.content for c, _, _ in selected_chunks if c.content)[:8000]
+        chunk_list = [c for c, _, _ in selected_chunks]
+        window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
+        chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
+        context = "\n\n".join(c.content for c in chunks_for_context if c.content)[:8000]
         max_conf = max((rel_score for _, rel_score, _ in selected_chunks), default=0.0)
         if max_conf == 0.0:
             max_rrf = max((rrf_score for _, _, rrf_score in selected_chunks), default=0.0)
@@ -401,7 +374,6 @@ class ChatService:
                 max_conf = min(1.0, max_rrf * k)
         max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        chunk_list = [c for c, _, _ in selected_chunks]
         return (context, max_conf, max_conf_context, chunk_list)
 
     async def _load_conversation_history(self, conversation_id: int, max_messages: int = None) -> List[Message]:

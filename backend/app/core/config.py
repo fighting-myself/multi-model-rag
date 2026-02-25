@@ -92,8 +92,12 @@ class Settings(BaseSettings):
     # RAG检索配置
     RAG_CONFIDENCE_THRESHOLD: float = 0.6
     RRF_K: int = 60  # RRF混合打分的k值
-    
-    # 文本分块配置
+    RAG_USE_BM25: bool = True  # 全文检索使用 BM25 打分（否则仅关键词计数）
+    RAG_QUERY_EXPAND: bool = True  # 多查询/查询改写
+    RAG_QUERY_EXPAND_COUNT: int = 2  # 改写子问题数量（不含原问）
+    RAG_CONTEXT_WINDOW_EXPAND: int = 1  # 检索后向左右各扩展 N 个相邻块（0=不扩展）
+
+    # 文本分块配置（全局默认）
     CHUNK_SIZE: int = 500  # 目标块大小（字符数）
     CHUNK_OVERLAP: int = 50  # 重叠字符数
     CHUNK_MAX_EXPAND_RATIO: float = 1.3  # 最大扩展比例（允许超出 chunk_size 的最大倍数）

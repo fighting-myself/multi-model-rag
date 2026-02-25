@@ -7,9 +7,12 @@ from typing import Optional, List
 
 
 class KnowledgeBaseCreate(BaseModel):
-    """知识库创建"""
+    """知识库创建/更新"""
     name: str
     description: Optional[str] = None
+    chunk_size: Optional[int] = None  # 分块大小，空则用全局配置
+    chunk_overlap: Optional[int] = None
+    chunk_max_expand_ratio: Optional[float] = None  # 如 1.3
 
 
 class AddFilesToKnowledgeBase(BaseModel):
@@ -82,7 +85,10 @@ class KnowledgeBaseResponse(BaseModel):
     file_count: int
     chunk_count: int
     created_at: datetime
-    
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
+    chunk_max_expand_ratio: Optional[str] = None  # 库中存字符串
+
     class Config:
         from_attributes = True
 

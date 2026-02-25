@@ -17,6 +17,10 @@ class KnowledgeBase(Base):
     description = Column(Text, nullable=True)
     file_count = Column(Integer, default=0)
     chunk_count = Column(Integer, default=0)
+    # 分块策略（为空则用全局 config）
+    chunk_size = Column(Integer, nullable=True)  # 目标块大小
+    chunk_overlap = Column(Integer, nullable=True)  # 重叠字符数
+    chunk_max_expand_ratio = Column(String(20), nullable=True)  # 最大扩展比例，存为字符串如 "1.3"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

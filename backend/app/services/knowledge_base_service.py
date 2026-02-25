@@ -41,7 +41,10 @@ class KnowledgeBaseService:
         kb = KnowledgeBase(
             user_id=user_id,
             name=kb_data.name,
-            description=kb_data.description
+            description=kb_data.description,
+            chunk_size=getattr(kb_data, "chunk_size", None),
+            chunk_overlap=getattr(kb_data, "chunk_overlap", None),
+            chunk_max_expand_ratio=str(kb_data.chunk_max_expand_ratio) if getattr(kb_data, "chunk_max_expand_ratio", None) is not None else None,
         )
         self.db.add(kb)
         await self.db.commit()
@@ -101,6 +104,12 @@ class KnowledgeBaseService:
         
         kb.name = kb_data.name
         kb.description = kb_data.description
+        if hasattr(kb_data, "chunk_size"):
+            kb.chunk_size = kb_data.chunk_size
+        if hasattr(kb_data, "chunk_overlap"):
+            kb.chunk_overlap = kb_data.chunk_overlap
+        if hasattr(kb_data, "chunk_max_expand_ratio"):
+            kb.chunk_max_expand_ratio = str(kb_data.chunk_max_expand_ratio) if kb_data.chunk_max_expand_ratio is not None else None
         await self.db.commit()
         await self.db.refresh(kb)
         return kb
@@ -396,6 +405,21 @@ class KnowledgeBaseService:
         
         return chunks
 
+    def _get_chunk_params(self, kb: Optional[KnowledgeBase], file_type: Optional[str] = None) -> tuple:
+        """从知识库（及可选文件类型）解析分块参数，未设置则用全局 config。返回 (chunk_size, overlap, max_expand_ratio)。"""
+        chunk_size = getattr(kb, "chunk_size", None) if kb else None
+        chunk_overlap = getattr(kb, "chunk_overlap", None) if kb else None
+        ratio_raw = getattr(kb, "chunk_max_expand_ratio", None) if kb else None
+        if chunk_size is None:
+            chunk_size = settings.CHUNK_SIZE
+        if chunk_overlap is None:
+            chunk_overlap = settings.CHUNK_OVERLAP
+        try:
+            max_expand_ratio = float(ratio_raw) if ratio_raw is not None else settings.CHUNK_MAX_EXPAND_RATIO
+        except (TypeError, ValueError):
+            max_expand_ratio = settings.CHUNK_MAX_EXPAND_RATIO
+        return (chunk_size, chunk_overlap, max_expand_ratio)
+
     async def add_files(
         self, kb_id: int, file_ids: List[int], user_id: int
     ) -> tuple[Optional[KnowledgeBase], List[Dict[str, Any]]]:
@@ -483,12 +507,8 @@ class KnowledgeBaseService:
                     })
                     continue
                     
-                text_chunks = self._chunk_text(
-                    text,
-                    chunk_size=settings.CHUNK_SIZE,
-                    overlap=settings.CHUNK_OVERLAP,
-                    max_expand_ratio=settings.CHUNK_MAX_EXPAND_RATIO
-                )
+                cs, co, ratio = self._get_chunk_params(kb, file.file_type)
+                text_chunks = self._chunk_text(text, chunk_size=cs, overlap=co, max_expand_ratio=ratio)
                 if not text_chunks:
                     logging.warning(f"文件 {file_id} 切分后无文本块，跳过")
                     await self.db.delete(kb_file)
@@ -668,12 +688,8 @@ class KnowledgeBaseService:
                     yield {"type": "file_skip", "file_id": file_id, "filename": filename, "reason": "提取文本为空"}
                     continue
 
-                text_chunks = self._chunk_text(
-                    text,
-                    chunk_size=settings.CHUNK_SIZE,
-                    overlap=settings.CHUNK_OVERLAP,
-                    max_expand_ratio=settings.CHUNK_MAX_EXPAND_RATIO,
-                )
+                cs, co, ratio = self._get_chunk_params(kb, file.file_type)
+                text_chunks = self._chunk_text(text, chunk_size=cs, overlap=co, max_expand_ratio=ratio)
                 if not text_chunks:
                     await self.db.delete(kb_file)
                     await self.db.flush()
