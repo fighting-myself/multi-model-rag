@@ -9,7 +9,7 @@ from jose import JWTError, jwt
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.schemas.auth import Token, UserCreate, UserResponse
+from app.schemas.auth import Token, UserCreate, UserResponse, UpdatePasswordRequest
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
 
@@ -84,3 +84,23 @@ async def get_current_active_user(
 async def get_me(current_user: UserResponse = Depends(get_current_user)):
     """获取当前用户信息"""
     return current_user
+
+
+@router.put("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def update_password(
+    body: UpdatePasswordRequest,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """修改当前用户密码"""
+    auth_service = AuthService(db)
+    try:
+        await auth_service.update_password(
+            current_user.id,
+            body.old_password,
+            body.new_password,
+        )
+    except ValueError as e:
+        if "原密码错误" in str(e):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

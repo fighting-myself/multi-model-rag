@@ -35,3 +35,9 @@ class Token(BaseModel):
     """Token响应"""
     access_token: str
     token_type: str = "bearer"
+
+
+class UpdatePasswordRequest(BaseModel):
+    """修改密码请求"""
+    old_password: str
+    new_password: str

@@ -7,6 +7,7 @@ import Files from './pages/Files'
 import KnowledgeBases from './pages/KnowledgeBases'
 import Chat from './pages/Chat'
 import Billing from './pages/Billing'
+import Profile from './pages/Profile'
 import AppLayout from './components/AppLayout'
 import { useAuthStore } from './stores/authStore'
 
@@ -31,6 +32,7 @@ function App() {
                   <Route path="/knowledge-bases" element={<KnowledgeBases />} />
                   <Route path="/chat" element={<Chat />} />
                   <Route path="/billing" element={<Billing />} />
+                  <Route path="/profile" element={<Profile />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </AppLayout>

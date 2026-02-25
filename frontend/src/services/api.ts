@@ -24,7 +24,9 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    if (error.response?.status === 401) {
+    const isAuthRequest =
+      error.config?.url === '/auth/login' || error.config?.url === '/auth/register'
+    if (error.response?.status === 401 && !isAuthRequest) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
     }

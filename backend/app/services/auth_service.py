@@ -119,3 +119,17 @@ class AuthService:
         if user is None:
             raise credentials_exception
         return user
+
+    async def update_password(self, user_id: int, old_password: str, new_password: str) -> None:
+        """修改密码：校验旧密码后更新为新密码"""
+        from sqlalchemy import select
+        result = await self.db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError("用户不存在")
+        if not (user.password_hash and user.password_hash.strip()):
+            raise ValueError("当前账号无法修改密码")
+        if not self.verify_password(old_password, user.password_hash):
+            raise ValueError("原密码错误")
+        user.password_hash = self.get_password_hash(new_password)
+        await self.db.commit()

@@ -49,7 +49,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       logout()
       navigate('/login')
     } else if (key === 'profile') {
-      // TODO: 跳转到个人中心
+      navigate('/profile')
     } else {
       navigate(key)
     }

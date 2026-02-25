@@ -28,8 +28,16 @@ export default function Login() {
       setUser(userResponse)
       message.success('登录成功')
       navigate('/')
-    } catch (error: any) {
-      message.error(error.response?.data?.detail || '登录失败')
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string | string[] } }; message?: string }
+      const detail = e.response?.data?.detail
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail[0] ?? '登录失败'
+            : e.response?.data?.message ?? e.message ?? '登录失败'
+      message.error(msg)
     } finally {
       setLoading(false)
     }
