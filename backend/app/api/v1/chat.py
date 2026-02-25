@@ -25,15 +25,20 @@ async def chat_completion(
     db: AsyncSession = Depends(get_db)
 ):
     """发送消息（同步）"""
+    import logging
     chat_service = ChatService(db)
-    response = await chat_service.chat(
-        user_id=current_user.id,
-        message=message.content,
-        conversation_id=conversation_id or message.conversation_id,
-        knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
-        stream=stream
-    )
-    return response
+    try:
+        response = await chat_service.chat(
+            user_id=current_user.id,
+            message=message.content,
+            conversation_id=conversation_id or message.conversation_id,
+            knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
+            stream=stream
+        )
+        return response
+    except Exception as e:
+        logging.exception("聊天接口异常")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/completions/stream")

@@ -33,19 +33,23 @@ export default function Chat() {
 
   useEffect(() => {
     if (currentConvId) {
-      // 只有在切换对话时才加载消息，避免覆盖刚刚发送的消息
+      // 刚刚发送过消息时不要重新加载，避免覆盖本地消息（含置信度等）
+      if (justSentMessageRef.current) {
+        justSentMessageRef.current = false
+        return
+      }
       loadConversationMessages(currentConvId)
     } else {
       setMessages([])
     }
   }, [currentConvId])
 
-  const loadConversations = async () => {
+  const loadConversations = async (skipAutoSelect = false) => {
     try {
       const res = await api.get<ConversationListResponse>('/chat/conversations?page_size=50')
       setConversations(res.conversations || [])
-      // 自动加载最新对话
-      if (res.conversations && res.conversations.length > 0 && !currentConvId) {
+      // 自动加载最新对话（仅当未选对话且未要求跳过时）
+      if (!skipAutoSelect && res.conversations && res.conversations.length > 0 && !currentConvId) {
         setCurrentConvId(res.conversations[0].id)
       }
     } catch {
@@ -127,18 +131,19 @@ export default function Chat() {
       }
       if (selectedKbId) payload.knowledge_base_id = selectedKbId
       if (currentConvId) payload.conversation_id = currentConvId
-      const response = await api.post<ChatCompletionResponse>('/chat/completions', payload)
-      
+      // 聊天接口含 RAG 检索 + LLM，可能较慢，超时设为 2 分钟
+      const response = await api.post<ChatCompletionResponse>('/chat/completions', payload, { timeout: 120000 })
+      const data = response && typeof response === 'object' ? response : null
       const assistantMessage: MessageItem = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: response.message,
-        tokens: response.tokens,
-        model: response.model,
-        created_at: response.created_at,
-        confidence: response.confidence,
-        retrieved_context: response.retrieved_context,
-        max_confidence_context: response.max_confidence_context,
+        content: data?.message ?? '',
+        tokens: data?.tokens ?? 0,
+        model: data?.model ?? '',
+        created_at: data?.created_at != null ? String(data.created_at) : new Date().toISOString(),
+        confidence: data?.confidence,
+        retrieved_context: data?.retrieved_context,
+        max_confidence_context: data?.max_confidence_context,
       }
       setMessages((prev: MessageItem[]) => [...prev, assistantMessage])
       
@@ -146,17 +151,24 @@ export default function Chat() {
       justSentMessageRef.current = true
       
       // 更新当前对话 ID（新对话时），但不触发重新加载消息
-      if (!currentConvId && response.conversation_id) {
-        setCurrentConvId(response.conversation_id)
+      const newConvId = data?.conversation_id
+      if (!currentConvId && newConvId) {
+        setCurrentConvId(newConvId)
       }
       
-      // 刷新对话列表（更新标题和时间），但不重新加载消息（避免覆盖置信度字段）
-      // 注意：这里只刷新对话列表，不会触发 useEffect 重新加载消息（因为 justSentMessageRef 标记）
-      if (currentConvId || response.conversation_id) {
-        loadConversations()
+      // 刷新对话列表（跳过自动选择，避免覆盖刚设置的 currentConvId）
+      try {
+        if (currentConvId || newConvId) {
+          await loadConversations(true)
+        }
+      } catch {
+        // 仅刷新列表失败，不提示发送失败
       }
-    } catch {
-      message.error('发送消息失败')
+    } catch (err: unknown) {
+      console.error('发送消息失败:', err)
+      const ax = err as { response?: { data?: { detail?: string }; status?: number }; message?: string }
+      const detail = ax?.response?.data?.detail ?? ax?.message
+      message.error(detail || '发送消息失败')
       // 移除刚添加的用户消息（发送失败时）
       setMessages((prev) => prev.slice(0, -1))
     } finally {

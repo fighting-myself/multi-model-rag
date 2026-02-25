@@ -257,10 +257,15 @@ class ChatService:
         from app.models.knowledge_base import KnowledgeBase
         
         # 获取用户的所有知识库 ID
-        kb_result = await self.db.execute(
-            select(KnowledgeBase.id).where(KnowledgeBase.user_id == user_id)
-        )
-        kb_ids = [kb_id for kb_id in kb_result.scalars().all()]
+        try:
+            kb_result = await self.db.execute(
+                select(KnowledgeBase.id).where(KnowledgeBase.user_id == user_id)
+            )
+            kb_ids = [kb_id for kb_id in kb_result.scalars().all()]
+        except Exception as e:
+            logging.warning(f"获取用户知识库列表失败: {e}")
+            return ("", 0.0, None)
+        
         if not kb_ids:
             return ("", 0.0, None)
         
@@ -475,21 +480,27 @@ class ChatService:
         stream: bool = False
     ) -> ChatResponse:
         """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史"""
-        # 获取或创建对话
-        if conversation_id:
-            conv = await self.get_conversation(conversation_id, user_id)
-            if not conv:
-                raise ValueError("对话不存在")
-        else:
-            conv = Conversation(
-                user_id=user_id,
-                knowledge_base_id=knowledge_base_id,
-                title=message[:50] if len(message) > 50 else message
-            )
-            self.db.add(conv)
-            await self.db.commit()
-            await self.db.refresh(conv)
-        
+        import logging
+        conv = None
+        try:
+            # 获取或创建对话
+            if conversation_id:
+                conv = await self.get_conversation(conversation_id, user_id)
+                if not conv:
+                    raise ValueError("对话不存在")
+            else:
+                conv = Conversation(
+                    user_id=user_id,
+                    knowledge_base_id=knowledge_base_id,
+                    title=message[:50] if len(message) > 50 else message
+                )
+                self.db.add(conv)
+                await self.db.commit()
+                await self.db.refresh(conv)
+        except Exception as e:
+            logging.exception("获取或创建对话失败")
+            raise
+
         user_msg = Message(
             conversation_id=conv.id,
             role="user",
@@ -497,7 +508,44 @@ class ChatService:
         )
         self.db.add(user_msg)
         await self.db.flush()
-        
+
+        try:
+            return await self._chat_after_user_message(conv, user_msg, message, knowledge_base_id)
+        except Exception:
+            logging.exception("聊天处理失败")
+            # 在已有对话上写入错误提示，保证返回 200
+            fallback_content = "抱歉，处理您的请求时遇到问题，请稍后重试。若未选择知识库，请确认您已创建知识库并添加了文件。"
+            assistant_msg = Message(
+                conversation_id=conv.id,
+                role="assistant",
+                content=fallback_content,
+                tokens=0,
+                model=settings.LLM_MODEL,
+            )
+            self.db.add(assistant_msg)
+            try:
+                await self.db.commit()
+            except Exception:
+                await self.db.rollback()
+            return ChatResponse(
+                conversation_id=conv.id,
+                message=fallback_content,
+                tokens=0,
+                model=settings.LLM_MODEL,
+                created_at=datetime.utcnow(),
+                confidence=None,
+                retrieved_context=None,
+                max_confidence_context=None,
+            )
+
+    async def _chat_after_user_message(
+        self,
+        conv: Conversation,
+        user_msg: Message,
+        message: str,
+        knowledge_base_id: Optional[int],
+    ) -> ChatResponse:
+        """在已添加用户消息后执行 RAG + LLM，并返回 ChatResponse（由 chat() 在 try 内调用）。"""
         # RAG 上下文（知识库检索）
         rag_context = ""
         rag_confidence = 0.0
@@ -528,7 +576,12 @@ class ChatService:
                 rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
         else:
             # 未指定知识库，在所有知识库中检索
-            rag_context, rag_confidence, max_confidence_context = await self._rag_context_all_kbs(message, user_id, top_k=10)
+            try:
+                rag_context, rag_confidence, max_confidence_context = await self._rag_context_all_kbs(message, conv.user_id, top_k=10)
+            except Exception as e:
+                import logging
+                logging.warning(f"全知识库检索失败: {e}，将使用空上下文继续对话")
+                rag_context, rag_confidence, max_confidence_context = "", 0.0, None
             retrieved_context_original = rag_context  # 保存原始上下文
             if rag_context and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
                 # 置信度低于阈值，提示用户并使用 LLM 自身知识
