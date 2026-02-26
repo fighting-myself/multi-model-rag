@@ -1,7 +1,7 @@
 """
 通用依赖：限流等
 """
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
@@ -49,3 +49,15 @@ async def require_search_rate_limit(
             detail=f"检索请求过于频繁，请稍后再试（QPS 上限 {limit_qps}）",
         )
     return current_user
+
+
+def get_client_ip(request: Request) -> str:
+    """从请求中取客户端 IP（支持 X-Forwarded-For）。"""
+    if not request:
+        return ""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host or ""
+    return ""

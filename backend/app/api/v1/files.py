@@ -2,7 +2,7 @@
 文件相关API
 """
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Query
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -11,13 +11,16 @@ from app.core.database import get_db
 from app.schemas.file import FileResponse, FileListResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
+from app.api.deps import get_client_ip
 from app.services.file_service import FileService
+from app.services.audit_service import log_audit
 
 router = APIRouter()
 
 
 @router.post("/upload", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     knowledge_base_id: int = None,
     current_user: UserResponse = Depends(get_current_active_user),
@@ -30,11 +33,13 @@ async def upload_file(
         user_id=current_user.id,
         knowledge_base_id=knowledge_base_id
     )
+    await log_audit(db, current_user.id, "upload_file", "file", str(file_record.id), {"filename": file_record.original_filename}, get_client_ip(request))
     return file_record
 
 
 @router.post("/batch-upload", response_model=List[FileResponse], status_code=status.HTTP_201_CREATED)
 async def batch_upload_files(
+    request: Request,
     files: List[UploadFile] = File(...),
     knowledge_base_id: int = None,
     on_duplicate: str = Query("use_existing", description="同 MD5 时：use_existing=返回已有，overwrite=覆盖并清空分块"),
@@ -49,6 +54,9 @@ async def batch_upload_files(
         knowledge_base_id=knowledge_base_id,
         on_duplicate=on_duplicate,
     )
+    ip = get_client_ip(request)
+    for rec in file_records:
+        await log_audit(db, current_user.id, "upload_file", "file", str(rec.id), {"filename": rec.original_filename}, ip)
     return file_records
 
 
@@ -109,10 +117,12 @@ async def get_file(
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_file(
     file_id: int,
+    request: Request,
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """删除文件"""
     file_service = FileService(db)
     await file_service.delete_file(file_id, current_user.id)
+    await log_audit(db, current_user.id, "delete_file", "file", str(file_id), None, get_client_ip(request))
     return None

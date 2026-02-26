@@ -16,6 +16,11 @@ from app.models.chunk import Chunk
 from app.models.knowledge_base import KnowledgeBaseFile
 from app.schemas.file import FileResponse, FileListResponse
 from app.services.vector_store import get_vector_client
+from app.services.file_security_service import (
+    validate_filename,
+    validate_file_content,
+    virus_scan_content,
+)
 
 
 class FileService:
@@ -56,6 +61,7 @@ class FileService:
         content = await file.read()
         if len(content) > settings.MAX_FILE_SIZE:
             raise ValueError(f"文件大小超过限制（{settings.MAX_FILE_SIZE}字节）")
+        validate_filename(file.filename or "")
         file_type = self._get_file_type(file.filename)
         allowed = settings.allowed_file_types_list
         if file_type not in allowed:
@@ -63,6 +69,10 @@ class FileService:
                 f"不支持的文件类型: {file_type}。当前允许: {', '.join(allowed)}。"
                 "可在 .env 中设置 ALLOWED_FILE_TYPES 增加类型。"
             )
+        validate_file_content(content, file_type)
+        ok, scan_msg = virus_scan_content(content)
+        if not ok:
+            raise ValueError(f"文件未通过安全扫描: {scan_msg or '检测到恶意内容'}")
         md5_hash = self._calculate_md5(content)
         policy = (on_duplicate or settings.UPLOAD_ON_DUPLICATE or "use_existing").strip().lower()
         if policy not in ("use_existing", "overwrite"):

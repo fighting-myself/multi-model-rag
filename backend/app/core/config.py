@@ -83,11 +83,25 @@ class Settings(BaseSettings):
     PDF_OCR_DPI: int = 150
     # 同 MD5 上传时的策略：use_existing=返回已有文件，overwrite=覆盖内容并清空分块
     UPLOAD_ON_DUPLICATE: str = "use_existing"
+    # 文件安全：魔数校验（扩展名与真实类型一致）、文件名长度、禁止扩展名、可选病毒扫描
+    FILE_NAME_MAX_LENGTH: int = 200
+    FILE_FORBIDDEN_EXTENSIONS: str = "exe,bat,cmd,sh,ps1,scr,vbs,js,jar"  # 禁止上传的可执行/脚本
+    FILE_VIRUS_SCAN_ENABLED: bool = False  # 是否启用病毒扫描（需配置 CLAMAV_SOCKET 或本地 clamd）
+    CLAMAV_SOCKET: str = ""  # 例如 /var/run/clamav/clamd.sock，为空则跳过扫描
+    # 敏感信息脱敏：入库与检索前对身份证、手机号等打标或脱敏
+    SENSITIVE_MASK_ENABLED: bool = True
+    # 操作审计：是否记录关键操作到 audit_log 表
+    AUDIT_LOG_ENABLED: bool = True
     
     @property
     def allowed_file_types_list(self) -> List[str]:
         """获取允许的文件类型列表"""
-        return [x.strip() for x in self.ALLOWED_FILE_TYPES.split(",") if x.strip()]
+        return [x.strip().lower() for x in self.ALLOWED_FILE_TYPES.split(",") if x.strip()]
+
+    @property
+    def forbidden_file_extensions_list(self) -> List[str]:
+        """禁止上传的扩展名列表（可执行/脚本等）"""
+        return [x.strip().lower() for x in self.FILE_FORBIDDEN_EXTENSIONS.split(",") if x.strip()]
     
     # 对话历史配置
     CHAT_HISTORY_MAX_COUNT: int = 100

@@ -214,3 +214,22 @@ export interface UnifiedSearchItem {
 export interface UnifiedSearchResponse {
   items: UnifiedSearchItem[]
 }
+
+/** 审计日志单条 */
+export interface AuditLogItem {
+  id: number
+  user_id: number
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  detail: string | null
+  ip: string | null
+  created_at: string
+}
+
+export interface AuditLogListResponse {
+  items: AuditLogItem[]
+  total: number
+  page: number
+  page_size: number
+}

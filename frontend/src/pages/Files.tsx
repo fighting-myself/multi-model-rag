@@ -57,6 +57,18 @@ export default function Files() {
     }
   }
 
+  /** 解析后端返回的错误 detail（可能是字符串或 422 校验数组） */
+  const getUploadErrorDetail = (res: unknown): string => {
+    if (res == null) return '上传失败'
+    const d = (res as { detail?: string | Array<{ msg?: string; loc?: unknown[] }> }).detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d) && d.length > 0) {
+      const first = d[0]
+      return (first && typeof first === 'object' && 'msg' in first ? first.msg : String(d[0])) as string
+    }
+    return '上传失败'
+  }
+
   const uploadProps: UploadProps = {
     name: 'file',
     action: '/api/v1/files/upload',
@@ -68,7 +80,7 @@ export default function Files() {
         message.success(`${info.file.name} 上传成功`)
         fetchFiles()
       } else if (info.file.status === 'error') {
-        message.error(info.file.response?.detail || `${info.file.name} 上传失败`)
+        message.error(getUploadErrorDetail(info.file.response) || `${info.file.name} 上传失败`)
       }
     },
   }
@@ -117,13 +129,18 @@ export default function Files() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <h1>文件管理</h1>
-        <Upload {...uploadProps}>
-          <Button type="primary" icon={<UploadOutlined />}>
-            上传文件
-          </Button>
-        </Upload>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h1 style={{ margin: 0 }}>文件管理</h1>
+          <Upload {...uploadProps}>
+            <Button type="primary" icon={<UploadOutlined />}>
+              上传文件
+            </Button>
+          </Upload>
+        </div>
+        <p style={{ color: '#666', fontSize: 12, margin: 0 }}>
+          支持格式：PDF、Word、Excel、PPT、TXT、Markdown、图片等；单文件不超过 100MB；文件名长度不超过 200 字符；禁止 exe、bat、脚本等危险类型。上传前会校验文件真实类型与安全策略。
+        </p>
       </div>
       <Table
         columns={columns}

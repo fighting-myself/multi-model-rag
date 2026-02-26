@@ -9,6 +9,7 @@ from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.models.order import Order
 from app.models.invoice import Invoice
+from app.models.audit_log import AuditLog
 
 __all__ = [
     "User",
@@ -23,4 +24,5 @@ __all__ = [
     "Subscription",
     "Order",
     "Invoice",
+    "AuditLog",
 ]

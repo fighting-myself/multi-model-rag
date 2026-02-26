@@ -27,6 +27,7 @@ from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.ocr_service import extract_text_from_image
 from app.services.rerank_service import rerank
 from app.services.llm_service import expand_image_search_terms
+from app.services.sensitive_mask_service import mask_sensitive_text
 from app.core.config import settings
 
 # RRF 常数，与 chat_service 一致
@@ -673,7 +674,7 @@ class KnowledgeBaseService:
                     chunk = Chunk(
                         file_id=file_id,
                         knowledge_base_id=kb_id,
-                        content=chunk_text,
+                        content=mask_sensitive_text(chunk_text),
                         chunk_index=idx,
                     )
                     self.db.add(chunk)
@@ -735,7 +736,7 @@ class KnowledgeBaseService:
                                 img_chunk = Chunk(
                                     file_id=file_id,
                                     knowledge_base_id=kb_id,
-                                    content=(text[:2000] if text else "[图片]"),
+                                    content=mask_sensitive_text((text[:2000] if text else "[图片]")),
                                     chunk_index=len(chunks),
                                     chunk_metadata={"embedding_source": "image"},
                                 )
@@ -746,7 +747,7 @@ class KnowledgeBaseService:
                                 img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
                                 img_meta = {
                                     "chunk_id": img_chunk.id,
-                                    "content": (text[:500] if text else "[图片]"),
+                                    "content": (img_chunk.content or "")[:500],
                                     "file_id": file_id,
                                     "knowledge_base_id": kb_id,
                                     "chunk_index": img_chunk.chunk_index,
@@ -914,7 +915,7 @@ class KnowledgeBaseService:
                     chunk = Chunk(
                         file_id=file_id,
                         knowledge_base_id=kb_id,
-                        content=chunk_text,
+                        content=mask_sensitive_text(chunk_text),
                         chunk_index=idx,
                     )
                     self.db.add(chunk)
@@ -971,7 +972,7 @@ class KnowledgeBaseService:
                                 img_chunk = Chunk(
                                     file_id=file_id,
                                     knowledge_base_id=kb_id,
-                                    content=(text[:2000] if text else "[图片]"),
+                                    content=mask_sensitive_text((text[:2000] if text else "[图片]")),
                                     chunk_index=len(chunks),
                                     chunk_metadata={"embedding_source": "image"},
                                 )
@@ -982,7 +983,7 @@ class KnowledgeBaseService:
                                 img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
                                 img_meta = {
                                     "chunk_id": img_chunk.id,
-                                    "content": (text[:500] if text else "[图片]"),
+                                    "content": (img_chunk.content or "")[:500],
                                     "file_id": file_id,
                                     "knowledge_base_id": kb_id,
                                     "chunk_index": img_chunk.chunk_index,

@@ -2,7 +2,7 @@
 API v1 路由
 """
 from fastapi import APIRouter
-from app.api.v1 import auth, files, knowledge_bases, chat, billing, dashboard, search, tasks
+from app.api.v1 import auth, files, knowledge_bases, chat, billing, dashboard, search, tasks, audit
 
 api_router = APIRouter()
 
@@ -15,3 +15,4 @@ api_router.include_router(tasks.router, prefix="/tasks", tags=["异步任务"])
 api_router.include_router(search.router, prefix="/search", tags=["检索"])
 api_router.include_router(chat.router, prefix="/chat", tags=["问答"])
 api_router.include_router(billing.router, prefix="/billing", tags=["计费"])
+api_router.include_router(audit.router, prefix="/audit-logs", tags=["审计"])

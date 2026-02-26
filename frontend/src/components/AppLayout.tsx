@@ -7,7 +7,8 @@ import {
   DollarOutlined,
   PictureOutlined,
   UserOutlined,
-  LogoutOutlined
+  LogoutOutlined,
+  AuditOutlined
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -30,6 +31,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/image-search', icon: <PictureOutlined />, label: '多模态检索' },
     { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
     { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
+    { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
   ]
 
   const userMenuItems = [
