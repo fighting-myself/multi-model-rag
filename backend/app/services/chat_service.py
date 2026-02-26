@@ -105,7 +105,12 @@ class ChatService:
         return [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k])]
     
     async def _rag_context(
-        self, message: str, knowledge_base_id: int, top_k: int = 10
+        self,
+        message: str,
+        knowledge_base_id: int,
+        top_k: int = 10,
+        use_rerank: bool = True,
+        use_hybrid: bool = True,
     ) -> tuple[str, float, Optional[str], List[Chunk]]:
         """根据用户问题在知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。
         
