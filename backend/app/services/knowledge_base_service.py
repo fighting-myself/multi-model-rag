@@ -365,6 +365,24 @@ class KnowledgeBaseService:
         """
         if not text or chunk_size <= 0:
             return []
+        text = text.strip()
+        if not text:
+            return []
+        logging.warning("[chunk] 输入 len=%d chunk_size=%d 前80字=%r", len(text), chunk_size, text[:80])
+        # 短文本且由两句完全相同组成（重复的图片描述等）→ 归一为一句，避免产出两块
+        if len(text) <= 600 and "。" in text:
+            segs = [s.strip() for s in text.split("。") if s.strip()]
+            if len(segs) == 2 and segs[0] == segs[1]:
+                text = segs[0] + "。"
+                logging.warning("[chunk] 短文本两句相同，归一为一句")
+        # 图片描述类：来自 OCR/LLM 的单段描述，一律单块返回，不参与按句切分
+        if text.startswith("「图片内容描述：」") or text.startswith("图片内容描述："):
+            logging.warning("[chunk] 走图片描述单块分支")
+            return [text[:2000]]  # 单块，长度上限 2000
+        # 整段短于一块大小时直接单块返回
+        if len(text) <= chunk_size:
+            logging.warning("[chunk] 走短文本单块分支")
+            return [text]
         
         import re
         
@@ -389,6 +407,10 @@ class KnowledgeBaseService:
         
         # 过滤空句子
         sentences = [s for s in sentences if s.strip()]
+        # 若多句内容完全一致（重复的图片描述等），只保留一句，避免产出多块
+        if len(sentences) >= 2 and all((s or "").strip() == (sentences[0] or "").strip() for s in sentences):
+            logging.warning("[chunk] 多句重复，合并为一句，原句数=%d", len(sentences))
+            sentences = [sentences[0].strip()]
         
         if not sentences:
             # 如果没有找到句子分隔符，按段落分割
@@ -491,6 +513,11 @@ class KnowledgeBaseService:
         if current_chunk:
             chunks.append(' '.join(current_chunk))
         
+        # 若所有块内容相同（如模型返回重复的图片描述），合并为单块
+        if len(chunks) > 1 and all((c or "").strip() == (chunks[0] or "").strip() for c in chunks):
+            logging.warning("[chunk] 多块内容相同，合并为单块，原块数=%d", len(chunks))
+            return [chunks[0].strip()]
+        logging.warning("[chunk] 输出块数=%d", len(chunks))
         return chunks
 
     def _get_chunk_params(self, kb: Optional[KnowledgeBase], file_type: Optional[str] = None) -> tuple:
@@ -582,6 +609,7 @@ class KnowledgeBaseService:
                 ft = (file.file_type or "").lower()
                 if ft in ("jpeg", "jpg", "png"):
                     text = await extract_text_from_image(content, file.file_type)
+                    logging.warning("[添加文件] 图片 file_id=%s OCR 返回长度=%d 前80字=%r", file_id, len(text or ""), (text or "")[:80])
                 else:
                     text = self._extract_text(content, file.file_type)
                 if ft == "pdf" and (not text or len(text.strip()) < getattr(settings, "PDF_OCR_MIN_CHARS", 80)):
@@ -601,6 +629,7 @@ class KnowledgeBaseService:
                     continue
                 cs, co, ratio = self._get_chunk_params(kb, file.file_type)
                 text_chunks = self._chunk_text(text, chunk_size=cs, overlap=co, max_expand_ratio=ratio)
+                logging.warning("[添加文件] file_id=%s 分块数=%d chunk_size=%s", file_id, len(text_chunks or []), cs)
                 if not text_chunks:
                     logging.warning(f"文件 {file_id} 切分后无文本块，跳过")
                     await self.db.delete(kb_file)
@@ -628,64 +657,85 @@ class KnowledgeBaseService:
 
                 # 生成向量
                 try:
-                    embeddings = await get_embeddings([c.content for c in chunks])
-                    if len(embeddings) != len(chunks):
-                        raise ValueError(f"向量数量 {len(embeddings)} 与文本块数量 {len(chunks)} 不匹配")
-                    
-                    # 使用确定性 vector_id，与 vector_store 一致，供检索时反查
-                    metadatas = []
-                    for c, emb in zip(chunks, embeddings):
-                        c.vector_id = chunk_id_to_vector_id(c.id)
-                        meta = {
-                            "chunk_id": c.id,
-                            "content": c.content[:1000],
-                            "file_id": c.file_id,
-                            "knowledge_base_id": c.knowledge_base_id,
-                            "chunk_index": c.chunk_index,
-                            "embedding_source": "text",
+                    is_image_single = ft in ("jpeg", "jpg", "png") and len(chunks) == 1
+                    if is_image_single:
+                        # 图片且仅 1 块：只写图像向量到该块，不另建 img_chunk，避免界面出现两个相同分块
+                        first = chunks[0]
+                        first.chunk_metadata = {"embedding_source": "image"}
+                        img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
+                        first.vector_id = chunk_id_to_vector_id(first.id)
+                        img_meta = {
+                            "chunk_id": first.id,
+                            "content": (first.content or "")[:1000],
+                            "file_id": file_id,
+                            "knowledge_base_id": kb_id,
+                            "chunk_index": first.chunk_index,
+                            "embedding_source": "image",
                         }
-                        metadatas.append(meta)
-                    
-                    ids_list = [str(c.id) for c in chunks]
-                    await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
-                    )
-                    logging.info(f"成功插入 {len(chunks)} 个向量到向量库（包含原文）")
-
-                    # 图片文件：额外写入图像向量，支持图搜图、以文搜图统一空间
-                    if ft in ("jpeg", "jpg", "png"):
-                        try:
-                            img_chunk = Chunk(
-                                file_id=file_id,
-                                knowledge_base_id=kb_id,
-                                content=(text[:2000] if text else "[图片]"),
-                                chunk_index=len(chunks),
-                                chunk_metadata={"embedding_source": "image"},
-                            )
-                            self.db.add(img_chunk)
-                            await self.db.flush()
-                            added_chunks.append(img_chunk)
-                            img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
-                            img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
-                            img_meta = {
-                                "chunk_id": img_chunk.id,
-                                "content": (text[:500] if text else "[图片]"),
-                                "file_id": file_id,
-                                "knowledge_base_id": kb_id,
-                                "chunk_index": img_chunk.chunk_index,
-                                "embedding_source": "image",
+                        await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: vector_store.insert(
+                                ids=[str(first.id)],
+                                vectors=[img_vec],
+                                metadatas=[img_meta],
+                            ),
+                        )
+                        logging.info(f"成功插入 1 个图像向量到向量库（单块图片 file_id={file_id}）")
+                    else:
+                        embeddings = await get_embeddings([c.content for c in chunks])
+                        if len(embeddings) != len(chunks):
+                            raise ValueError(f"向量数量 {len(embeddings)} 与文本块数量 {len(chunks)} 不匹配")
+                        metadatas = []
+                        for c, emb in zip(chunks, embeddings):
+                            c.vector_id = chunk_id_to_vector_id(c.id)
+                            meta = {
+                                "chunk_id": c.id,
+                                "content": c.content[:1000],
+                                "file_id": c.file_id,
+                                "knowledge_base_id": c.knowledge_base_id,
+                                "chunk_index": c.chunk_index,
+                                "embedding_source": "text",
                             }
-                            await asyncio.get_event_loop().run_in_executor(
-                                None,
-                                lambda: vector_store.insert(
-                                    ids=[str(img_chunk.id)],
-                                    vectors=[img_vec],
-                                    metadatas=[img_meta],
-                                ),
-                            )
-                        except Exception as img_e:
-                            logging.warning(f"文件 {file_id} 图像向量写入失败（已保留文本块）: {img_e}")
+                            metadatas.append(meta)
+                        ids_list = [str(c.id) for c in chunks]
+                        await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
+                        )
+                        logging.info(f"成功插入 {len(chunks)} 个向量到向量库（包含原文）")
+                        # 图片且多块：额外写入图像向量块，支持图搜图
+                        if ft in ("jpeg", "jpg", "png"):
+                            try:
+                                img_chunk = Chunk(
+                                    file_id=file_id,
+                                    knowledge_base_id=kb_id,
+                                    content=(text[:2000] if text else "[图片]"),
+                                    chunk_index=len(chunks),
+                                    chunk_metadata={"embedding_source": "image"},
+                                )
+                                self.db.add(img_chunk)
+                                await self.db.flush()
+                                added_chunks.append(img_chunk)
+                                img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
+                                img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
+                                img_meta = {
+                                    "chunk_id": img_chunk.id,
+                                    "content": (text[:500] if text else "[图片]"),
+                                    "file_id": file_id,
+                                    "knowledge_base_id": kb_id,
+                                    "chunk_index": img_chunk.chunk_index,
+                                    "embedding_source": "image",
+                                }
+                                await asyncio.get_event_loop().run_in_executor(
+                                    None,
+                                    lambda: vector_store.insert(
+                                        ids=[str(img_chunk.id)],
+                                        vectors=[img_vec],
+                                        metadatas=[img_meta],
+                                    ),
+                                )
+                            except Exception as img_e:
+                                logging.warning(f"文件 {file_id} 图像向量写入失败（已保留文本块）: {img_e}")
                     
                 except Exception as e:
                     logging.error(f"文件 {file_id} 向量化失败: {e}")
@@ -693,7 +743,8 @@ class KnowledgeBaseService:
 
                 old_chunk_count = file.chunk_count or 0
                 file.chunk_count = old_chunk_count + len(chunks)
-                if ft in ("jpeg", "jpg", "png") and any(
+                # 仅当额外创建了 img_chunk（多块图片）时才 +1
+                if ft in ("jpeg", "jpg", "png") and not is_image_single and any(
                     getattr(c, "chunk_metadata") and (c.chunk_metadata or {}).get("embedding_source") == "image"
                     for c in added_chunks if c.file_id == file_id
                 ):
@@ -809,6 +860,7 @@ class KnowledgeBaseService:
                 ft = (file.file_type or "").lower()
                 if ft in ("jpeg", "jpg", "png"):
                     text = await extract_text_from_image(content, file.file_type)
+                    logging.warning("[添加文件] 图片 file_id=%s OCR 返回长度=%d 前80字=%r", file_id, len(text or ""), (text or "")[:80])
                 else:
                     text = self._extract_text(content, file.file_type)
                 if ft == "pdf" and (not text or len(text.strip()) < getattr(settings, "PDF_OCR_MIN_CHARS", 80)):
@@ -823,6 +875,7 @@ class KnowledgeBaseService:
                     continue
                 cs, co, ratio = self._get_chunk_params(kb, file.file_type)
                 text_chunks = self._chunk_text(text, chunk_size=cs, overlap=co, max_expand_ratio=ratio)
+                logging.warning("[添加文件] file_id=%s 分块数=%d chunk_size=%s", file_id, len(text_chunks or []), cs)
                 if not text_chunks:
                     await self.db.delete(kb_file)
                     await self.db.flush()
@@ -844,59 +897,82 @@ class KnowledgeBaseService:
                 added_chunks.extend(chunks)
 
                 try:
-                    embeddings = await get_embeddings([c.content for c in chunks])
-                    if len(embeddings) != len(chunks):
-                        raise ValueError("向量数量与文本块数量不匹配")
-                    metadatas = []
-                    for c, emb in zip(chunks, embeddings):
-                        c.vector_id = chunk_id_to_vector_id(c.id)
-                        metadatas.append({
-                            "chunk_id": c.id,
-                            "content": c.content[:1000],
-                            "file_id": c.file_id,
-                            "knowledge_base_id": c.knowledge_base_id,
-                            "chunk_index": c.chunk_index,
-                            "embedding_source": "text",
-                        })
-                    ids_list = [str(c.id) for c in chunks]
-                    await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
-                    )
+                    is_image_single = ft in ("jpeg", "jpg", "png") and len(chunks) == 1
                     extra_image_chunks = 0
-                    if ft in ("jpeg", "jpg", "png"):
-                        try:
-                            img_chunk = Chunk(
-                                file_id=file_id,
-                                knowledge_base_id=kb_id,
-                                content=(text[:2000] if text else "[图片]"),
-                                chunk_index=len(chunks),
-                                chunk_metadata={"embedding_source": "image"},
-                            )
-                            self.db.add(img_chunk)
-                            await self.db.flush()
-                            added_chunks.append(img_chunk)
-                            img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
-                            img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
-                            img_meta = {
-                                "chunk_id": img_chunk.id,
-                                "content": (text[:500] if text else "[图片]"),
-                                "file_id": file_id,
-                                "knowledge_base_id": kb_id,
-                                "chunk_index": img_chunk.chunk_index,
-                                "embedding_source": "image",
-                            }
-                            await asyncio.get_event_loop().run_in_executor(
-                                None,
-                                lambda: vector_store.insert(
-                                    ids=[str(img_chunk.id)],
-                                    vectors=[img_vec],
-                                    metadatas=[img_meta],
-                                ),
-                            )
-                            extra_image_chunks = 1
-                        except Exception as img_e:
-                            logging.warning(f"文件 {file_id} 图像向量写入失败: {img_e}")
+                    if is_image_single:
+                        first = chunks[0]
+                        first.chunk_metadata = {"embedding_source": "image"}
+                        img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
+                        first.vector_id = chunk_id_to_vector_id(first.id)
+                        img_meta = {
+                            "chunk_id": first.id,
+                            "content": (first.content or "")[:1000],
+                            "file_id": file_id,
+                            "knowledge_base_id": kb_id,
+                            "chunk_index": first.chunk_index,
+                            "embedding_source": "image",
+                        }
+                        await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: vector_store.insert(
+                                ids=[str(first.id)],
+                                vectors=[img_vec],
+                                metadatas=[img_meta],
+                            ),
+                        )
+                    else:
+                        embeddings = await get_embeddings([c.content for c in chunks])
+                        if len(embeddings) != len(chunks):
+                            raise ValueError("向量数量与文本块数量不匹配")
+                        metadatas = []
+                        for c, emb in zip(chunks, embeddings):
+                            c.vector_id = chunk_id_to_vector_id(c.id)
+                            metadatas.append({
+                                "chunk_id": c.id,
+                                "content": c.content[:1000],
+                                "file_id": c.file_id,
+                                "knowledge_base_id": c.knowledge_base_id,
+                                "chunk_index": c.chunk_index,
+                                "embedding_source": "text",
+                            })
+                        ids_list = [str(c.id) for c in chunks]
+                        await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
+                        )
+                        if ft in ("jpeg", "jpg", "png"):
+                            try:
+                                img_chunk = Chunk(
+                                    file_id=file_id,
+                                    knowledge_base_id=kb_id,
+                                    content=(text[:2000] if text else "[图片]"),
+                                    chunk_index=len(chunks),
+                                    chunk_metadata={"embedding_source": "image"},
+                                )
+                                self.db.add(img_chunk)
+                                await self.db.flush()
+                                added_chunks.append(img_chunk)
+                                img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
+                                img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
+                                img_meta = {
+                                    "chunk_id": img_chunk.id,
+                                    "content": (text[:500] if text else "[图片]"),
+                                    "file_id": file_id,
+                                    "knowledge_base_id": kb_id,
+                                    "chunk_index": img_chunk.chunk_index,
+                                    "embedding_source": "image",
+                                }
+                                await asyncio.get_event_loop().run_in_executor(
+                                    None,
+                                    lambda: vector_store.insert(
+                                        ids=[str(img_chunk.id)],
+                                        vectors=[img_vec],
+                                        metadatas=[img_meta],
+                                    ),
+                                )
+                                extra_image_chunks = 1
+                            except Exception as img_e:
+                                logging.warning(f"文件 {file_id} 图像向量写入失败: {img_e}")
                 except Exception as e:
                     logging.error(f"文件 {file_id} 向量化失败: {e}")
                     await self.db.delete(kb_file)
