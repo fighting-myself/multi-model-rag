@@ -31,9 +31,9 @@ class Settings(BaseSettings):
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379/0"
     
-    # Celery配置
-    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    # Celery配置（不填则与 REDIS_URL 一致，只维护一份 Redis 地址即可）
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
     
     # 向量数据库配置
     VECTOR_DB_TYPE: str = "zilliz"  # zilliz | qdrant
@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Path = PROJECT_ROOT / "logs" / "app.log"
+
+    # 用量与限流（按用户）
+    RATE_LIMIT_UPLOAD_PER_DAY: int = 500  # 每日上传文件次数上限
+    RATE_LIMIT_CONVERSATION_PER_DAY: int = 200  # 每日对话条数上限
+    RATE_LIMIT_SEARCH_QPS: float = 10.0  # 检索 QPS 上限（每秒请求数）
+    RATE_LIMIT_ENABLED: bool = True  # 是否启用限流
 
 
 # 创建全局配置实例

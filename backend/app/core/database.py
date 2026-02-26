@@ -38,3 +38,29 @@ async def get_db() -> AsyncSession:
             yield session
         finally:
             await session.close()
+
+
+def create_async_engine_and_session_for_celery():
+    """
+    在 Celery 任务内、当前 event loop 下创建新的 engine 和 session 工厂。
+    Worker 子进程复用的全局 engine 绑定的是主进程的 loop，会导致
+    "Future attached to a different loop"。必须在任务的 async 函数内调用本函数。
+    使用 NullPool + 不 ping，避免复用连接或 ping 到错误 loop 的连接。
+    返回 (engine, session_factory)；用完后请 engine.dispose()。
+    """
+    from app.core.config import settings
+    # Celery 任务内始终用 NullPool：每次新建连接，用后即弃，避免跨 loop 复用
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,
+        pool_pre_ping=False,
+        poolclass=NullPool,
+    )
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+    return engine, session_factory

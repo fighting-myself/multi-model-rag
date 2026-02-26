@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from app.core.database import get_db
-from app.schemas.billing import UsageResponse, PlanResponse, PlanListResponse, OrderCreate, OrderResponse
+from app.schemas.billing import UsageResponse, UsageLimitsResponse, PlanResponse, PlanListResponse, OrderCreate, OrderResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
 from app.services.billing_service import BillingService
+from app.services.rate_limit_service import get_usage_snapshot
 
 router = APIRouter()
 
@@ -29,6 +30,15 @@ async def get_usage(
         end_date=end_date
     )
     return usage
+
+
+@router.get("/usage-limits", response_model=UsageLimitsResponse)
+async def get_usage_limits(
+    current_user: UserResponse = Depends(get_current_active_user),
+):
+    """获取当前用量与限流快照（当日上传/对话数、当前秒检索数及上限），用于仪表盘展示、避免滥用。"""
+    snapshot = get_usage_snapshot(current_user.id)
+    return UsageLimitsResponse(**snapshot)
 
 
 @router.get("/plans", response_model=PlanListResponse)

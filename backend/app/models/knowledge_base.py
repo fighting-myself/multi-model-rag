@@ -1,7 +1,7 @@
 """
 知识库模型
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -21,6 +21,12 @@ class KnowledgeBase(Base):
     chunk_size = Column(Integer, nullable=True)  # 目标块大小
     chunk_overlap = Column(Integer, nullable=True)  # 重叠字符数
     chunk_max_expand_ratio = Column(String(20), nullable=True)  # 最大扩展比例，存为字符串如 "1.3"
+    # 知识库级配置：模型与检索
+    embedding_model = Column(String(80), nullable=True)  # 为空用全局
+    llm_model = Column(String(80), nullable=True)
+    temperature = Column(Float, nullable=True)  # 0~2，为空用全局
+    enable_rerank = Column(Boolean, default=True, nullable=False)  # 是否启用 rerank
+    enable_hybrid = Column(Boolean, default=True, nullable=False)  # 是否启用混合检索（向量+全文）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -34,7 +40,8 @@ class KnowledgeBase(Base):
 class KnowledgeBaseFile(Base):
     """知识库文件关联表"""
     __tablename__ = "knowledge_base_files"
-    
+    __mapper_args__ = {"confirm_deleted_rows": False}  # 并发时可能已被其他事务删除，0 行匹配不告警
+
     id = Column(Integer, primary_key=True, index=True)
     knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=False)
     file_id = Column(Integer, ForeignKey("files.id"), nullable=False)

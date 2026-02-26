@@ -7,6 +7,7 @@ import logging
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
+from sqlalchemy.exc import OperationalError
 
 from app.models.knowledge_base import KnowledgeBase, KnowledgeBaseFile
 from app.models.file import File
@@ -46,6 +47,11 @@ class KnowledgeBaseService:
             chunk_size=getattr(kb_data, "chunk_size", None),
             chunk_overlap=getattr(kb_data, "chunk_overlap", None),
             chunk_max_expand_ratio=str(kb_data.chunk_max_expand_ratio) if getattr(kb_data, "chunk_max_expand_ratio", None) is not None else None,
+            embedding_model=getattr(kb_data, "embedding_model", None),
+            llm_model=getattr(kb_data, "llm_model", None),
+            temperature=getattr(kb_data, "temperature", None),
+            enable_rerank=getattr(kb_data, "enable_rerank", True) if hasattr(kb_data, "enable_rerank") else True,
+            enable_hybrid=getattr(kb_data, "enable_hybrid", True) if hasattr(kb_data, "enable_hybrid") else True,
         )
         self.db.add(kb)
         await self.db.commit()
@@ -111,6 +117,16 @@ class KnowledgeBaseService:
             kb.chunk_overlap = kb_data.chunk_overlap
         if hasattr(kb_data, "chunk_max_expand_ratio"):
             kb.chunk_max_expand_ratio = str(kb_data.chunk_max_expand_ratio) if kb_data.chunk_max_expand_ratio is not None else None
+        if hasattr(kb_data, "embedding_model"):
+            kb.embedding_model = kb_data.embedding_model
+        if hasattr(kb_data, "llm_model"):
+            kb.llm_model = kb_data.llm_model
+        if hasattr(kb_data, "temperature"):
+            kb.temperature = kb_data.temperature
+        if hasattr(kb_data, "enable_rerank") and kb_data.enable_rerank is not None:
+            kb.enable_rerank = kb_data.enable_rerank
+        if hasattr(kb_data, "enable_hybrid") and kb_data.enable_hybrid is not None:
+            kb.enable_hybrid = kb_data.enable_hybrid
         await self.db.commit()
         await self.db.refresh(kb)
         return kb
@@ -1094,6 +1110,65 @@ class KnowledgeBaseService:
             chunks=[ChunkItem(id=c.id, chunk_index=c.chunk_index, content=c.content or "") for c in chunks]
         )
 
+    async def export_knowledge_base(
+        self, kb_id: int, user_id: int
+    ) -> Dict[str, Any]:
+        """导出知识库为可序列化结构：元数据 + 文件列表 + 每文件分块内容，便于迁移与备份。"""
+        kb = await self.get_knowledge_base(kb_id, user_id)
+        if not kb:
+            raise ValueError("知识库不存在")
+        # 元数据（不含关系）
+        meta = {
+            "id": kb.id,
+            "name": kb.name,
+            "description": kb.description or "",
+            "file_count": kb.file_count or 0,
+            "chunk_count": kb.chunk_count or 0,
+            "chunk_size": kb.chunk_size,
+            "chunk_overlap": kb.chunk_overlap,
+            "chunk_max_expand_ratio": kb.chunk_max_expand_ratio,
+            "embedding_model": kb.embedding_model,
+            "llm_model": kb.llm_model,
+            "temperature": kb.temperature,
+            "enable_rerank": getattr(kb, "enable_rerank", True),
+            "enable_hybrid": getattr(kb, "enable_hybrid", True),
+            "created_at": kb.created_at.isoformat() if kb.created_at else None,
+            "updated_at": kb.updated_at.isoformat() if kb.updated_at else None,
+        }
+        # 文件及分块
+        result = await self.db.execute(
+            select(KnowledgeBaseFile, File)
+            .join(File, KnowledgeBaseFile.file_id == File.id)
+            .where(
+                KnowledgeBaseFile.knowledge_base_id == kb_id,
+                File.user_id == user_id,
+            )
+            .order_by(KnowledgeBaseFile.created_at)
+        )
+        rows = result.all()
+        files_data = []
+        for kb_file, file in rows:
+            chunk_result = await self.db.execute(
+                select(Chunk)
+                .where(
+                    Chunk.knowledge_base_id == kb_id,
+                    Chunk.file_id == file.id,
+                )
+                .order_by(Chunk.chunk_index)
+            )
+            chunks = chunk_result.scalars().all()
+            files_data.append({
+                "file_id": file.id,
+                "original_filename": file.original_filename or file.filename,
+                "file_type": file.file_type or "",
+                "file_size": file.file_size or 0,
+                "chunks": [
+                    {"chunk_index": c.chunk_index, "content": c.content or ""}
+                    for c in chunks
+                ],
+            })
+        return {"knowledge_base": meta, "files": files_data}
+
     async def remove_file_from_knowledge_base(self, kb_id: int, file_id: int, user_id: int) -> None:
         """从知识库中移除文件：删除该文件在本库中的分块与向量，更新统计"""
         kb = await self.get_knowledge_base(kb_id, user_id)
@@ -1107,7 +1182,8 @@ class KnowledgeBaseService:
         )
         kb_file = kb_file_result.scalar_one_or_none()
         if not kb_file:
-            raise ValueError("该文件不在本知识库中")
+            # 可能已被其他事务删除（如并发重索引或死锁重试），视为已移除
+            return
         file_result = await self.db.execute(select(File).where(File.id == file_id, File.user_id == user_id))
         file = file_result.scalar_one_or_none()
         if not file:
@@ -1136,11 +1212,30 @@ class KnowledgeBaseService:
         await self.db.commit()
         logging.info(f"已从知识库 {kb_id} 移除文件 {file_id}，删除 {chunk_delta} 个分块")
 
+    def _is_deadlock(self, e: BaseException) -> bool:
+        """MySQL 1213 死锁"""
+        if isinstance(e, OperationalError) and e.orig:
+            return getattr(e.orig, "args", (None,))[0] == 1213
+        return False
+
     async def reindex_file_in_knowledge_base(self, kb_id: int, file_id: int, user_id: int) -> Optional[KnowledgeBase]:
-        """重新索引：先移除该文件在本库中的分块与向量，再重新切分与向量化"""
-        await self.remove_file_from_knowledge_base(kb_id, file_id, user_id)
-        kb, _ = await self.add_files(kb_id, [file_id], user_id)
-        return kb
+        """重新索引：先移除该文件在本库中的分块与向量，再重新切分与向量化。遇 MySQL 死锁(1213) 自动重试。"""
+        last_error = None
+        for attempt in range(3):
+            try:
+                await self.remove_file_from_knowledge_base(kb_id, file_id, user_id)
+                kb, _ = await self.add_files(kb_id, [file_id], user_id)
+                return kb
+            except Exception as e:
+                last_error = e
+                if self._is_deadlock(e) and attempt < 2:
+                    await self.db.rollback()
+                    await asyncio.sleep(0.3 * (attempt + 1))
+                    continue
+                raise
+        if last_error:
+            raise last_error
+        return None
 
     async def search_images_by_text(
         self,

@@ -13,6 +13,11 @@ class KnowledgeBaseCreate(BaseModel):
     chunk_size: Optional[int] = None  # 分块大小，空则用全局配置
     chunk_overlap: Optional[int] = None
     chunk_max_expand_ratio: Optional[float] = None  # 如 1.3
+    embedding_model: Optional[str] = None  # 嵌入模型，空则用全局
+    llm_model: Optional[str] = None
+    temperature: Optional[float] = None  # 0~2
+    enable_rerank: Optional[bool] = None  # 是否启用 rerank
+    enable_hybrid: Optional[bool] = None  # 是否启用混合检索
 
 
 class AddFilesToKnowledgeBase(BaseModel):
@@ -88,6 +93,11 @@ class KnowledgeBaseResponse(BaseModel):
     chunk_size: Optional[int] = None
     chunk_overlap: Optional[int] = None
     chunk_max_expand_ratio: Optional[str] = None  # 库中存字符串
+    embedding_model: Optional[str] = None
+    llm_model: Optional[str] = None
+    temperature: Optional[float] = None
+    enable_rerank: Optional[bool] = True
+    enable_hybrid: Optional[bool] = True
 
     class Config:
         from_attributes = True

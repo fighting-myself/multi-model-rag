@@ -15,6 +15,7 @@ from app.schemas.knowledge_base import (
     UnifiedSearchResponse,
 )
 from app.api.v1.auth import get_current_active_user
+from app.api.deps import require_search_rate_limit
 from app.services.knowledge_base_service import KnowledgeBaseService
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +48,7 @@ class ByImageSearchRequest(BaseModel):
 @router.post("/images", response_model=ImageSearchResponse)
 async def search_images_by_text(
     body: ImageSearchRequest,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_search_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """以文搜图：根据文本在知识库中检索匹配的图片。可选指定知识库。"""
@@ -81,7 +82,7 @@ async def search_images_by_text(
 @router.post("/unified", response_model=UnifiedSearchResponse)
 async def search_unified(
     body: UnifiedSearchRequest,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_search_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """多模态检索统一：以文搜图与文本 RAG 共用入口。传 query 或 image_base64 其一，同时返回文档与图片。"""
@@ -168,7 +169,7 @@ async def search_by_image_upload(
     file: UploadFile = File(...),
     knowledge_base_id: Optional[int] = None,
     top_k: int = 20,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_search_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """图搜图：上传图片文件，在知识库中检索相似图片。"""

@@ -1,21 +1,24 @@
 import { useState, useEffect } from 'react'
-import { Card, Row, Col, Statistic, Table, Button, message } from 'antd'
-import { DollarOutlined, FileOutlined, DatabaseOutlined } from '@ant-design/icons'
+import { Card, Row, Col, Statistic, Table, Button, message, Progress } from 'antd'
+import { DollarOutlined, FileOutlined, DatabaseOutlined, MessageOutlined, SearchOutlined } from '@ant-design/icons'
 import api from '../services/api'
-import type { UsageResponse, PlanListResponse } from '../types/api'
+import type { UsageResponse, PlanListResponse, UsageLimitsResponse } from '../types/api'
 
 export default function Billing() {
   const [usage, setUsage] = useState<UsageResponse | null>(null)
+  const [usageLimits, setUsageLimits] = useState<UsageLimitsResponse | null>(null)
   const [plans, setPlans] = useState<PlanListResponse['plans']>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     Promise.all([
       api.get<UsageResponse>('/billing/usage').catch(() => null),
+      api.get<UsageLimitsResponse>('/billing/usage-limits').catch(() => null),
       api.get<PlanListResponse>('/billing/plans').catch(() => ({ plans: [], total: 0 })),
     ])
-      .then(([u, p]) => {
+      .then(([u, ul, p]) => {
         if (u) setUsage(u)
+        if (ul) setUsageLimits(ul)
         if (p?.plans) setPlans(p.plans)
       })
       .finally(() => setLoading(false))
@@ -66,6 +69,35 @@ export default function Billing() {
           </Card>
         </Col>
       </Row>
+
+      {usageLimits && (
+        <Card title="用量与限流" style={{ marginBottom: 24 }}>
+          <Row gutter={24}>
+            <Col span={8}>
+              <div style={{ marginBottom: 8 }}>
+                <span><FileOutlined /> 当日上传</span>
+                <span style={{ marginLeft: 8, fontWeight: 600 }}>{usageLimits.upload_today} / {usageLimits.upload_limit_per_day}</span>
+              </div>
+              <Progress percent={usageLimits.upload_limit_per_day ? Math.min(100, (usageLimits.upload_today / usageLimits.upload_limit_per_day) * 100) : 0} size="small" />
+            </Col>
+            <Col span={8}>
+              <div style={{ marginBottom: 8 }}>
+                <span><MessageOutlined /> 当日对话</span>
+                <span style={{ marginLeft: 8, fontWeight: 600 }}>{usageLimits.conversation_today} / {usageLimits.conversation_limit_per_day}</span>
+              </div>
+              <Progress percent={usageLimits.conversation_limit_per_day ? Math.min(100, (usageLimits.conversation_today / usageLimits.conversation_limit_per_day) * 100) : 0} size="small" />
+            </Col>
+            <Col span={8}>
+              <div style={{ marginBottom: 8 }}>
+                <span><SearchOutlined /> 检索 QPS 上限</span>
+                <span style={{ marginLeft: 8, fontWeight: 600 }}>{usageLimits.search_qps_limit}/秒</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#666' }}>当前秒请求数：{usageLimits.search_current_second}</div>
+            </Col>
+          </Row>
+        </Card>
+      )}
+
       <Card title="套餐列表" loading={loading}>
         <Table
           rowKey="id"

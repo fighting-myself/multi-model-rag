@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.schemas.chat import ChatMessage, ChatResponse, ConversationResponse, ConversationListResponse, MessageResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
+from app.api.deps import require_chat_rate_limit
 from app.services.chat_service import ChatService
 
 router = APIRouter()
@@ -22,7 +23,7 @@ async def chat_completion(
     conversation_id: Optional[int] = None,
     knowledge_base_id: Optional[int] = None,
     stream: bool = False,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_chat_rate_limit),
     db: AsyncSession = Depends(get_db)
 ):
     """发送消息（同步）"""
@@ -47,7 +48,7 @@ async def chat_completion_stream(
     message: ChatMessage,
     conversation_id: Optional[int] = None,
     knowledge_base_id: Optional[int] = None,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_chat_rate_limit),
     db: AsyncSession = Depends(get_db)
 ):
     """发送消息（流式），每个 token 单独推送，禁用缓冲以真正逐字输出。"""

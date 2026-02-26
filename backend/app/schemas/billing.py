@@ -17,6 +17,16 @@ class UsageResponse(BaseModel):
     period_end: datetime
 
 
+class UsageLimitsResponse(BaseModel):
+    """用量与限流快照（仪表盘/计费展示）"""
+    upload_today: int
+    upload_limit_per_day: int
+    conversation_today: int
+    conversation_limit_per_day: int
+    search_current_second: int
+    search_qps_limit: float
+
+
 class PlanResponse(BaseModel):
     """套餐响应"""
     id: int

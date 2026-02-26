@@ -30,6 +30,41 @@ export interface KnowledgeBaseItem {
   file_count: number
   chunk_count: number
   created_at: string
+  chunk_size?: number
+  chunk_overlap?: number
+  chunk_max_expand_ratio?: string
+  embedding_model?: string
+  llm_model?: string
+  temperature?: number
+  enable_rerank?: boolean
+  enable_hybrid?: boolean
+}
+
+/** 提交异步任务后的响应 */
+export interface TaskEnqueueResponse {
+  task_id?: string | null
+  message?: string
+  sync?: boolean
+  result?: Record<string, unknown>
+}
+
+/** 任务状态（轮询用） */
+export interface TaskStatusResponse {
+  task_id: string
+  status: string // PENDING | STARTED | SUCCESS | FAILURE | RETRY
+  result?: { kb_id?: number; file_count?: number; chunk_count?: number; skipped?: { file_id: number; original_filename: string; reason: string }[]; reindexed_files?: number; total_files?: number }
+  error?: string
+  traceback?: string
+}
+
+/** 用量与限流快照（仪表盘/计费展示） */
+export interface UsageLimitsResponse {
+  upload_today: number
+  upload_limit_per_day: number
+  conversation_today: number
+  conversation_limit_per_day: number
+  search_current_second: number
+  search_qps_limit: number
 }
 
 export interface KnowledgeBaseListResponse {

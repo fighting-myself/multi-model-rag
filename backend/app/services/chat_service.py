@@ -10,6 +10,7 @@ from datetime import datetime
 from app.models.conversation import Conversation, Message
 from app.models.chunk import Chunk
 from app.models.file import File
+from app.models.knowledge_base import KnowledgeBase
 from app.schemas.chat import ChatResponse, ConversationResponse, ConversationListResponse, SourceItem
 from app.services.embedding_service import get_embedding
 from app.services.llm_service import chat_completion as llm_chat, chat_completion_stream as llm_chat_stream, query_expand
@@ -157,15 +158,16 @@ class ChatService:
             except Exception as e:
                 logging.warning(f"向量检索失败: {e}")
         
-        # 2. 全文匹配（多查询合并 RRF）
-        for q in queries:
-            try:
-                fulltext_results = await self._full_text_search(q, knowledge_base_id, top_k=top_k * 3)
-                for chunk, rank in fulltext_results:
-                    vector_chunk_map[chunk.id] = chunk
-                    chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
-            except Exception as e:
-                logging.warning(f"全文匹配失败: {e}")
+        # 2. 全文匹配（多查询合并 RRF），知识库未启用混合检索时跳过
+        if use_hybrid:
+            for q in queries:
+                try:
+                    fulltext_results = await self._full_text_search(q, knowledge_base_id, top_k=top_k * 3)
+                    for chunk, rank in fulltext_results:
+                        vector_chunk_map[chunk.id] = chunk
+                        chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
+                except Exception as e:
+                    logging.warning(f"全文匹配失败: {e}")
         
         # 如果没有检索到任何结果，走兜底逻辑
         if not chunk_rrf_scores:
@@ -192,22 +194,24 @@ class ChatService:
         if not candidate_chunks:
             return ("", 0.0, None, [])
         
-        # 4. Rerank 重排序
-        try:
-            documents = [chunk.content for chunk, _ in candidate_chunks]
-            reranked = await rerank(query=message, documents=documents, top_n=min(top_k, len(documents)))
-            
-            final_chunks = []
-            for item in reranked:
-                idx = item["index"]
-                if idx < len(candidate_chunks):
-                    chunk, rrf_score = candidate_chunks[idx]
-                    relevance_score = item.get("relevance_score", 0.0)
-                    final_chunks.append((chunk, relevance_score, rrf_score))
-            if not final_chunks:
+        # 4. Rerank 重排序（知识库未启用 rerank 时直接用 RRF 排序）
+        if use_rerank:
+            try:
+                documents = [chunk.content for chunk, _ in candidate_chunks]
+                reranked = await rerank(query=message, documents=documents, top_n=min(top_k, len(documents)))
+                final_chunks = []
+                for item in reranked:
+                    idx = item["index"]
+                    if idx < len(candidate_chunks):
+                        chunk, rrf_score = candidate_chunks[idx]
+                        relevance_score = item.get("relevance_score", 0.0)
+                        final_chunks.append((chunk, relevance_score, rrf_score))
+                if not final_chunks:
+                    final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
+            except Exception as e:
+                logging.warning(f"Rerank 失败: {e}，使用 RRF 排序结果")
                 final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
-        except Exception as e:
-            logging.warning(f"Rerank 失败: {e}，使用 RRF 排序结果")
+        else:
             final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
         
         selected_chunks = final_chunks[:top_k]
@@ -536,7 +540,13 @@ class ChatService:
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
         if knowledge_base_id:
-            rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(message, knowledge_base_id, top_k=10)
+            kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
+            kb = kb_result.scalar_one_or_none()
+            use_rerank = getattr(kb, "enable_rerank", True) if kb else True
+            use_hybrid = getattr(kb, "enable_hybrid", True) if kb else True
+            rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(
+                message, knowledge_base_id, top_k=10, use_rerank=use_rerank, use_hybrid=use_hybrid
+            )
             retrieved_context_original = rag_context
             if not rag_context.strip():
                 try:
@@ -695,8 +705,12 @@ class ChatService:
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
         if knowledge_base_id:
+            kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
+            kb = kb_result.scalar_one_or_none()
+            use_rerank = getattr(kb, "enable_rerank", True) if kb else True
+            use_hybrid = getattr(kb, "enable_hybrid", True) if kb else True
             rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(
-                message, knowledge_base_id, top_k=10
+                message, knowledge_base_id, top_k=10, use_rerank=use_rerank, use_hybrid=use_hybrid
             )
             if not rag_context.strip():
                 try:
