@@ -15,6 +15,7 @@ from app.models.file import File, FileStatus
 from app.models.chunk import Chunk
 from app.models.knowledge_base import KnowledgeBaseFile
 from app.schemas.file import FileResponse, FileListResponse
+from app.services.vector_store import get_vector_client
 
 
 class FileService:
@@ -48,40 +49,40 @@ class FileService:
         self,
         file: UploadFile,
         user_id: int,
-        knowledge_base_id: Optional[int] = None
+        knowledge_base_id: Optional[int] = None,
+        on_duplicate: Optional[str] = None,
     ) -> File:
-        """上传文件"""
-        # 读取文件内容
+        """上传文件。on_duplicate: use_existing=同 MD5 返回已有；overwrite=覆盖已有（同用户同 MD5）并清空分块。"""
         content = await file.read()
-        
-        # 验证文件大小
         if len(content) > settings.MAX_FILE_SIZE:
             raise ValueError(f"文件大小超过限制（{settings.MAX_FILE_SIZE}字节）")
-        
-        # 验证文件类型
         file_type = self._get_file_type(file.filename)
-        if file_type not in settings.allowed_file_types_list:
-            raise ValueError(f"不支持的文件类型: {file_type}")
-        
-        # 计算MD5
+        allowed = settings.allowed_file_types_list
+        if file_type not in allowed:
+            raise ValueError(
+                f"不支持的文件类型: {file_type}。当前允许: {', '.join(allowed)}。"
+                "可在 .env 中设置 ALLOWED_FILE_TYPES 增加类型。"
+            )
         md5_hash = self._calculate_md5(content)
-        
-        # 检查文件是否已存在
-        existing_file = await self.db.execute(
-            select(File).where(File.md5_hash == md5_hash)
+        policy = (on_duplicate or settings.UPLOAD_ON_DUPLICATE or "use_existing").strip().lower()
+        if policy not in ("use_existing", "overwrite"):
+            policy = "use_existing"
+
+        existing_result = await self.db.execute(
+            select(File).where(File.md5_hash == md5_hash, File.user_id == user_id)
         )
-        existing = existing_file.scalar_one_or_none()
+        existing = existing_result.scalar_one_or_none()
         if existing:
+            if policy == "overwrite":
+                await self._overwrite_file(existing, content, file, file_type)
+                return existing
             return existing
-        
-        # 生成存储路径
+
         storage_path = f"{user_id}/{md5_hash}/{file.filename}"
-        
-        # 上传到MinIO
         try:
             from io import BytesIO
             file_obj = BytesIO(content)
-            file_obj.seek(0)  # 重置文件指针
+            file_obj.seek(0)
             self.minio_client.put_object(
                 settings.MINIO_BUCKET_NAME,
                 storage_path,
@@ -91,8 +92,6 @@ class FileService:
             )
         except Exception as e:
             raise ValueError(f"文件上传失败: {str(e)}")
-        
-        # 创建文件记录
         file_record = File(
             user_id=user_id,
             filename=file.filename,
@@ -103,29 +102,59 @@ class FileService:
             md5_hash=md5_hash,
             status=FileStatus.COMPLETED
         )
-        
         self.db.add(file_record)
         await self.db.commit()
         await self.db.refresh(file_record)
-        
-        # TODO: 触发异步处理任务（解析、向量化）
-        
         return file_record
+
+    async def _overwrite_file(self, existing: File, content: bytes, file: UploadFile, file_type: str) -> None:
+        """覆盖已有文件：删该文件的 chunk 与向量、知识库关联，覆盖 MinIO，更新记录。"""
+        chunk_result = await self.db.execute(select(Chunk.id).where(Chunk.file_id == existing.id))
+        chunk_ids = [r for r in chunk_result.scalars().all()]
+        await self.db.execute(delete(Chunk).where(Chunk.file_id == existing.id))
+        await self.db.execute(delete(KnowledgeBaseFile).where(KnowledgeBaseFile.file_id == existing.id))
+        if chunk_ids:
+            try:
+                vs = get_vector_client()
+                vs.delete_by_chunk_ids(chunk_ids)
+            except Exception:
+                pass
+        try:
+            from io import BytesIO
+            self.minio_client.put_object(
+                settings.MINIO_BUCKET_NAME,
+                existing.storage_path,
+                BytesIO(content),
+                length=len(content),
+                content_type=file.content_type or "application/octet-stream"
+            )
+        except Exception:
+            pass
+        existing.file_size = len(content)
+        existing.chunk_count = 0
+        existing.original_filename = file.filename
+        existing.filename = file.filename
+        existing.file_type = file_type
+        existing.status = FileStatus.COMPLETED
+        await self.db.commit()
+        await self.db.refresh(existing)
     
     async def batch_upload_files(
         self,
         files: List[UploadFile],
         user_id: int,
-        knowledge_base_id: Optional[int] = None
+        knowledge_base_id: Optional[int] = None,
+        on_duplicate: Optional[str] = None,
     ) -> List[File]:
         """批量上传文件"""
         results = []
         for file in files:
             try:
-                file_record = await self.upload_file(file, user_id, knowledge_base_id)
+                file_record = await self.upload_file(
+                    file, user_id, knowledge_base_id, on_duplicate=on_duplicate
+                )
                 results.append(file_record)
             except Exception as e:
-                # 记录错误但继续处理其他文件
                 print(f"文件 {file.filename} 上传失败: {str(e)}")
         return results
     

@@ -216,6 +216,20 @@ class ZillizVectorStore:
             raise
         return []
 
+    def delete_by_chunk_ids(self, chunk_ids: List[int]) -> None:
+        """按 chunk_id 列表删除向量（用于覆盖同文件时清理旧向量）。"""
+        if not chunk_ids:
+            return
+        try:
+            ids_expr = [int(chunk_id_to_vector_id(cid)) for cid in chunk_ids]
+            self.client.delete(
+                collection_name=self._collection,
+                ids=ids_expr,
+            )
+        except Exception as e:
+            import logging
+            logging.warning(f"向量删除失败: {e}")
+
 
 class QdrantVectorStore:
     """Qdrant 向量存储（保留原有逻辑，VECTOR_DB_TYPE=qdrant 时使用）。"""
@@ -276,3 +290,15 @@ class QdrantVectorStore:
             query_filter=filter_expr,
         )
         return [{"id": h.id, "score": h.score, "payload": h.payload or {}} for h in hits]
+
+    def delete_by_chunk_ids(self, chunk_ids: List[int]) -> None:
+        """按 chunk_id 列表删除向量。"""
+        if not chunk_ids:
+            return
+        try:
+            from qdrant_client.models import PointIdsList
+            ids = [hash(str(cid)) % (2**63) for cid in chunk_ids]
+            self.client.delete(collection_name="documents", points_selector=PointIdsList(points=ids))
+        except Exception as e:
+            import logging
+            logging.warning(f"向量删除失败: {e}")

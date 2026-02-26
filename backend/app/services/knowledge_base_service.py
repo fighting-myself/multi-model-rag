@@ -1,6 +1,7 @@
 """
 知识库服务：创建知识库、添加文件并做 RAG 切分与向量化
 """
+import asyncio
 import io
 import logging
 from typing import List, Optional, Dict, Any, AsyncGenerator
@@ -182,7 +183,6 @@ class KnowledgeBaseService:
         if ft == "txt":
             return content.decode("utf-8", errors="ignore").strip()
         if ft == "pdf":
-            # 先用 PyPDF2，若提取为空再用 pdfplumber 尝试（兼容性更好，部分 PDF 需后者）
             text = ""
             try:
                 from PyPDF2 import PdfReader
@@ -207,6 +207,9 @@ class KnowledgeBaseService:
                         logging.info("PDF 文本由 pdfplumber 提取（PyPDF2 未提取到内容）")
                 except Exception as e:
                     logging.warning(f"pdfplumber 提取 PDF 失败: {e}")
+            table_text = KnowledgeBaseService._extract_pdf_tables_static(content)
+            if table_text:
+                text = (text + "\n\n" + table_text).strip()
             return text
         if ft == "docx":
             try:
@@ -251,16 +254,101 @@ class KnowledgeBaseService:
                 parts = []
                 for name in wb.sheetnames:
                     sheet = wb[name]
+                    sheet_parts = [f"表：{name}"]
                     for row in sheet.iter_rows(values_only=True):
-                        for cell in row:
-                            if cell is not None and str(cell).strip():
-                                parts.append(str(cell).strip())
+                        row_str = "\t".join(str(c) if c is not None else "" for c in row).strip()
+                        if row_str:
+                            sheet_parts.append(row_str)
+                    if len(sheet_parts) > 1:
+                        parts.append("\n".join(sheet_parts))
                 wb.close()
-                return "\n".join(parts).strip() if parts else ""
+                return "\n\n".join(parts).strip() if parts else ""
             except Exception as e:
                 logging.warning(f"xlsx 文本提取失败: {e}")
                 return ""
+        if ft in ("md", "markdown"):
+            return content.decode("utf-8", errors="ignore").strip()
+        if ft == "html":
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(content.decode("utf-8", errors="ignore"), "html.parser")
+                for tag in soup(["script", "style"]):
+                    tag.decompose()
+                return soup.get_text(separator="\n", strip=True) or ""
+            except Exception as e:
+                logging.warning(f"HTML 文本提取失败: {e}")
+                return content.decode("utf-8", errors="ignore").strip()
+        if ft == "zip":
+            return KnowledgeBaseService._extract_zip_static(content)
         return ""
+
+    @staticmethod
+    def _extract_pdf_tables_static(content: bytes) -> str:
+        """从 PDF 中提取表格，格式为「表：第N页表格」+ 行列文本，便于查表类问答。"""
+        try:
+            import pdfplumber
+            parts = []
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                for i, page in enumerate(pdf.pages):
+                    tables = page.extract_tables()
+                    for j, table in enumerate(tables or []):
+                        if not table:
+                            continue
+                        title = f"表：第{i+1}页表格{j+1}"
+                        rows = ["\t".join(str(cell or "").strip() for cell in row) for row in table]
+                        if rows:
+                            parts.append(title + "\n" + "\n".join(rows))
+            return "\n\n".join(parts).strip() if parts else ""
+        except Exception as e:
+            logging.warning(f"PDF 表格提取失败: {e}")
+            return ""
+
+    @staticmethod
+    def _extract_zip_static(content: bytes) -> str:
+        """从 zip 中解压支持格式的文件，逐个提取文本后合并（带 [文件: 名] 前缀）。"""
+        import zipfile
+        supported = {"txt", "pdf", "md", "markdown", "html", "docx", "pptx", "xlsx"}
+        parts = []
+        try:
+            with zipfile.ZipFile(io.BytesIO(content), "r") as z:
+                for name in z.namelist():
+                    if name.startswith("__MACOSX") or "/." in name:
+                        continue
+                    ext = name.split(".")[-1].lower() if "." in name else ""
+                    if ext not in supported:
+                        continue
+                    try:
+                        raw = z.read(name)
+                        t = KnowledgeBaseService._extract_text(raw, ext if ext != "markdown" else "md")
+                        if t and t.strip():
+                            parts.append(f"[文件: {name}]\n{t}")
+                    except Exception as e:
+                        logging.warning(f"zip 内文件 {name} 提取失败: {e}")
+            return "\n\n".join(parts).strip() if parts else ""
+        except Exception as e:
+            logging.warning(f"ZIP 解压/解析失败: {e}")
+            return ""
+
+    async def _extract_pdf_ocr(self, content: bytes) -> str:
+        """扫描版 PDF：将每页渲染为图后走 OCR，再拼接文本。"""
+        min_chars = getattr(settings, "PDF_OCR_MIN_CHARS", 80)
+        dpi = getattr(settings, "PDF_OCR_DPI", 150)
+        parts = []
+        try:
+            from pdf2image import convert_from_bytes
+            images = convert_from_bytes(content, dpi=dpi)
+            for img in images:
+                buf = io.BytesIO()
+                img.save(buf, "PNG")
+                t = await extract_text_from_image(buf.getvalue(), "png")
+                parts.append(t or "")
+            return "\n\n".join(parts).strip()
+        except ImportError:
+            logging.warning("pdf2image 未安装，无法对 PDF 做 OCR（需安装 poppler）")
+            return ""
+        except Exception as e:
+            logging.warning(f"PDF OCR 失败: {e}")
+            return ""
 
     @staticmethod
     def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50, max_expand_ratio: float = 1.3) -> List[str]:
@@ -496,7 +584,12 @@ class KnowledgeBaseService:
                     text = await extract_text_from_image(content, file.file_type)
                 else:
                     text = self._extract_text(content, file.file_type)
-                if not text:
+                if ft == "pdf" and (not text or len(text.strip()) < getattr(settings, "PDF_OCR_MIN_CHARS", 80)):
+                    ocr_text = await self._extract_pdf_ocr(content)
+                    if ocr_text:
+                        text = ocr_text
+                        logging.info(f"文件 {file_id} 经 PDF OCR 补充文本")
+                if not text or not text.strip():
                     logging.warning(f"文件 {file_id} 提取文本为空，跳过")
                     await self.db.delete(kb_file)
                     await self.db.flush()
@@ -506,7 +599,6 @@ class KnowledgeBaseService:
                         "reason": "提取文本为空（可能为扫描版 PDF 或格式不支持）",
                     })
                     continue
-                    
                 cs, co, ratio = self._get_chunk_params(kb, file.file_type)
                 text_chunks = self._chunk_text(text, chunk_size=cs, overlap=co, max_expand_ratio=ratio)
                 if not text_chunks:
@@ -553,11 +645,11 @@ class KnowledgeBaseService:
                             "chunk_index": c.chunk_index,
                         })
                     
-                    # 插入向量到向量库（包含原文 metadata）
-                    vector_store.insert(
-                        ids=[str(c.id) for c in chunks],
-                        vectors=embeddings,
-                        metadatas=metadatas,  # 保存文档块原文到 metadata
+                    # 插入向量到向量库（同步网络 I/O 放线程池，避免阻塞事件循环）
+                    ids_list = [str(c.id) for c in chunks]
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
                     )
                     logging.info(f"成功插入 {len(chunks)} 个向量到向量库（包含原文）")
                     
@@ -681,13 +773,16 @@ class KnowledgeBaseService:
                     text = await extract_text_from_image(content, file.file_type)
                 else:
                     text = self._extract_text(content, file.file_type)
-                if not text:
+                if ft == "pdf" and (not text or len(text.strip()) < getattr(settings, "PDF_OCR_MIN_CHARS", 80)):
+                    ocr_text = await self._extract_pdf_ocr(content)
+                    if ocr_text:
+                        text = ocr_text
+                if not text or not text.strip():
                     await self.db.delete(kb_file)
                     await self.db.flush()
                     skipped.append({"file_id": file_id, "original_filename": filename, "reason": "提取文本为空"})
                     yield {"type": "file_skip", "file_id": file_id, "filename": filename, "reason": "提取文本为空"}
                     continue
-
                 cs, co, ratio = self._get_chunk_params(kb, file.file_type)
                 text_chunks = self._chunk_text(text, chunk_size=cs, overlap=co, max_expand_ratio=ratio)
                 if not text_chunks:
@@ -724,10 +819,10 @@ class KnowledgeBaseService:
                             "knowledge_base_id": c.knowledge_base_id,
                             "chunk_index": c.chunk_index,
                         })
-                    vector_store.insert(
-                        ids=[str(c.id) for c in chunks],
-                        vectors=embeddings,
-                        metadatas=metadatas,
+                    ids_list = [str(c.id) for c in chunks]
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
                     )
                 except Exception as e:
                     logging.error(f"文件 {file_id} 向量化失败: {e}")

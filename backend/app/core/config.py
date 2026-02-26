@@ -77,7 +77,12 @@ class Settings(BaseSettings):
     
     # 文件上传配置
     MAX_FILE_SIZE: int = 104857600  # 100MB
-    ALLOWED_FILE_TYPES: str = "pdf,ppt,pptx,txt,xlsx,docx,jpeg,jpg,png"
+    ALLOWED_FILE_TYPES: str = "pdf,ppt,pptx,txt,xlsx,docx,jpeg,jpg,png,md,html,zip"
+    # 扫描版 PDF：提取文本少于该字数时走 OCR（每页渲染为图再 OCR）
+    PDF_OCR_MIN_CHARS: int = 80
+    PDF_OCR_DPI: int = 150
+    # 同 MD5 上传时的策略：use_existing=返回已有文件，overwrite=覆盖内容并清空分块
+    UPLOAD_ON_DUPLICATE: str = "use_existing"
     
     @property
     def allowed_file_types_list(self) -> List[str]:

@@ -2,7 +2,7 @@
 文件相关API
 """
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -37,6 +37,7 @@ async def upload_file(
 async def batch_upload_files(
     files: List[UploadFile] = File(...),
     knowledge_base_id: int = None,
+    on_duplicate: str = Query("use_existing", description="同 MD5 时：use_existing=返回已有，overwrite=覆盖并清空分块"),
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -45,7 +46,8 @@ async def batch_upload_files(
     file_records = await file_service.batch_upload_files(
         files=files,
         user_id=current_user.id,
-        knowledge_base_id=knowledge_base_id
+        knowledge_base_id=knowledge_base_id,
+        on_duplicate=on_duplicate,
     )
     return file_records
 
