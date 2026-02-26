@@ -533,9 +533,12 @@ export default function KnowledgeBases() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <h1>知识库管理</h1>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalVisible(true) }}>
+      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="app-page-title" style={{ marginBottom: 4 }}>知识库管理</h1>
+          <p className="app-page-desc" style={{ marginBottom: 0 }}>创建知识库并添加文件，供检索与智能问答使用</p>
+        </div>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalVisible(true) }} size="large">
           创建知识库
         </Button>
       </div>

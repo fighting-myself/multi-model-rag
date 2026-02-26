@@ -246,7 +246,7 @@ export default function Chat() {
   return (
     <div style={{ height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0 }}>智能问答</h1>
+        <h1 className="app-page-title" style={{ margin: 0, marginRight: 8 }}>智能问答</h1>
         <Space>
           <Button
             type={currentConvId ? 'default' : 'primary'}

@@ -100,8 +100,11 @@ export default function AuditLog() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center' }}>
-        <h1 style={{ margin: 0 }}>操作审计</h1>
+      <div style={{ marginBottom: 20, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+        <div>
+          <h1 className="app-page-title" style={{ marginBottom: 4 }}>操作审计</h1>
+          <p className="app-page-desc" style={{ marginBottom: 0 }}>关键操作记录，便于排查与合规</p>
+        </div>
         <Select
           placeholder="操作类型"
           allowClear
@@ -129,8 +132,8 @@ export default function AuditLog() {
           pageSize,
           total,
           showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条`,
-          onChange: (p, ps) => {
+          showTotal: (t: number) => `共 ${t} 条`,
+          onChange: (p: number, ps?: number) => {
             setPage(p)
             if (typeof ps === 'number') setPageSize(ps)
           },

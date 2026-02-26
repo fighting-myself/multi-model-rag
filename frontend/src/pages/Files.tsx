@@ -129,18 +129,20 @@ export default function Files() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <h1 style={{ margin: 0 }}>文件管理</h1>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h1 className="app-page-title" style={{ marginBottom: 4 }}>文件管理</h1>
+            <p className="app-page-desc" style={{ marginBottom: 0 }}>
+              支持 PDF、Word、Excel、PPT、TXT、Markdown、图片等；单文件 ≤100MB；禁止可执行与脚本文件。
+            </p>
+          </div>
           <Upload {...uploadProps}>
-            <Button type="primary" icon={<UploadOutlined />}>
+            <Button type="primary" icon={<UploadOutlined />} size="large">
               上传文件
             </Button>
           </Upload>
         </div>
-        <p style={{ color: '#666', fontSize: 12, margin: 0 }}>
-          支持格式：PDF、Word、Excel、PPT、TXT、Markdown、图片等；单文件不超过 100MB；文件名长度不超过 200 字符；禁止 exe、bat、脚本等危险类型。上传前会校验文件真实类型与安全策略。
-        </p>
       </div>
       <Table
         columns={columns}

@@ -56,7 +56,8 @@ export default function Profile() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: 24 }}>个人中心</h1>
+      <h1 className="app-page-title">个人中心</h1>
+      <p className="app-page-desc">账户信息与密码修改</p>
 
       <Card title="注册信息" loading={loading} style={{ marginBottom: 24 }}>
         {displayUser && (

@@ -182,7 +182,8 @@ export default function ImageSearch() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: 24 }}>多模态检索</h1>
+      <h1 className="app-page-title">多模态检索</h1>
+      <p className="app-page-desc">以文搜图、图搜图或统一检索文档与图片</p>
       <Card style={{ marginBottom: 24 }}>
         <Tabs
           activeKey={tab}

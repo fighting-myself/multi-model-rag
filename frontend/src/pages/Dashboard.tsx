@@ -24,32 +24,33 @@ export default function Dashboard() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: 24 }}>仪表盘</h1>
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={8}>
-          <Card loading={loading}>
+      <h1 className="app-page-title">仪表盘</h1>
+      <p className="app-page-desc">概览您的文件、知识库与对话用量</p>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={24} md={8}>
+          <Card loading={loading} style={{ borderLeft: '4px solid var(--app-accent)' }}>
             <Statistic
               title="文件总数"
               value={stats.file_count}
-              prefix={<FileOutlined />}
+              prefix={<FileOutlined style={{ color: 'var(--app-accent)' }} />}
             />
           </Card>
         </Col>
-        <Col span={8}>
-          <Card loading={loading}>
+        <Col xs={24} sm={24} md={8}>
+          <Card loading={loading} style={{ borderLeft: '4px solid #10b981' }}>
             <Statistic
               title="知识库数量"
               value={stats.knowledge_base_count}
-              prefix={<DatabaseOutlined />}
+              prefix={<DatabaseOutlined style={{ color: '#10b981' }} />}
             />
           </Card>
         </Col>
-        <Col span={8}>
-          <Card loading={loading}>
+        <Col xs={24} sm={24} md={8}>
+          <Card loading={loading} style={{ borderLeft: '4px solid #8b5cf6' }}>
             <Statistic
               title="对话次数"
               value={stats.conversation_count}
-              prefix={<MessageOutlined />}
+              prefix={<MessageOutlined style={{ color: '#8b5cf6' }} />}
             />
           </Card>
         </Col>

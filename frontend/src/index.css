@@ -1,3 +1,17 @@
+/* AI 风格全局样式 */
+:root {
+  --app-bg: #f1f5f9;
+  --app-sidebar-bg: #0f172a;
+  --app-sidebar-hover: rgba(6, 182, 212, 0.12);
+  --app-sidebar-selected: rgba(6, 182, 212, 0.2);
+  --app-accent: #06b6d4;
+  --app-accent-hover: #22d3ee;
+  --app-header-bg: #1e293b;
+  --app-card-bg: #ffffff;
+  --app-text-primary: #0f172a;
+  --app-text-secondary: #64748b;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -5,19 +19,86 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: var(--app-bg);
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: 'JetBrains Mono', source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
 #root {
   width: 100%;
-  height: 100vh;
+  min-height: 100vh;
+}
+
+/* 主内容区背景（在 AppLayout 内使用） */
+.app-content-area {
+  background: var(--app-bg) !important;
+  min-height: calc(100vh - 64px);
+}
+
+/* 卡片在内容区内的统一风格 */
+.app-content-area .ant-card {
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.app-content-area .ant-card-head {
+  border-radius: 12px 12px 0 0;
+  border-bottom-color: rgba(15, 23, 42, 0.06);
+}
+
+/* 表格轻微圆角 */
+.app-content-area .ant-table-wrapper .ant-table {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.app-content-area .ant-table-wrapper .ant-table-container table > thead > tr:first-child > *:first-child {
+  border-start-start-radius: 12px;
+}
+
+.app-content-area .ant-table-wrapper .ant-table-container table > thead > tr:first-child > *:last-child {
+  border-start-end-radius: 12px;
+}
+
+/* 页面标题统一 */
+.app-page-title {
+  color: var(--app-text-primary);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-bottom: 24px;
+}
+
+.app-page-desc {
+  color: var(--app-text-secondary);
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+/* 侧栏菜单：与深色背景一致，选中项使用青色强调 */
+.ant-layout-sider .ant-menu-dark {
+  background: transparent !important;
+}
+
+.ant-layout-sider .ant-menu-dark .ant-menu-item-selected {
+  background: var(--app-sidebar-selected) !important;
+  color: var(--app-accent) !important;
+}
+
+.ant-layout-sider .ant-menu-dark .ant-menu-item:hover {
+  background: var(--app-sidebar-hover) !important;
+  color: var(--app-accent-hover) !important;
+}
+
+.ant-layout-sider .ant-menu-dark .ant-menu-item {
+  color: rgba(255, 255, 255, 0.78);
+  border-radius: 8px;
+  margin: 2px 8px;
+  width: calc(100% - 16px);
 }

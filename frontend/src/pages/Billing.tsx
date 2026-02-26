@@ -36,8 +36,9 @@ export default function Billing() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: 24 }}>计费中心</h1>
-      <Row gutter={16} style={{ marginBottom: 24 }}>
+      <h1 className="app-page-title">计费中心</h1>
+      <p className="app-page-desc">用量统计与套餐订阅</p>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col span={8}>
           <Card loading={loading}>
             <Statistic
