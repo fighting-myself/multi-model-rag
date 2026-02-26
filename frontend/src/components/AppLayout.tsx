@@ -8,7 +8,8 @@ import {
   PictureOutlined,
   UserOutlined,
   LogoutOutlined,
-  AuditOutlined
+  AuditOutlined,
+  ApiOutlined
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -55,6 +56,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
     { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
     { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
+    { key: '/mcp-servers', icon: <ApiOutlined />, label: 'MCP 工具' },
   ]
 
   const userMenuItems = [

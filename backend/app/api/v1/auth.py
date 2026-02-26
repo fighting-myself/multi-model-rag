@@ -1,8 +1,8 @@
 """
 认证相关API
 """
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
@@ -38,12 +38,13 @@ async def register(
 
 @router.post("/login", response_model=Token)
 async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_db)
+    username: str = Form(..., description="用户名"),
+    password: str = Form(..., description="密码"),
+    db: AsyncSession = Depends(get_db),
 ):
-    """用户登录"""
+    """用户登录（使用 Form 避免 FastAPI 0.104 + Pydantic v2 下 OAuth2PasswordRequestForm 的 field_info.in_ 兼容问题）"""
     auth_service = AuthService(db)
-    user = await auth_service.authenticate_user(form_data.username, form_data.password)
+    user = await auth_service.authenticate_user(username, password)
     
     if not user:
         raise HTTPException(

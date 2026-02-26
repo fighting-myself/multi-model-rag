@@ -10,6 +10,7 @@ import Billing from './pages/Billing'
 import Profile from './pages/Profile'
 import ImageSearch from './pages/ImageSearch'
 import AuditLog from './pages/AuditLog'
+import McpServers from './pages/McpServers'
 import AppLayout from './components/AppLayout'
 import { useAuthStore } from './stores/authStore'
 
@@ -37,6 +38,7 @@ function App() {
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/image-search" element={<ImageSearch />} />
                   <Route path="/audit-log" element={<AuditLog />} />
+                  <Route path="/mcp-servers" element={<McpServers />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </AppLayout>

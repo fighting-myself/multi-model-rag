@@ -233,3 +233,25 @@ export interface AuditLogListResponse {
   page: number
   page_size: number
 }
+
+/** MCP 服务 */
+export interface McpServerItem {
+  id: number
+  name: string
+  transport_type: 'stdio' | 'streamable_http' | 'sse'
+  config: Record<string, unknown>
+  enabled: boolean
+}
+
+/** MCP 工具项 */
+export interface McpToolItem {
+  name: string
+  description: string
+  inputSchema: Record<string, unknown>
+}
+
+export interface McpToolsListResponse {
+  server_id: number
+  server_name: string
+  tools: McpToolItem[]
+}

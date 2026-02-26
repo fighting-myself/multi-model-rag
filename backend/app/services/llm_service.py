@@ -1,7 +1,7 @@
 """
 LLM 服务：调用 OpenAI 兼容接口生成回答
 """
-from typing import AsyncGenerator, List
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 from openai import AsyncOpenAI
 from app.core.config import settings
 
@@ -93,6 +93,51 @@ async def chat_completion(
         max_tokens=2048,
     )
     return (resp.choices[0].message.content or "").strip()
+
+
+async def chat_completion_with_tools(
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    max_tokens: int = 2048,
+) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    """
+    支持 tool_calls 的对话：传入消息列表与可选 tools，返回 (content, tool_calls)。
+    若模型返回 tool_calls，content 可能为空，调用方执行工具后把结果 append 到 messages 再调用本函数直至返回 content。
+    messages: 标准 OpenAI 格式，可含 role=tool 及 assistant 的 tool_calls。
+    tools: OpenAI 格式 [ {"type": "function", "function": {"name", "description", "parameters"}} ]
+    返回: (assistant 文本内容 或 None, tool_calls 列表 [{ "id", "name", "arguments" }])
+    """
+    client = _client()
+    kwargs = {
+        "model": settings.LLM_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+    resp = await client.chat.completions.create(**kwargs)
+    msg = resp.choices[0].message if resp.choices else None
+    if not msg:
+        return ("", [])
+    content = (msg.content or "").strip() or None
+    tool_calls = []
+    if getattr(msg, "tool_calls", None):
+        for tc in msg.tool_calls:
+            fn = getattr(tc, "function", None)
+            if fn:
+                import json as _json
+                args_str = getattr(fn, "arguments", None) or "{}"
+                try:
+                    args = _json.loads(args_str)
+                except Exception:
+                    args = {}
+                tool_calls.append({
+                    "id": getattr(tc, "id", ""),
+                    "name": getattr(fn, "name", ""),
+                    "arguments": args,
+                })
+    return (content, tool_calls)
 
 
 async def query_expand(user_question: str, count: int = 2) -> List[str]:

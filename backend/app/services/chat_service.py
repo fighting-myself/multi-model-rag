@@ -11,15 +11,32 @@ from app.models.conversation import Conversation, Message
 from app.models.chunk import Chunk
 from app.models.file import File
 from app.models.knowledge_base import KnowledgeBase
+from app.models.mcp_server import McpServer
 from app.schemas.chat import ChatResponse, ConversationResponse, ConversationListResponse, SourceItem
 from app.services.embedding_service import get_embedding
-from app.services.llm_service import chat_completion as llm_chat, chat_completion_stream as llm_chat_stream, query_expand
+from app.services.llm_service import (
+    chat_completion as llm_chat,
+    chat_completion_stream as llm_chat_stream,
+    chat_completion_with_tools,
+    query_expand,
+)
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.rerank_service import rerank
 from app.services.bm25_service import bm25_score
 from app.core.config import settings
 from sqlalchemy.orm import selectinload
 from sqlalchemy import or_
+
+try:
+    from app.services.mcp_client_service import (
+        MCP_AVAILABLE,
+        gather_openai_tools_and_call_map,
+        call_tool_on_server,
+    )
+except ImportError:
+    MCP_AVAILABLE = False
+    gather_openai_tools_and_call_map = None
+    call_tool_on_server = None
 
 
 class ChatService:
@@ -599,12 +616,76 @@ class ChatService:
         if history_context:
             full_context += f"【对话历史】\n{history_context}\n\n"
 
+        assistant_content = ""
         try:
-            assistant_content = await llm_chat(
-                user_content=message,
-                context=full_context.strip(),
-            )
+            # 若启用了 MCP 且存在已启用服务，则聚合工具并在需要时走工具调用循环
+            openai_tools = []
+            call_map = {}
+            if MCP_AVAILABLE and gather_openai_tools_and_call_map and call_tool_on_server:
+                mcp_result = await self.db.execute(
+                    select(McpServer.id, McpServer.name, McpServer.transport_type, McpServer.config).where(
+                        McpServer.enabled == True
+                    )
+                )
+                servers = mcp_result.all()
+                if servers:
+                    openai_tools, call_map = await gather_openai_tools_and_call_map(servers)
+
+            if openai_tools and call_map:
+                # 带工具的对话：系统提示 + 用户消息，循环处理 tool_calls
+                system_content = (
+                    "你是一个有帮助的AI助手。请根据以下信息回答用户问题；若需要调用外部工具（如查数据、计算等），请使用提供的工具。"
+                    + ("\n\n" + full_context.strip() if full_context.strip() else "")
+                )
+                messages = [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": message},
+                ]
+                max_tool_rounds = 5
+                for _ in range(max_tool_rounds):
+                    content, tool_calls = await chat_completion_with_tools(messages, tools=openai_tools)
+                    if content:
+                        assistant_content = content
+                        break
+                    if not tool_calls:
+                        assistant_content = "抱歉，未能生成有效回答。"
+                        break
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {"id": tc.get("id") or "", "type": "function", "function": {"name": tc.get("name") or "", "arguments": _json.dumps(tc.get("arguments") or {})}}
+                            for tc in tool_calls
+                        ],
+                    }
+                    messages.append(assistant_msg)
+                    for tc in tool_calls:
+                        name = tc.get("name") or ""
+                        args = tc.get("arguments") or {}
+                        tid = tc.get("id") or ""
+                        if name not in call_map:
+                            tool_result = f"[错误] 未知工具: {name}"
+                        else:
+                            transport_type, config_json, mcp_tool_name = call_map[name]
+                            try:
+                                tool_result = await call_tool_on_server(
+                                    transport_type, config_json, mcp_tool_name, args
+                                )
+                            except Exception as e:
+                                import logging
+                                logging.warning("MCP 工具调用失败 %s: %s", name, e)
+                                tool_result = f"[工具执行错误] {str(e)}"
+                        messages.append({"role": "tool", "tool_call_id": tid, "content": tool_result})
+                if not assistant_content:
+                    assistant_content = "抱歉，工具调用后未能生成最终回答，请稍后重试。"
+            else:
+                assistant_content = await llm_chat(
+                    user_content=message,
+                    context=full_context.strip(),
+                )
         except Exception:
+            import logging
+            logging.exception("聊天/工具调用异常")
             assistant_content = "抱歉，当前无法生成回答，请检查模型配置或网络。"
         
         # 判断是否有真实的检索结果

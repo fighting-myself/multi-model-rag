@@ -10,6 +10,7 @@ from app.models.subscription import Subscription
 from app.models.order import Order
 from app.models.invoice import Invoice
 from app.models.audit_log import AuditLog
+from app.models.mcp_server import McpServer
 
 __all__ = [
     "User",
@@ -25,4 +26,5 @@ __all__ = [
     "Order",
     "Invoice",
     "AuditLog",
+    "McpServer",
 ]
