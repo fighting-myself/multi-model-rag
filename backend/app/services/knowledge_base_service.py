@@ -6,7 +6,7 @@ import io
 import logging
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, or_
 from sqlalchemy.exc import OperationalError
 
 from app.models.knowledge_base import KnowledgeBase, KnowledgeBaseFile
@@ -25,7 +25,17 @@ from app.services.file_service import FileService
 from app.services.embedding_service import get_embeddings, get_embedding, get_embedding_for_image
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.ocr_service import extract_text_from_image
+from app.services.rerank_service import rerank
+from app.services.llm_service import expand_image_search_terms
 from app.core.config import settings
+
+# RRF 常数，与 chat_service 一致
+RRF_K = 60
+
+
+def _rrf_score(rank: int, k: int = RRF_K) -> float:
+    """Reciprocal Rank Fusion 分数，rank 从 1 开始。"""
+    return 1.0 / (k + rank)
 
 
 class KnowledgeBaseService:
@@ -1237,6 +1247,61 @@ class KnowledgeBaseService:
             raise last_error
         return None
 
+    def _tokenize_for_keywords(self, text: str, min_len: int = 1, max_len: int = 8) -> List[str]:
+        """把句子切分为可用于 LIKE 的关键词（按标点/空格），过滤长度。"""
+        import re
+        if not (text and text.strip()):
+            return []
+        parts = [w.strip() for w in re.split(r"[，。！？\s、]+", text) if w.strip()]
+        return [p for p in parts if min_len <= len(p) <= max_len]
+
+    async def _full_text_search_images(
+        self,
+        query: str,
+        user_id: int,
+        knowledge_base_id: Optional[int] = None,
+        top_k: int = 50,
+        extra_keywords: Optional[List[str]] = None,
+    ) -> List[tuple]:
+        """全文检索仅限图片：Chunk.content 匹配查询词（含扩展同义/相关词），且 File 为 jpeg/jpg/png。
+        返回 List[(Chunk, File, rank)]，rank 从 1 开始。
+        """
+        import re
+        q = (query or "").strip()
+        if not q:
+            return []
+        keywords = self._tokenize_for_keywords(q)
+        if extra_keywords:
+            keywords = list(dict.fromkeys(keywords + [w for w in extra_keywords if w and 1 <= len(w) <= 8]))
+        if not keywords:
+            keywords = [q]
+        conditions = [Chunk.content.like(f"%{kw}%") for kw in keywords[:15]]
+        stmt = (
+            select(Chunk, File)
+            .join(File, Chunk.file_id == File.id)
+            .where(
+                or_(*conditions),
+                Chunk.content != "",
+                File.file_type.in_(("jpeg", "jpg", "png")),
+                File.user_id == user_id,
+            )
+            .limit(top_k * 3)
+        )
+        if knowledge_base_id is not None:
+            stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        if not rows:
+            return []
+        # 按关键词命中数排序后赋 rank
+        chunk_scores = []
+        for chunk, file in rows:
+            score = sum(1 for kw in keywords if kw in (chunk.content or ""))
+            if score > 0:
+                chunk_scores.append((chunk, file, score))
+        chunk_scores.sort(key=lambda x: x[2], reverse=True)
+        return [(c, f, idx + 1) for idx, (c, f, _) in enumerate(chunk_scores[:top_k])]
+
     async def search_images_by_text(
         self,
         query: str,
@@ -1244,22 +1309,27 @@ class KnowledgeBaseService:
         knowledge_base_id: Optional[int] = None,
         top_k: int = 20,
     ) -> List[Dict[str, Any]]:
-        """以文搜图：根据文本在知识库中检索匹配的图片文件。
-        
-        使用查询文本的向量在向量库中检索，再过滤出 file_type 为 jpeg/jpg/png 的文件，
-        按相似度排序后去重（同一文件只返回一次），返回文件信息及片段。
-        """
+        """以文搜图：向量检索 + 全文检索 → RRF 混排 → Rerank → 返回图片文件列表。"""
         if not (query and query.strip()):
             return []
+        q = query.strip()
+        k = RRF_K
+        file_rrf: Dict[int, float] = {}
+        file_info: Dict[int, tuple] = {}  # file_id -> (File, Chunk, snippet)
+
+        # 1) 向量检索（提高召回量，避免相关图排太靠后被截断）
         try:
-            query_vec = await get_embedding(query.strip())
+            query_vec = await get_embedding(q)
             vs = get_vector_client()
             filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
-            hits = vs.search(query_vector=query_vec, top_k=min(80, top_k * 4), filter_expr=filter_expr) or []
+            hits = vs.search(
+                query_vector=query_vec,
+                top_k=min(500, top_k * 25),
+                filter_expr=filter_expr,
+            ) or []
         except Exception as e:
             logging.warning(f"以文搜图向量检索失败: {e}")
-            return []
-
+            hits = []
         vector_ids = []
         for h in hits if isinstance(hits, list) else []:
             if not isinstance(h, dict):
@@ -1267,41 +1337,82 @@ class KnowledgeBaseService:
             vid = h.get("id") or (h.get("entity") or {}).get("id") if isinstance(h.get("entity"), dict) else None
             if vid is not None:
                 vector_ids.append(str(vid))
-        if not vector_ids:
+        if vector_ids:
+            vid_to_rank = {vid: i + 1 for i, vid in enumerate(vector_ids)}
+            stmt = (
+                select(Chunk, File)
+                .join(File, Chunk.file_id == File.id)
+                .where(
+                    Chunk.vector_id.in_(vector_ids),
+                    File.file_type.in_(("jpeg", "jpg", "png")),
+                    File.user_id == user_id,
+                )
+            )
+            if knowledge_base_id is not None:
+                stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+            result = await self.db.execute(stmt)
+            for chunk, file in result.all():
+                rank = vid_to_rank.get(str(chunk.vector_id or ""), 9999)
+                file_rrf[file.id] = file_rrf.get(file.id, 0.0) + _rrf_score(rank, k)
+                if file.id not in file_info:
+                    file_info[file.id] = (file, chunk, (chunk.content or "")[:300])
+
+        # 2) 全文检索（仅图片），用 LLM 扩展同义/相关词以提高召回（狗→哈士奇/犬，森林→树林，太阳→阳光）
+        extra_keywords: List[str] = []
+        if getattr(settings, "RAG_IMAGE_SEARCH_EXPAND_TERMS", True):
+            try:
+                extra_keywords = await expand_image_search_terms(q, max_terms=6)
+            except Exception as e:
+                logging.debug("以文搜图 expand_image_search_terms 跳过: %s", e)
+        try:
+            ft_tuples = await self._full_text_search_images(
+                q, user_id, knowledge_base_id, top_k=top_k * 2, extra_keywords=extra_keywords or None,
+            )
+            for chunk, file, rank in ft_tuples:
+                file_rrf[file.id] = file_rrf.get(file.id, 0.0) + _rrf_score(rank, k)
+                if file.id not in file_info:
+                    file_info[file.id] = (file, chunk, (chunk.content or "")[:300])
+        except Exception as e:
+            logging.warning(f"以文搜图全文检索失败: {e}")
+
+        if not file_rrf:
             return []
 
-        # Chunk join File，只保留图片类型且属于当前用户的文件
-        stmt = (
-            select(Chunk, File)
-            .join(File, Chunk.file_id == File.id)
-            .where(
-                Chunk.vector_id.in_(vector_ids),
-                File.file_type.in_(("jpeg", "jpg", "png")),
-                File.user_id == user_id,
-            )
-        )
-        if knowledge_base_id is not None:
-            stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
-        result = await self.db.execute(stmt)
-        rows = result.all()
-        # 按向量检索顺序排序，同一 file_id 只保留第一次出现（最佳匹配）
-        seen_file_ids = set()
-        ordered_files: List[Dict[str, Any]] = []
-        vid_order = {vid: i for i, vid in enumerate(vector_ids)}
-        for chunk, file in rows:
-            if file.id in seen_file_ids:
+        # 3) 按 RRF 总分排序，取前 top_k*2 作为 rerank 候选
+        sorted_file_ids = sorted(
+            file_rrf.keys(),
+            key=lambda fid: file_rrf[fid],
+            reverse=True,
+        )[: min(top_k * 2, len(file_rrf))]
+        candidates = []
+        for fid in sorted_file_ids:
+            if fid not in file_info:
                 continue
-            seen_file_ids.add(file.id)
-            rank = vid_order.get(chunk.vector_id, 9999)
-            ordered_files.append({
-                "rank": rank,
+            file, chunk, snippet = file_info[fid]
+            candidates.append((file, chunk, snippet, file_rrf[fid]))
+
+        # 4) Rerank
+        documents = [snippet for (_, _, snippet, _) in candidates]
+        try:
+            reranked = await rerank(query=q, documents=documents, top_n=min(top_k, len(documents)))
+        except Exception as e:
+            logging.warning(f"以文搜图 rerank 失败: {e}")
+            reranked = [{"index": i, "relevance_score": 0.5} for i in range(min(top_k, len(candidates)))]
+
+        out: List[Dict[str, Any]] = []
+        for item in reranked:
+            idx = item.get("index", 0)
+            if idx < 0 or idx >= len(candidates):
+                continue
+            file, chunk, snippet, _ = candidates[idx]
+            out.append({
                 "file_id": file.id,
                 "original_filename": file.original_filename or file.filename,
                 "file_type": file.file_type,
-                "snippet": (chunk.content or "")[:200],
+                "snippet": snippet,
+                "score": item.get("relevance_score"),
             })
-        ordered_files.sort(key=lambda x: x["rank"])
-        return ordered_files[:top_k]
+        return out
 
     async def search_unified(
         self,

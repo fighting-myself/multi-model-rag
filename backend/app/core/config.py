@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     RAG_QUERY_EXPAND: bool = True  # 多查询/查询改写
     RAG_QUERY_EXPAND_COUNT: int = 2  # 改写子问题数量（不含原问）
     RAG_CONTEXT_WINDOW_EXPAND: int = 1  # 检索后向左右各扩展 N 个相邻块（0=不扩展）
+    RAG_IMAGE_SEARCH_EXPAND_TERMS: bool = True  # 以文搜图时用 LLM 扩展同义/相关词（狗→哈士奇/犬等）提高全文召回
 
     # 文本分块配置（全局默认）
     CHUNK_SIZE: int = 500  # 目标块大小（字符数）

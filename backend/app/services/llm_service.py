@@ -117,3 +117,30 @@ async def query_expand(user_question: str, count: int = 2) -> List[str]:
         return lines[:count]
     except Exception:
         return []
+
+
+async def expand_image_search_terms(query: str, max_terms: int = 6) -> List[str]:
+    """以文搜图专用：根据用户输入的一个或几个词，扩展出同义/相关、常出现在图片描述中的中文词。
+    例如：狗→哈士奇/犬；森林→树林；太阳→阳光。用于全文匹配提高召回。"""
+    import re
+    q = (query or "").strip()
+    if not q or max_terms <= 0:
+        return []
+    client = _client()
+    prompt = f"""用户在以文搜图时输入的词：{q}
+请直接输出 3～{max_terms} 个同义或相关、常出现在图片描述中的中文词（例如：狗→哈士奇 犬；森林→树林；太阳→阳光）。
+只输出词，用空格或逗号分隔，不要编号、不要解释。"""
+    try:
+        resp = await client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": "你只输出用于图片检索的同义/相关词，用空格或逗号分隔，不要其他内容。"},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=80,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        terms = [w.strip() for w in re.split(r"[\s，,、]+", text) if 1 <= len(w.strip()) <= 8]
+        return list(dict.fromkeys(terms))[:max_terms]
+    except Exception:
+        return []
