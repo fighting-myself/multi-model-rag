@@ -1,10 +1,10 @@
 # AI多模态智能问答助手
 
-企业级AI多模态智能问答系统，支持PDF、PPT、TXT、XLSX、DOCX、JPEG等多种文件格式的上传和智能问答。
+企业级AI多模态智能问答系统，支持PDF、PPT、TXT、XLSX、DOCX、HTML、MARKDOWN、ZIP、JPEG等多种文件格式的上传和智能问答。
 
 ## 功能特性
 
-- 📄 多格式文件支持（PDF、PPT、TXT、XLSX、DOCX、JPEG等）
+- 📄 多格式文件支持（PDF、PPT、TXT、XLSX、DOCX、HTML、MARKDOWN、ZIP、JPEG等）
 - 🔍 基于RAG的智能问答
 - 🖼️ 多模态支持（文本+图片）
 - 👥 用户认证和权限管理
