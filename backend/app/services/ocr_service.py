@@ -68,7 +68,7 @@ async def extract_text_from_image(content: bytes, file_type: str) -> str:
                             "type": "image_url",
                             "image_url": {"url": data_url},
                         },
-                        {"type": "text", "text": '''提取图片中的所有文字。如果没有文字，请描述图片的内容（场景、主体、颜色、风格等），用于检索。'''},
+                        {"type": "text", "text": '''如果图中没有文字，请描述图片的内容（场景、主体、颜色、风格等），用于检索，一定不能返回图中没有文字等信息。提取图片中的所有文字。'''},
                     ],
                 },
             ],
