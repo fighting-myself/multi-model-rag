@@ -27,7 +27,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/', icon: <HomeOutlined />, label: '首页' },
     { key: '/files', icon: <FileOutlined />, label: '文件管理' },
     { key: '/knowledge-bases', icon: <DatabaseOutlined />, label: '知识库' },
-    { key: '/image-search', icon: <PictureOutlined />, label: '以文搜图' },
+    { key: '/image-search', icon: <PictureOutlined />, label: '多模态检索' },
     { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
     { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
   ]

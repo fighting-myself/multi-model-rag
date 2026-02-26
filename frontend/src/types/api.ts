@@ -151,3 +151,31 @@ export interface ChatCompletionResponse {
   max_confidence_context?: string  // 最高置信度对应的单个上下文
   sources?: SourceItem[]  // 引用来源列表
 }
+
+/** 以文搜图 / 图搜图单条结果 */
+export interface ImageSearchItem {
+  file_id: number
+  original_filename: string
+  file_type: string
+  snippet?: string
+  score?: number
+}
+
+export interface ImageSearchResponse {
+  files: ImageSearchItem[]
+}
+
+/** 统一检索单条结果（文档+图片混合） */
+export interface UnifiedSearchItem {
+  chunk_id: number
+  file_id: number
+  original_filename: string
+  file_type: string
+  snippet: string
+  score: number
+  is_image: boolean
+}
+
+export interface UnifiedSearchResponse {
+  items: UnifiedSearchItem[]
+}

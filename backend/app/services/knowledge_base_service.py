@@ -21,7 +21,7 @@ from app.schemas.knowledge_base import (
     ChunkListResponse,
 )
 from app.services.file_service import FileService
-from app.services.embedding_service import get_embeddings, get_embedding
+from app.services.embedding_service import get_embeddings, get_embedding, get_embedding_for_image
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.ocr_service import extract_text_from_image
 from app.core.config import settings
@@ -636,30 +636,68 @@ class KnowledgeBaseService:
                     metadatas = []
                     for c, emb in zip(chunks, embeddings):
                         c.vector_id = chunk_id_to_vector_id(c.id)
-                        # 将文档块原文保存到 metadata 中
-                        metadatas.append({
+                        meta = {
                             "chunk_id": c.id,
-                            "content": c.content[:1000],  # 限制长度，避免 metadata 过大
+                            "content": c.content[:1000],
                             "file_id": c.file_id,
                             "knowledge_base_id": c.knowledge_base_id,
                             "chunk_index": c.chunk_index,
-                        })
+                            "embedding_source": "text",
+                        }
+                        metadatas.append(meta)
                     
-                    # 插入向量到向量库（同步网络 I/O 放线程池，避免阻塞事件循环）
                     ids_list = [str(c.id) for c in chunks]
                     await asyncio.get_event_loop().run_in_executor(
                         None,
                         lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
                     )
                     logging.info(f"成功插入 {len(chunks)} 个向量到向量库（包含原文）")
+
+                    # 图片文件：额外写入图像向量，支持图搜图、以文搜图统一空间
+                    if ft in ("jpeg", "jpg", "png"):
+                        try:
+                            img_chunk = Chunk(
+                                file_id=file_id,
+                                knowledge_base_id=kb_id,
+                                content=(text[:2000] if text else "[图片]"),
+                                chunk_index=len(chunks),
+                                chunk_metadata={"embedding_source": "image"},
+                            )
+                            self.db.add(img_chunk)
+                            await self.db.flush()
+                            added_chunks.append(img_chunk)
+                            img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
+                            img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
+                            img_meta = {
+                                "chunk_id": img_chunk.id,
+                                "content": (text[:500] if text else "[图片]"),
+                                "file_id": file_id,
+                                "knowledge_base_id": kb_id,
+                                "chunk_index": img_chunk.chunk_index,
+                                "embedding_source": "image",
+                            }
+                            await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: vector_store.insert(
+                                    ids=[str(img_chunk.id)],
+                                    vectors=[img_vec],
+                                    metadatas=[img_meta],
+                                ),
+                            )
+                        except Exception as img_e:
+                            logging.warning(f"文件 {file_id} 图像向量写入失败（已保留文本块）: {img_e}")
                     
                 except Exception as e:
                     logging.error(f"文件 {file_id} 向量化失败: {e}")
                     raise ValueError(f"文件 {file_id} 向量化失败: {e}")
 
-                # 更新文件统计（仅在成功后才更新）
                 old_chunk_count = file.chunk_count or 0
                 file.chunk_count = old_chunk_count + len(chunks)
+                if ft in ("jpeg", "jpg", "png") and any(
+                    getattr(c, "chunk_metadata") and (c.chunk_metadata or {}).get("embedding_source") == "image"
+                    for c in added_chunks if c.file_id == file_id
+                ):
+                    file.chunk_count += 1
                 updated_files.append((file, old_chunk_count))
 
             # 更新知识库统计
@@ -818,12 +856,47 @@ class KnowledgeBaseService:
                             "file_id": c.file_id,
                             "knowledge_base_id": c.knowledge_base_id,
                             "chunk_index": c.chunk_index,
+                            "embedding_source": "text",
                         })
                     ids_list = [str(c.id) for c in chunks]
                     await asyncio.get_event_loop().run_in_executor(
                         None,
                         lambda: vector_store.insert(ids=ids_list, vectors=embeddings, metadatas=metadatas),
                     )
+                    extra_image_chunks = 0
+                    if ft in ("jpeg", "jpg", "png"):
+                        try:
+                            img_chunk = Chunk(
+                                file_id=file_id,
+                                knowledge_base_id=kb_id,
+                                content=(text[:2000] if text else "[图片]"),
+                                chunk_index=len(chunks),
+                                chunk_metadata={"embedding_source": "image"},
+                            )
+                            self.db.add(img_chunk)
+                            await self.db.flush()
+                            added_chunks.append(img_chunk)
+                            img_vec = await get_embedding_for_image(content, ft.replace("jpg", "jpeg"))
+                            img_chunk.vector_id = chunk_id_to_vector_id(img_chunk.id)
+                            img_meta = {
+                                "chunk_id": img_chunk.id,
+                                "content": (text[:500] if text else "[图片]"),
+                                "file_id": file_id,
+                                "knowledge_base_id": kb_id,
+                                "chunk_index": img_chunk.chunk_index,
+                                "embedding_source": "image",
+                            }
+                            await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: vector_store.insert(
+                                    ids=[str(img_chunk.id)],
+                                    vectors=[img_vec],
+                                    metadatas=[img_meta],
+                                ),
+                            )
+                            extra_image_chunks = 1
+                        except Exception as img_e:
+                            logging.warning(f"文件 {file_id} 图像向量写入失败: {img_e}")
                 except Exception as e:
                     logging.error(f"文件 {file_id} 向量化失败: {e}")
                     await self.db.delete(kb_file)
@@ -833,9 +906,9 @@ class KnowledgeBaseService:
                     continue
 
                 old_chunk_count = file.chunk_count or 0
-                file.chunk_count = old_chunk_count + len(chunks)
+                file.chunk_count = old_chunk_count + len(chunks) + extra_image_chunks
                 updated_files.append((file, old_chunk_count))
-                yield {"type": "file_done", "file_id": file_id, "filename": filename, "chunk_count": len(chunks)}
+                yield {"type": "file_done", "file_id": file_id, "filename": filename, "chunk_count": len(chunks) + extra_image_chunks}
 
             for file, old_count in updated_files:
                 kb.chunk_count = (kb.chunk_count or 0) + (file.chunk_count - old_count)
@@ -1058,3 +1131,158 @@ class KnowledgeBaseService:
             })
         ordered_files.sort(key=lambda x: x["rank"])
         return ordered_files[:top_k]
+
+    async def search_unified(
+        self,
+        query: Optional[str] = None,
+        image_bytes: Optional[bytes] = None,
+        user_id: int = None,
+        knowledge_base_id: Optional[int] = None,
+        top_k: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """多模态检索统一：以文或以图一次查询，同时返回文档与图片（同一向量空间）。
+        若提供 image_bytes 则用图向量，否则用 query 文本向量。
+        """
+        if image_bytes:
+            query_vec = await get_embedding_for_image(
+                image_bytes,
+                image_format="jpeg",
+            )
+        elif query and query.strip():
+            query_vec = await get_embedding(query.strip())
+        else:
+            return []
+        vs = get_vector_client()
+        filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+        hits = vs.search(query_vector=query_vec, top_k=min(80, top_k * 2), filter_expr=filter_expr) or []
+        vector_ids = []
+        id_to_score = {}
+        for rank, h in enumerate(hits if isinstance(hits, list) else []):
+            if not isinstance(h, dict):
+                continue
+            vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id")
+            if vid is None:
+                continue
+            vid_str = str(vid)
+            vector_ids.append(vid_str)
+            dist = h.get("distance")
+            if dist is not None:
+                id_to_score[vid_str] = float(dist)
+            else:
+                id_to_score[vid_str] = 1.0 - (rank / max(len(hits), 1))
+        if not vector_ids:
+            return []
+        stmt = (
+            select(Chunk, File)
+            .join(File, Chunk.file_id == File.id)
+            .where(
+                Chunk.vector_id.in_(vector_ids),
+                File.user_id == user_id,
+            )
+        )
+        if knowledge_base_id is not None:
+            stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        vid_to_rank = {vid: i for i, vid in enumerate(vector_ids)}
+        items = []
+        for chunk, file in rows:
+            rank = vid_to_rank.get(str(chunk.vector_id), 9999)
+            score = id_to_score.get(str(chunk.vector_id), 1.0 - rank / 100)
+            items.append({
+                "chunk_id": chunk.id,
+                "file_id": file.id,
+                "original_filename": file.original_filename or file.filename,
+                "file_type": file.file_type or "",
+                "snippet": (chunk.content or "")[:300],
+                "score": score,
+                "is_image": (file.file_type or "").lower() in ("jpeg", "jpg", "png"),
+                "_rank": rank,
+            })
+        items.sort(key=lambda x: x["_rank"])
+        for x in items:
+            del x["_rank"]
+        return items[:top_k]
+
+    async def search_images_by_image(
+        self,
+        image_bytes: bytes,
+        user_id: int,
+        knowledge_base_id: Optional[int] = None,
+        top_k: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """图搜图：上传一张图，用多模态模型得到向量，在知识库中检索相似图片。
+        返回所有命中向量且属于图片文件（file_type 为 jpeg/jpg/png）的记录；
+        优先保留 embedding_source=image 的块（同一文件只取最佳排名的一条），
+        这样既有图像向量的新图能高排，仅有 OCR 文本向量的旧图也有机会被搜到。
+        """
+        if not image_bytes or len(image_bytes) == 0:
+            return []
+        try:
+            query_vec = await get_embedding_for_image(image_bytes, "jpeg")
+        except Exception as e:
+            logging.warning(f"图搜图获取图片向量失败: {e}")
+            return []
+        vs = get_vector_client()
+        filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+        hits = vs.search(query_vector=query_vec, top_k=min(100, top_k * 4), filter_expr=filter_expr) or []
+        vector_ids = []
+        id_to_score = {}
+        for rank, h in enumerate(hits if isinstance(hits, list) else []):
+            if not isinstance(h, dict):
+                continue
+            vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id")
+            if vid is None:
+                continue
+            vid_str = str(vid)
+            vector_ids.append(vid_str)
+            dist = h.get("distance")
+            id_to_score[vid_str] = float(dist) if dist is not None else (1.0 - rank / 100)
+        if not vector_ids:
+            return []
+        stmt = (
+            select(Chunk, File)
+            .join(File, Chunk.file_id == File.id)
+            .where(
+                Chunk.vector_id.in_(vector_ids),
+                File.user_id == user_id,
+                File.file_type.in_(("jpeg", "jpg", "png")),
+            )
+        )
+        if knowledge_base_id is not None:
+            stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        vid_order = {vid: i for i, vid in enumerate(vector_ids)}
+        best_for_file: Dict[int, Dict[str, Any]] = {}
+        for chunk, file in rows:
+            rank = vid_order.get(str(chunk.vector_id), 9999)
+            score = id_to_score.get(str(chunk.vector_id), 0.0)
+            is_image_chunk = (chunk.chunk_metadata or {}).get("embedding_source") == "image"
+            cand = {
+                "file_id": file.id,
+                "original_filename": file.original_filename or file.filename,
+                "file_type": file.file_type,
+                "snippet": (chunk.content or "")[:200],
+                "score": score,
+                "rank": rank,
+                "_is_image_chunk": is_image_chunk,
+                "_rank": rank,
+            }
+            existing = best_for_file.get(file.id)
+            if existing is None:
+                best_for_file[file.id] = cand
+            else:
+                replace = is_image_chunk and not existing.get("_is_image_chunk")
+                if not replace and is_image_chunk == existing.get("_is_image_chunk") and rank < existing.get("_rank", 9999):
+                    replace = True
+                if replace:
+                    best_for_file[file.id] = cand
+        ordered = sorted(
+            best_for_file.values(),
+            key=lambda x: (not x.get("_is_image_chunk"), x.get("_rank", 9999)),
+        )
+        return [
+            {"file_id": x["file_id"], "original_filename": x["original_filename"], "file_type": x["file_type"], "snippet": x.get("snippet"), "score": x["score"]}
+            for x in ordered[:top_k]
+        ]

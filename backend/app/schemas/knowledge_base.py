@@ -102,13 +102,30 @@ class KnowledgeBaseListResponse(BaseModel):
 
 
 class ImageSearchItem(BaseModel):
-    """以文搜图单条结果"""
+    """以文搜图/图搜图单条结果"""
     file_id: int
     original_filename: str
     file_type: str
     snippet: Optional[str] = None
+    score: Optional[float] = None
 
 
 class ImageSearchResponse(BaseModel):
-    """以文搜图响应"""
+    """以文搜图/图搜图响应"""
     files: List[ImageSearchItem]
+
+
+class UnifiedSearchItem(BaseModel):
+    """统一检索单条结果（文档+图片混合）"""
+    chunk_id: int
+    file_id: int
+    original_filename: str
+    file_type: str
+    snippet: str
+    score: float
+    is_image: bool
+
+
+class UnifiedSearchResponse(BaseModel):
+    """统一检索响应（以文或以图一次查询文档与图片）"""
+    items: List[UnifiedSearchItem]
