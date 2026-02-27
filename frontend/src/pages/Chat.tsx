@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal } from 'antd'
+import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
 import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import api, { streamPost } from '../services/api'
@@ -64,6 +64,8 @@ export default function Chat() {
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [sourcePreview, setSourcePreview] = useState<SourceItem | null>(null)
+  const [enableTools, setEnableTools] = useState(true)
+  const [enableRag, setEnableRag] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const justSentMessageRef = useRef(false)
   const navigate = useNavigate()
@@ -195,6 +197,8 @@ export default function Chat() {
         content: messageContent,
         knowledge_base_id: selectedKbId ?? null,
         conversation_id: currentConvId ?? null,
+        enable_tools: enableTools,
+        enable_rag: enableRag,
       })
       const decoder = new TextDecoder()
       let buffer = ''
@@ -312,6 +316,16 @@ export default function Chat() {
               ...knowledgeBases.map((kb: KnowledgeBaseListResponse['knowledge_bases'][0]) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count || 0} 块）` })),
             ]}
           />
+          <Space split="|" style={{ color: 'var(--app-text-muted)', fontSize: 13 }}>
+            <Space size={6}>
+              <span>工具调用</span>
+              <Switch size="small" checked={enableTools} onChange={setEnableTools} />
+            </Space>
+            <Space size={6}>
+              <span>RAG 增强</span>
+              <Switch size="small" checked={enableRag} onChange={setEnableRag} />
+            </Space>
+          </Space>
         </Space>
       </div>
       <Card 
@@ -354,12 +368,11 @@ export default function Chat() {
                         {item.confidence !== undefined && item.confidence !== null && (
                           <span style={{ 
                             fontSize: 12, 
-                            color: item.confidence < 0.6 ? '#ff4d4f' : '#52c41a',
                             backgroundColor: item.confidence < 0.6 ? 'var(--app-error-bg)' : 'var(--app-success-bg)',
                             padding: '2px 8px',
                             borderRadius: 4,
                             border: item.confidence < 0.6 ? '1px solid rgba(255,77,79,0.4)' : '1px solid rgba(82,196,26,0.4)',
-                            color: 'var(--app-text-primary)'
+                            color: 'var(--app-text-primary)',
                           }}>
                             置信度: {(item.confidence * 100).toFixed(1)}% {item.confidence < 0.6 ? '(低)' : ''}
                           </span>

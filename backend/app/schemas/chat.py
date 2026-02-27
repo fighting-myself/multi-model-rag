@@ -12,6 +12,8 @@ class ChatMessage(BaseModel):
     content: str
     knowledge_base_id: Optional[int] = None
     conversation_id: Optional[int] = None
+    enable_tools: Optional[bool] = None   # True=开启工具调用，False=关闭，None=默认 True
+    enable_rag: Optional[bool] = None    # True=开启 RAG 增强上下文，False=关闭，None=默认 True
 
 
 class SourceItem(BaseModel):

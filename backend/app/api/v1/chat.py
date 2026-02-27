@@ -33,12 +33,16 @@ async def chat_completion(
     import logging
     chat_service = ChatService(db)
     try:
+        enable_tools = message.enable_tools if message.enable_tools is not None else True
+        enable_rag = message.enable_rag if message.enable_rag is not None else True
         response = await chat_service.chat(
             user_id=current_user.id,
             message=message.content,
             conversation_id=conversation_id or message.conversation_id,
             knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
-            stream=stream
+            stream=stream,
+            enable_tools=enable_tools,
+            enable_rag=enable_rag,
         )
         return response
     except Exception as e:
@@ -62,11 +66,15 @@ async def chat_completion_stream(
     async def generate():
         import logging
         try:
+            enable_tools = message.enable_tools if message.enable_tools is not None else True
+            enable_rag = message.enable_rag if message.enable_rag is not None else True
             async for event in chat_service.chat_stream(
                 user_id=current_user.id,
                 message=message.content,
                 conversation_id=conv_id,
-                knowledge_base_id=knowledge_base_id or message.knowledge_base_id
+                knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
+                enable_tools=enable_tools,
+                enable_rag=enable_rag,
             ):
                 if await request.is_disconnected():
                     break

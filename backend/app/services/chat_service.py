@@ -25,6 +25,7 @@ from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.rerank_service import rerank
 from app.services.bm25_service import bm25_score
 from app.core.config import settings
+from app.services import cache_service
 from sqlalchemy.orm import selectinload
 from sqlalchemy import or_
 
@@ -485,7 +486,9 @@ class ChatService:
         message: str,
         conversation_id: Optional[int] = None,
         knowledge_base_id: Optional[int] = None,
-        stream: bool = False
+        stream: bool = False,
+        enable_tools: bool = True,
+        enable_rag: bool = True,
     ) -> ChatResponse:
         """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史"""
         import logging
@@ -518,7 +521,11 @@ class ChatService:
         await self.db.flush()
 
         try:
-            return await self._chat_after_user_message(conv, user_msg, message, knowledge_base_id)
+            return await self._chat_after_user_message(
+                conv, user_msg, message, knowledge_base_id,
+                enable_tools=enable_tools,
+                enable_rag=enable_rag,
+            )
         except Exception:
             logging.exception("聊天处理失败")
             # 在已有对话上写入错误提示，保证返回 200
@@ -599,6 +606,8 @@ class ChatService:
         user_msg: Message,
         message: str,
         knowledge_base_id: Optional[int],
+        enable_tools: bool = True,
+        enable_rag: bool = True,
     ) -> ChatResponse:
         """在已添加用户消息后执行：先判断并调用工具（若有）→ RAG 检索 → 结合工具结果与 RAG 上下文由 LLM 回答。"""
         import logging
@@ -610,11 +619,18 @@ class ChatService:
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
         try:
-            # 1) 先判断工具库是否有能用上的工具，若有则调用并得到工具结果与工具名列表
-            tool_results, tools_used = await self._try_tool_phase(message)
+            # 1) 工具阶段（可由前端关闭）
+            if enable_tools:
+                try:
+                    tool_results, tools_used = await self._try_tool_phase(message)
+                except Exception as e:
+                    logging.warning("工具阶段失败，将不调用工具继续回答: %s", e)
+                    tool_results, tools_used = "", []
+            else:
+                tool_results, tools_used = "", []
 
-            # 2) RAG 上下文（知识库检索）
-            if knowledge_base_id:
+            # 2) RAG 上下文（知识库检索，可由前端关闭）
+            if enable_rag and knowledge_base_id:
                 kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
                 kb = kb_result.scalar_one_or_none()
                 use_rerank = getattr(kb, "enable_rerank", True) if kb else True
@@ -641,7 +657,8 @@ class ChatService:
                         pass
                 if not rag_context.strip():
                     rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
-            else:
+            elif enable_rag:
+                # 未选知识库时检索用户全部知识库
                 try:
                     rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_all_kbs(message, conv.user_id, top_k=10)
                 except Exception as e:
@@ -651,6 +668,7 @@ class ChatService:
                 if rag_context and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
                     low_confidence_warning = f"[系统提示：当前内部知识库检索结果的置信度为 {rag_confidence:.2f}，低于阈值 {settings.RAG_CONFIDENCE_THRESHOLD}。请明确告知用户「当前内部知识库置信度比较低，将使用AI自身知识解答问题」，然后结合检索到的上下文（如有）和AI自身知识回答问题。]"
                     rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
+            # enable_rag=False 时 rag_context 保持空
 
             # 对话历史上下文
             history_context = await self._build_chat_history_context(conv.id)
@@ -750,7 +768,9 @@ class ChatService:
         user_id: int,
         message: str,
         conversation_id: Optional[int] = None,
-        knowledge_base_id: Optional[int] = None
+        knowledge_base_id: Optional[int] = None,
+        enable_tools: bool = True,
+        enable_rag: bool = True,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）。"""
         import logging
@@ -778,20 +798,23 @@ class ChatService:
         self.db.add(user_msg)
         await self.db.flush()
 
-        # 1) 先判断工具库是否有能用上的工具，若有则调用并得到工具结果与工具名列表（失败则跳过工具阶段）
-        try:
-            tool_results, tools_used = await self._try_tool_phase(message)
-        except Exception as e:
-            logging.warning("工具阶段失败，将不调用工具继续回答: %s", e)
+        # 1) 工具阶段（可由前端关闭）
+        if enable_tools:
+            try:
+                tool_results, tools_used = await self._try_tool_phase(message)
+            except Exception as e:
+                logging.warning("工具阶段失败，将不调用工具继续回答: %s", e)
+                tool_results, tools_used = "", []
+        else:
             tool_results, tools_used = "", []
 
-        # 2) RAG + 历史上下文（与 _chat_after_user_message 一致）
+        # 2) RAG + 历史上下文（可由前端关闭 RAG）
         rag_context = ""
         rag_confidence = 0.0
         low_confidence_warning = ""
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
-        if knowledge_base_id:
+        if enable_rag and knowledge_base_id:
             kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
             kb = kb_result.scalar_one_or_none()
             use_rerank = getattr(kb, "enable_rerank", True) if kb else True
@@ -816,7 +839,7 @@ class ChatService:
                     pass
             if not rag_context.strip():
                 rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」。]"
-        else:
+        elif enable_rag:
             try:
                 rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_all_kbs(
                     message, conv.user_id, top_k=10
@@ -830,6 +853,7 @@ class ChatService:
                     "请明确告知用户「当前内部知识库置信度比较低，将使用AI自身知识解答问题」，然后结合检索到的上下文（如有）和AI自身知识回答问题。]"
                 )
                 rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
+        # enable_rag=False 时不检索，rag_context 保持空
 
         history_context = await self._build_chat_history_context(conv.id)
         # 与非流式一致：先工具阶段再 RAG，此处工具阶段在 RAG 之前已执行
