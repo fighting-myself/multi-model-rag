@@ -45,6 +45,7 @@
 
 ### AI 与自动化
 
+- **LangChain**：默认使用 LangChain 封装 LLM（`langchain-openai` ChatOpenAI）、RAG 生成链与浏览器助手 Agent（`create_tool_calling_agent` + `AgentExecutor`）。可通过 `USE_LANGCHAIN=False` 回退为原生 OpenAI 调用。
 - **LLM**：OpenAI 兼容接口（如 Qwen、GPT、Claude），支持多轮对话与 function calling
 - **视觉模型**：用于电脑管家截图分析（可配置 `VISION_MODEL`，默认与 `LLM_MODEL` 一致）
 - **Embedding**：文本向量化（如 qwen3-vl-embedding、m3e-base）
@@ -162,6 +163,18 @@ multi-model-rag/
 - [优化方向建议](./docs/11-优化方向建议.md)
 - [anyio4 依赖升级](./docs/12-anyio4-依赖升级.md)
 - [项目完善策略与实施](./docs/13-项目完善策略与实施.md)
+
+## LangChain 改造说明
+
+项目已接入 LangChain，在保持原有 API 与行为的前提下：
+
+- **配置**：`.env` 或环境中设置 `USE_LANGCHAIN=True`（默认）则启用 LangChain；设为 `False` 则使用原生 OpenAI 调用。
+- **LLM**：`app.services.langchain_llm` 提供与 `llm_service` 一致的接口（`chat_completion`、`chat_completion_stream`、`chat_completion_with_tools`、`query_expand`、`expand_image_search_terms`），内部使用 `ChatOpenAI`（base_url + bind_tools）。
+- **RAG**：`app.services.langchain_rag` 提供基于 LangChain 的 RAG 生成链（prompt + LLM），检索逻辑仍由 `ChatService._rag_context` 完成；问答流程通过 `llm_service.chat_completion` 统一走 LangChain（当 `USE_LANGCHAIN=True`）。
+- **浏览器助手**：当 `USE_LANGCHAIN=True` 时，`run_steward` 会调用 `langchain_steward_agent.run_steward_langchain`，使用 `create_tool_calling_agent` + `AgentExecutor` 执行任务；若 LangChain/Agent 依赖缺失则自动回退到原有「消息循环 + tool_calls」实现。
+- **电脑管家**：仍为「截图 → 视觉模型 + tool_calls → 键鼠执行」循环，其中 `chat_completion_with_tools` 在启用 LangChain 时已为 LangChain 实现。
+
+依赖见 `backend/requirements.txt`：`langchain-core`、`langchain-openai`、`langchain`、`langchain-community`。
 
 ## 开发
 

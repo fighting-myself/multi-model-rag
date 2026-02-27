@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 50  # 重叠字符数
     CHUNK_MAX_EXPAND_RATIO: float = 1.3  # 最大扩展比例（允许超出 chunk_size 的最大倍数）
     
+    # LangChain：是否使用 LangChain 封装 LLM/RAG/Agent（True 时走 langchain_llm 与 LangChain 链）
+    USE_LANGCHAIN: bool = True
+
     # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Path = PROJECT_ROOT / "logs" / "app.log"

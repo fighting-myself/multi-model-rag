@@ -192,3 +192,17 @@ async def expand_image_search_terms(query: str, max_terms: int = 6) -> List[str]
         return list(dict.fromkeys(terms))[:max_terms]
     except Exception:
         return []
+
+
+# 当配置 USE_LANGCHAIN=True 时，将上述实现替换为 LangChain 封装（保持接口一致）
+if getattr(settings, "USE_LANGCHAIN", False):
+    try:
+        from app.services import langchain_llm as _lc
+        chat_completion = _lc.chat_completion
+        chat_completion_stream = _lc.chat_completion_stream
+        chat_completion_with_tools = _lc.chat_completion_with_tools
+        query_expand = _lc.query_expand
+        expand_image_search_terms = _lc.expand_image_search_terms
+    except ImportError as e:
+        import logging
+        logging.getLogger(__name__).warning("USE_LANGCHAIN=True 但 langchain 未安装或导入失败，使用原生 OpenAI 实现: %s", e)

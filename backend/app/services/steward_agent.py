@@ -1,10 +1,12 @@
 """
 浏览器助手 Agent：根据用户指令编排 LLM + 工具调用，直至得到最终结果。
+当 USE_LANGCHAIN=True 时使用 LangChain create_tool_calling_agent + AgentExecutor。
 """
 import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.core.config import settings
 from app.services.llm_service import chat_completion_with_tools
 from app.services.skill_loader import get_skills_summary
 from app.services.steward_tools import STEWARD_TOOLS, run_steward_tool, _tool_browser_close, clear_browser_context
@@ -50,6 +52,12 @@ async def run_steward(instruction: str) -> Tuple[bool, str, List[Dict[str, Any]]
     执行浏览器助手任务。
     返回: (success, summary, steps, error_message)
     """
+    if getattr(settings, "USE_LANGCHAIN", False):
+        try:
+            from app.services.langchain_steward_agent import run_steward_langchain
+            return await run_steward_langchain(instruction)
+        except ImportError:
+            pass
     clear_browser_context()
     system_content = _build_system_prompt()
     messages: List[Dict[str, Any]] = [

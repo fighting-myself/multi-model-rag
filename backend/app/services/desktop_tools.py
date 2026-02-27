@@ -11,10 +11,12 @@ from typing import Tuple
 logger = logging.getLogger(__name__)
 
 _AVAILABLE = False
+pyautogui = None  # type: ignore
 try:
     import pyautogui
     _AVAILABLE = True
-except ImportError:
+except Exception:
+    # 无图形环境（如服务器无 DISPLAY）时 pyautogui 或 mouseinfo 会报错（如 KeyError: 'DISPLAY'），视为不可用
     pyautogui = None  # type: ignore
 
 

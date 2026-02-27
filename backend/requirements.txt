@@ -40,6 +40,10 @@ opencv-python==4.8.1.78
 
 # AI模型（openai>=2 支持 anyio 4，与 MCP 兼容；1.x 要求 anyio<4）
 openai==2.0.0
+
+# LangChain（LLM 封装、RAG 链；不装 langchain 元包以免与 langchain-openai 对 core 版本冲突，浏览器助手用原生 tool_calls 循环）
+langchain-core==0.3
+langchain-openai==0.2.0
 sentence-transformers==2.2.2
 transformers==4.35.2
 #torch==2.1.1

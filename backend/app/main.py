@@ -1,6 +1,10 @@
 """
 FastAPI主应用入口
 """
+import warnings
+# 屏蔽 transformers 与 torch 的 pytree 弃用告警（来自第三方库，不影响功能）
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*_register_pytree_node.*")
+
 # ========== 兼容性修复：必须在导入任何使用 pymilvus 的模块之前执行 ==========
 # marshmallow 4.x 移除了 __version_info__，pymilvus 需要它
 try:
