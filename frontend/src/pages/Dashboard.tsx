@@ -23,12 +23,12 @@ export default function Dashboard() {
   }, [])
 
   return (
-    <div>
-      <h1 className="app-page-title">仪表盘</h1>
-      <p className="app-page-desc">概览您的文件、知识库与对话用量</p>
+    <div className="app-perspective">
+      <h1 className="app-page-title app-animate-in">仪表盘</h1>
+      <p className="app-page-desc app-animate-in app-animate-in-delay-1">概览您的文件、知识库与对话用量</p>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={24} md={8}>
-          <Card loading={loading} style={{ borderLeft: '4px solid var(--app-accent)' }}>
+        <Col xs={24} sm={24} md={8} className="app-animate-in app-animate-in-delay-1">
+          <Card loading={loading} className="app-card-3d" style={{ borderLeft: '4px solid var(--app-accent)' }}>
             <Statistic
               title="文件总数"
               value={stats.file_count}
@@ -36,8 +36,8 @@ export default function Dashboard() {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={24} md={8}>
-          <Card loading={loading} style={{ borderLeft: '4px solid #10b981' }}>
+        <Col xs={24} sm={24} md={8} className="app-animate-in app-animate-in-delay-2">
+          <Card loading={loading} className="app-card-3d" style={{ borderLeft: '4px solid #10b981' }}>
             <Statistic
               title="知识库数量"
               value={stats.knowledge_base_count}
@@ -45,8 +45,8 @@ export default function Dashboard() {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={24} md={8}>
-          <Card loading={loading} style={{ borderLeft: '4px solid #8b5cf6' }}>
+        <Col xs={24} sm={24} md={8} className="app-animate-in app-animate-in-delay-3">
+          <Card loading={loading} className="app-card-3d" style={{ borderLeft: '4px solid #8b5cf6' }}>
             <Statistic
               title="对话次数"
               value={stats.conversation_count}
@@ -56,7 +56,7 @@ export default function Dashboard() {
         </Col>
       </Row>
       {usageLimits && (
-        <Card title="当日用量与限流" loading={loading}>
+        <Card title="当日用量与限流" loading={loading} className="app-card-3d app-animate-in app-animate-in-delay-4">
           <Typography.Text type="secondary">
             上传 {usageLimits.upload_today}/{usageLimits.upload_limit_per_day} 次
             · 对话 {usageLimits.conversation_today}/{usageLimits.conversation_limit_per_day} 条

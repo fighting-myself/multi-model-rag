@@ -321,3 +321,124 @@ code {
   margin: 2px 8px;
   width: calc(100% - 16px);
 }
+
+/* ========== 3D 与动效：AI 时代灵气感 ========== */
+/* 透视容器 */
+.app-perspective {
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+
+/* 卡片 3D 悬浮：悬停时微微浮起 + 阴影 + 轻微 Y 轴旋转 */
+.app-card-3d {
+  transform-style: preserve-3d;
+  transform: translateZ(0);
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.35s ease,
+    border-color 0.2s ease;
+}
+.app-card-3d:hover {
+  transform: translateY(-6px) translateZ(12px) rotateY(-1deg);
+  box-shadow: 0 20px 40px -12px rgba(15, 23, 42, 0.18),
+    0 0 0 1px rgba(6, 182, 212, 0.08);
+}
+
+[data-theme="dark"] .app-card-3d:hover {
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(6, 182, 212, 0.2);
+}
+
+/* 入场动画：自下而上淡入 */
+@keyframes app-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px) translateZ(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) translateZ(0);
+  }
+}
+.app-animate-in {
+  animation: app-fade-in-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.app-animate-in-delay-1 { animation-delay: 0.08s; opacity: 0; }
+.app-animate-in-delay-2 { animation-delay: 0.16s; opacity: 0; }
+.app-animate-in-delay-3 { animation-delay: 0.24s; opacity: 0; }
+.app-animate-in-delay-4 { animation-delay: 0.32s; opacity: 0; }
+
+/* 光晕脉冲（用于主按钮、强调元素） */
+@keyframes app-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.35); }
+  50%  { box-shadow: 0 0 20px 4px rgba(6, 182, 212, 0.25); }
+}
+.app-glow-pulse {
+  animation: app-glow-pulse 2.5s ease-in-out infinite;
+}
+
+/* 内容区环境背景：极淡渐变 + 轻微光斑（不抢内容） */
+.app-content-area {
+  position: relative;
+}
+.app-content-area::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 80% 50% at 70% 20%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
+              radial-gradient(ellipse 60% 40% at 20% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 45%);
+  z-index: 0;
+}
+[data-theme="dark"] .app-content-area::before {
+  background: radial-gradient(ellipse 80% 50% at 70% 20%, rgba(6, 182, 212, 0.08) 0%, transparent 50%),
+              radial-gradient(ellipse 60% 40% at 20% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 45%);
+}
+.app-content-area-padding {
+  position: relative;
+  z-index: 1;
+}
+
+/* 主按钮 3D 按压感 + 悬停浮起 */
+.app-btn-3d {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.app-btn-3d:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px -4px rgba(6, 182, 212, 0.4);
+}
+.app-btn-3d:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px -2px rgba(6, 182, 212, 0.3);
+}
+
+/* 小卡片/列表项 3D 悬浮（弱化版，用于来源卡片等） */
+.app-card-3d-subtle {
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background-color 0.2s ease;
+}
+.app-card-3d-subtle:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px -8px rgba(15, 23, 42, 0.15);
+}
+[data-theme="dark"] .app-card-3d-subtle:hover {
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.4);
+}
+
+/* 侧栏菜单项：悬停轻微浮起 */
+.ant-layout-sider .ant-menu-dark .ant-menu-item {
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+.ant-layout-sider .ant-menu-dark .ant-menu-item:hover {
+  transform: translateX(4px);
+}
+.ant-layout-sider .ant-menu-dark .ant-menu-item-selected:hover {
+  transform: translateX(4px);
+}
+
+/* 顶栏按钮：悬停轻微浮起 + 高亮 */
+.ant-layout-header .ant-btn:hover {
+  transform: translateY(-1px);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+.ant-layout-header .ant-btn {
+  transition: transform 0.2s ease, color 0.2s ease;
+}

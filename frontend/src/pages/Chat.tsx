@@ -283,8 +283,8 @@ export default function Chat() {
   if (pageLoading) return <PageSkeleton rows={5} />
 
   return (
-    <div style={{ height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+    <div className="app-perspective" style={{ height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="app-animate-in" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h1 className="app-page-title" style={{ margin: 0, marginRight: 8 }}>智能问答</h1>
         <Space>
           <Button
@@ -315,6 +315,7 @@ export default function Chat() {
         </Space>
       </div>
       <Card 
+        className="app-card-3d app-animate-in app-animate-in-delay-1"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}
       >
@@ -457,13 +458,14 @@ export default function Chat() {
                                         key={`${s.file_id}-${s.chunk_index}-${i}`}
                                         role="button"
                                         tabIndex={0}
+                                        className="app-card-3d-subtle"
                                         onClick={() => setSourcePreview(s)}
                                         onKeyDown={(e) => e.key === 'Enter' && setSourcePreview(s)}
                                         style={{
                                           marginBottom: 8,
                                           padding: 8,
                                           backgroundColor: 'var(--app-bg-muted)',
-                                          borderRadius: 4,
+                                          borderRadius: 8,
                                           borderLeft: '3px solid var(--app-accent)',
                                           cursor: 'pointer',
                                         }}
@@ -515,6 +517,7 @@ export default function Chat() {
               loading={loading}
               size="large"
               disabled={loading}
+              className="app-btn-3d app-glow-pulse"
             >
               发送
             </Button>
