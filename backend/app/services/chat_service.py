@@ -885,7 +885,7 @@ class ChatService:
         page: int = 1,
         page_size: int = None
     ) -> ConversationListResponse:
-        """获取对话列表（限制最多保存数量）"""
+        """获取会话列表（以会话为单位；每条会话内包含多条消息为对话历史）。保留数量以 CHAT_HISTORY_MAX_COUNT 为上限，超出删除最旧会话。"""
         if page_size is None:
             page_size = settings.CHAT_HISTORY_DEFAULT_COUNT
         page_size = min(page_size, settings.CHAT_HISTORY_MAX_COUNT)
@@ -951,7 +951,7 @@ class ChatService:
     async def get_conversation_messages(
         self, conv_id: int, user_id: int, limit: int = 100
     ) -> List[Message]:
-        """获取对话的消息列表"""
+        """获取该会话内的消息列表（会话级别对话历史）"""
         # 先校验对话归属
         conv = await self.get_conversation(conv_id, user_id)
         if not conv:

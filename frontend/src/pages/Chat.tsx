@@ -57,6 +57,7 @@ export default function Chat() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
   const [selectedKbId, setSelectedKbId] = useState<number | undefined>(undefined)
   const [conversations, setConversations] = useState<ConversationItem[]>([])
+  // 当前会话 ID：同窗口内多次发送均为同一会话；仅「新对话」时置空以开启新会话
   const [currentConvId, setCurrentConvId] = useState<number | null>(null)
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -194,7 +195,7 @@ export default function Chat() {
         body: JSON.stringify({
           content: messageContent,
           knowledge_base_id: selectedKbId ?? null,
-          conversation_id: currentConvId ?? null,
+          conversation_id: currentConvId ?? null, // 同窗口同会话；新对话时为 null，后端会创建新会话
         }),
       })
       if (!res.ok) {

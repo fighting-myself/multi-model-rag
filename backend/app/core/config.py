@@ -103,10 +103,10 @@ class Settings(BaseSettings):
         """禁止上传的扩展名列表（可执行/脚本等）"""
         return [x.strip().lower() for x in self.FILE_FORBIDDEN_EXTENSIONS.split(",") if x.strip()]
     
-    # 对话历史配置
-    CHAT_HISTORY_MAX_COUNT: int = 100
-    CHAT_HISTORY_DEFAULT_COUNT: int = 50
-    CHAT_CONTEXT_MESSAGE_COUNT: int = 8  # 最近 N 条完整保留，更早的用总结替代
+    # 对话历史配置（均为会话级别：一个 conversation_id = 一次会话，其下多条消息为对话历史）
+    CHAT_HISTORY_MAX_COUNT: int = 100   # 最多保留的会话数量，超出时删除最旧的会话
+    CHAT_HISTORY_DEFAULT_COUNT: int = 50  # 列表默认每页展示的会话数
+    CHAT_CONTEXT_MESSAGE_COUNT: int = 8  # 单次会话内最近 N 条消息完整保留，更早的用总结替代
     
     # RAG检索配置
     RAG_CONFIDENCE_THRESHOLD: float = 0.6

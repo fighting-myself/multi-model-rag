@@ -51,14 +51,16 @@ async def chat_completion_stream(
     current_user: UserResponse = Depends(require_chat_rate_limit),
     db: AsyncSession = Depends(get_db)
 ):
-    """发送消息（流式），每个 token 单独推送，禁用缓冲以真正逐字输出。"""
+    """发送消息（流式），每个 token 单独推送。同一会话内多次发送需传 conversation_id（前端同窗口即同会话）。"""
     chat_service = ChatService(db)
+    # 优先使用 body 中的 conversation_id，保证「同一窗口 = 同一会话」
+    conv_id = conversation_id or message.conversation_id
 
     async def generate():
         async for event in chat_service.chat_stream(
             user_id=current_user.id,
             message=message.content,
-            conversation_id=conversation_id,
+            conversation_id=conv_id,
             knowledge_base_id=knowledge_base_id or message.knowledge_base_id
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
