@@ -438,15 +438,21 @@ class ChatService:
         except Exception:
             return ""
 
-    async def _build_chat_history_context(self, conversation_id: int) -> str:
-        """构建对话历史上下文（最近 N 条，超过则总结）"""
+    async def _build_chat_history_context(
+        self, conversation_id: int, skip_summary: bool = False
+    ) -> str:
+        """构建对话历史上下文（最近 N 条）。skip_summary=True 时不调用 LLM 总结，仅截断，用于降低首字延迟。"""
         messages = await self._load_conversation_history(conversation_id)
         if not messages:
             return ""
         summary = ""
         if len(messages) > settings.CHAT_CONTEXT_MESSAGE_COUNT:
-            summary = await self._summarize_old_messages(messages)
-            messages = messages[-settings.CHAT_CONTEXT_MESSAGE_COUNT:]
+            if skip_summary:
+                # 不发起总结 LLM 调用，直接只用最近 N 条，避免首字前多一次 5～10s 往返
+                messages = messages[-settings.CHAT_CONTEXT_MESSAGE_COUNT:]
+            else:
+                summary = await self._summarize_old_messages(messages)
+                messages = messages[-settings.CHAT_CONTEXT_MESSAGE_COUNT:]
         history_lines = []
         if summary:
             history_lines.append(f"[对话历史总结] {summary}")
@@ -670,8 +676,9 @@ class ChatService:
                     rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
             # enable_rag=False 时 rag_context 保持空
 
-            # 对话历史上下文
-            history_context = await self._build_chat_history_context(conv.id)
+            # 对话历史上下文（未开 RAG/工具时为降低首字延迟不做历史总结 LLM 调用）
+            skip_summary = not (enable_rag or enable_tools)
+            history_context = await self._build_chat_history_context(conv.id, skip_summary=skip_summary)
 
             # 3) 合并上下文：工具结果 + RAG + 对话历史，再交给 LLM 一次性回答
             full_context = ""
@@ -855,7 +862,8 @@ class ChatService:
                 rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
         # enable_rag=False 时不检索，rag_context 保持空
 
-        history_context = await self._build_chat_history_context(conv.id)
+        # 流式为追求首字延迟，不做历史总结 LLM 调用
+        history_context = await self._build_chat_history_context(conv.id, skip_summary=True)
         # 与非流式一致：先工具阶段再 RAG，此处工具阶段在 RAG 之前已执行
         full_context = ""
         if tool_results:
