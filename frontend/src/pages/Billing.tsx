@@ -75,7 +75,7 @@ export default function Billing() {
         <Card title="用量与限流" style={{ marginBottom: 24 }}>
           <Row gutter={24}>
             <Col span={8}>
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 8, color: 'var(--app-text-primary)' }}>
                 <span><FileOutlined /> 当日上传</span>
                 <span style={{ marginLeft: 8, fontWeight: 600 }}>{usageLimits.upload_today} / {usageLimits.upload_limit_per_day}</span>
               </div>
@@ -89,11 +89,11 @@ export default function Billing() {
               <Progress percent={usageLimits.conversation_limit_per_day ? Math.min(100, (usageLimits.conversation_today / usageLimits.conversation_limit_per_day) * 100) : 0} size="small" />
             </Col>
             <Col span={8}>
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 8, color: 'var(--app-text-primary)' }}>
                 <span><SearchOutlined /> 检索 QPS 上限</span>
                 <span style={{ marginLeft: 8, fontWeight: 600 }}>{usageLimits.search_qps_limit}/秒</span>
               </div>
-              <div style={{ fontSize: 12, color: '#666' }}>当前秒请求数：{usageLimits.search_current_second}</div>
+              <div style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>当前秒请求数：{usageLimits.search_current_second}</div>
             </Col>
           </Row>
         </Card>

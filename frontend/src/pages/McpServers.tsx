@@ -277,9 +277,9 @@ export default function McpServers() {
             ) : (
               <ul style={{ listStyle: 'none', padding: 0 }}>
                 {toolsData.tools.map((t) => (
-                  <li key={t.name} style={{ marginBottom: 16, padding: 12, background: '#f8fafc', borderRadius: 8 }}>
+                  <li key={t.name} style={{ marginBottom: 16, padding: 12, background: 'var(--app-bg-subtle)', borderRadius: 8 }}>
                     <div style={{ fontWeight: 600 }}>{t.name}</div>
-                    {t.description && <div style={{ color: '#64748b', fontSize: 12, marginTop: 4 }}>{t.description}</div>}
+                    {t.description && <div style={{ color: 'var(--app-text-secondary)', fontSize: 12, marginTop: 4 }}>{t.description}</div>}
                     <Button type="link" size="small" icon={<ApiOutlined />} onClick={() => openTest(t.name)} style={{ paddingLeft: 0 }}>
                       测试调用
                     </Button>
@@ -306,7 +306,7 @@ export default function McpServers() {
             <Input.TextArea rows={4} value={testArgs} onChange={(e) => setTestArgs(e.target.value)} />
           </Form.Item>
         </Form>
-        {testResult && <pre style={{ background: '#f1f5f9', padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap' }}>{testResult}</pre>}
+        {testResult && <pre style={{ background: 'var(--app-bg-muted)', padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap', color: 'var(--app-text-primary)' }}>{testResult}</pre>}
       </Modal>
     </div>
   )

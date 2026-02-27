@@ -144,6 +144,7 @@ export interface SourceItem {
   original_filename: string
   chunk_index: number
   snippet: string
+  knowledge_base_id?: number | null
 }
 
 export interface MessageItem {

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { Table, Button, Modal, Form, Input, message, Select, Popconfirm, Drawer, Space, List, Collapse, Checkbox, Dropdown } from 'antd'
 import { PlusOutlined, FileAddOutlined, FolderOpenOutlined, DeleteOutlined, ReloadOutlined, EyeOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined, EditOutlined, ExportOutlined, CloudUploadOutlined } from '@ant-design/icons'
-import api from '../services/api'
+import api, { fetchWithAuth, streamPost } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
+import PageSkeleton from '../components/PageSkeleton'
 import type {
   KnowledgeBaseItem,
   KnowledgeBaseListResponse,
@@ -249,75 +250,60 @@ export default function KnowledgeBases() {
       }))
     )
     setAddFilesLoading(true)
-    const token = useAuthStore.getState().token
     try {
-      const res = await fetch(`/api/v1/knowledge-bases/${currentKb.id}/files/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ file_ids: selectedFileIds }),
-      })
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        throw new Error(errData.detail || res.statusText)
-      }
-      const reader = res.body?.getReader()
+      const { reader } = await streamPost(`knowledge-bases/${currentKb.id}/files/stream`, { file_ids: selectedFileIds })
       const decoder = new TextDecoder()
       let buffer = ''
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n\n')
-          buffer = lines.pop() ?? ''
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const data = line.slice(6).trim()
-            if (data === '[DONE]') continue
-            try {
-              const event = JSON.parse(data) as {
-                type: string
-                file_id?: number
-                filename?: string
-                reason?: string
-                chunk_count?: number
-                message?: string
-              }
-              if (event.type === 'file_start') {
-                setAddFilesProgress((prev) =>
-                  prev.map((p) =>
-                    p.file_id === event.file_id ? { ...p, status: 'processing' as const } : p
-                  )
-                )
-              } else if (event.type === 'file_done') {
-                setAddFilesProgress((prev) =>
-                  prev.map((p) =>
-                    p.file_id === event.file_id
-                      ? { ...p, status: 'done' as const, chunk_count: event.chunk_count }
-                      : p
-                  )
-                )
-              } else if (event.type === 'file_skip') {
-                setAddFilesProgress((prev) =>
-                  prev.map((p) =>
-                    p.file_id === event.file_id
-                      ? { ...p, status: 'skip' as const, reason: event.reason }
-                      : p
-                  )
-                )
-              } else if (event.type === 'done') {
-                message.success('添加完成')
-                fetchKnowledgeBases()
-                setAddFilesLoading(false)
-              } else if (event.type === 'error') {
-                message.error(event.message || '添加失败')
-              }
-            } catch {
-              // ignore parse error
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') continue
+          try {
+            const event = JSON.parse(data) as {
+              type: string
+              file_id?: number
+              filename?: string
+              reason?: string
+              chunk_count?: number
+              message?: string
             }
+            if (event.type === 'file_start') {
+              setAddFilesProgress((prev) =>
+                prev.map((p) =>
+                  p.file_id === event.file_id ? { ...p, status: 'processing' as const } : p
+                )
+              )
+            } else if (event.type === 'file_done') {
+              setAddFilesProgress((prev) =>
+                prev.map((p) =>
+                  p.file_id === event.file_id
+                    ? { ...p, status: 'done' as const, chunk_count: event.chunk_count }
+                    : p
+                )
+              )
+            } else if (event.type === 'file_skip') {
+              setAddFilesProgress((prev) =>
+                prev.map((p) =>
+                  p.file_id === event.file_id
+                    ? { ...p, status: 'skip' as const, reason: event.reason }
+                    : p
+                )
+              )
+            } else if (event.type === 'done') {
+              message.success('添加完成')
+              fetchKnowledgeBases()
+              setAddFilesLoading(false)
+            } else if (event.type === 'error') {
+              message.error(event.message || '添加失败')
+            }
+          } catch {
+            // ignore parse error
           }
         }
       }
@@ -449,11 +435,8 @@ export default function KnowledgeBases() {
 
   const handleExport = async (kbId: number, format: 'json' | 'zip') => {
     setExportingKbId(kbId)
-    const token = useAuthStore.getState().token
     try {
-      const res = await fetch(`/api/v1/knowledge-bases/${kbId}/export?format=${format}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
+      const res = await fetchWithAuth(`/api/v1/knowledge-bases/${kbId}/export?format=${format}`)
       if (!res.ok) throw new Error(res.statusText)
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
@@ -531,6 +514,8 @@ export default function KnowledgeBases() {
     },
   ]
 
+  if (loading && knowledgeBases.length === 0) return <PageSkeleton rows={6} />
+
   return (
     <div>
       <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -547,20 +532,21 @@ export default function KnowledgeBases() {
         dataSource={knowledgeBases}
         loading={loading}
         rowKey="id"
+        scroll={{ x: 'max-content' }}
       />
       {(taskId || reindexAllTaskId || reindexFileTaskId) && taskStatus && (
-        <div style={{ marginBottom: 16, padding: 12, background: taskStatus.status === 'SUCCESS' ? '#f6ffed' : taskStatus.status === 'FAILURE' ? '#fff2f0' : '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 8 }}>
+        <div style={{ marginBottom: 16, padding: 12, background: taskStatus.status === 'SUCCESS' ? 'var(--app-success-bg)' : taskStatus.status === 'FAILURE' ? 'var(--app-error-bg)' : 'var(--app-info-bg)', border: '1px solid var(--app-border-info)', borderRadius: 8, color: 'var(--app-text-primary)' }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
             <Space wrap>
               <span>后台任务：{taskStatus.status}</span>
-              {reindexAllTaskId && <span style={{ color: '#d46b08', fontSize: 12 }}>（全库重索引）</span>}
-              {reindexFileTaskId && !reindexAllTaskId && <span style={{ color: '#666', fontSize: 12 }}>（仅单个文件）</span>}
+              {reindexAllTaskId && <span style={{ color: 'var(--app-warning-text)', fontSize: 12 }}>（全库重索引）</span>}
+              {reindexFileTaskId && !reindexAllTaskId && <span style={{ color: 'var(--app-text-muted)', fontSize: 12 }}>（仅单个文件）</span>}
               {taskStatus.status === 'SUCCESS' && taskStatus.result && (
                 <span>文件数 {taskStatus.result.file_count}，分块数 {taskStatus.result.chunk_count}</span>
               )}
               {taskStatus.status === 'FAILURE' && taskStatus.error && <span style={{ color: '#ff4d4f' }}>{taskStatus.error}</span>}
               {(taskStatus.status === 'PENDING' || taskStatus.status === 'STARTED') && (
-                <span style={{ color: '#666', fontSize: 12 }}>
+                <span style={{ color: 'var(--app-text-muted)', fontSize: 12 }}>
                   PENDING 表示任务在队列中等待执行。若一直不变，请启动 Celery Worker：<code style={{ fontSize: 11 }}> celery -A app.celery_app worker -l info --pool=solo</code>
                 </span>
               )}
@@ -718,7 +704,7 @@ export default function KnowledgeBases() {
           </>
         ) : (
           <div style={{ minHeight: 280 }}>
-            <p style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>
+            <p style={{ marginBottom: 12, color: 'var(--app-text-muted)', fontSize: 13 }}>
               {addFilesLoading ? '正在切分与向量化，请稍候…' : '处理完成'}
             </p>
             <List
@@ -737,9 +723,9 @@ export default function KnowledgeBases() {
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 500, marginBottom: 2 }}>{item.filename}</div>
-                      <div style={{ fontSize: 12, color: '#666' }}>
-                        {item.status === 'pending' && <span style={{ color: '#999' }}>等待中</span>}
-                        {item.status === 'processing' && <span style={{ color: '#1890ff' }}>处理中</span>}
+                      <div style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
+                        {item.status === 'pending' && <span style={{ color: 'var(--app-text-muted)' }}>等待中</span>}
+                        {item.status === 'processing' && <span style={{ color: 'var(--app-accent)' }}>处理中</span>}
                         {item.status === 'done' && item.chunk_count != null && (
                           <span style={{ color: '#52c41a' }}>成功 · {item.chunk_count} 块</span>
                         )}
@@ -796,7 +782,7 @@ export default function KnowledgeBases() {
           )
         }
       >
-        <p style={{ marginBottom: 16, color: '#666' }}>
+        <p style={{ marginBottom: 16, color: 'var(--app-text-muted)' }}>
           对本知识库内的文件进行查看、移除或重新索引。分块有问题时可使用「重新索引」重新切分与向量化。支持「全库重索引（后台）」与单文件「重新索引（后台）」。
         </p>
         <Table
@@ -854,7 +840,7 @@ export default function KnowledgeBases() {
           ]}
         />
         {kbFiles.length === 0 && !kbFilesLoading && (
-          <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>暂无文件，可点击「添加文件」加入内容</div>
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--app-text-muted)' }}>暂无文件，可点击「添加文件」加入内容</div>
         )}
       </Drawer>
 
@@ -868,7 +854,7 @@ export default function KnowledgeBases() {
         {chunksLoading ? (
           <div style={{ padding: 24, textAlign: 'center' }}>加载中...</div>
         ) : chunks.length === 0 ? (
-          <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>暂无分块内容</div>
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--app-text-muted)' }}>暂无分块内容</div>
         ) : (
           <div style={{ maxHeight: 480, overflowY: 'auto' }}>
             {chunks.map((c) => (
@@ -882,7 +868,7 @@ export default function KnowledgeBases() {
                   border: '1px solid #f0f0f0',
                 }}
               >
-                <div style={{ marginBottom: 6, fontSize: 12, color: '#666' }}>分块 #{c.chunk_index + 1}</div>
+                <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--app-text-muted)' }}>分块 #{c.chunk_index + 1}</div>
                 <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13 }}>
                   {c.content || '(空)'}
                 </div>

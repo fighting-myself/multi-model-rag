@@ -20,6 +20,7 @@ class SourceItem(BaseModel):
     original_filename: str
     chunk_index: int
     snippet: str  # 片段，约前 200 字
+    knowledge_base_id: Optional[int] = None  # 所属知识库，便于前端跳转
 
 
 class ChatResponse(BaseModel):

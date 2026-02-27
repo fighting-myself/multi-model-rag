@@ -3,6 +3,7 @@ import { Card, Input, Button, Select, Row, Col, message, Empty, Tabs, Upload } f
 import { SearchOutlined, PictureOutlined, UploadOutlined, FileTextOutlined } from '@ant-design/icons'
 import type { UploadFile } from 'antd/es/upload/interface'
 import api from '../services/api'
+import PageSkeleton from '../components/PageSkeleton'
 import type {
   KnowledgeBaseListResponse,
   ImageSearchItem,
@@ -47,14 +48,14 @@ function ImageThumb({ fileId, alt, style }: { fileId: number; alt: string; style
         style={{
           width: '100%',
           aspectRatio: '4/3',
-          background: '#f5f5f5',
+          background: 'var(--app-bg-muted)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           ...style,
         }}
       >
-        <PictureOutlined style={{ fontSize: 32, color: '#bfbfbf' }} />
+        <PictureOutlined style={{ fontSize: 32, color: 'var(--app-icon-muted)' }} />
       </div>
     )
   }
@@ -69,15 +70,18 @@ export default function ImageSearch() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
   const [selectedKbId, setSelectedKbId] = useState<number | undefined>(undefined)
   const [loading, setLoading] = useState(false)
+  const [initLoading, setInitLoading] = useState(true)
   const [imageFiles, setImageFiles] = useState<UploadFile[]>([])
   const [results, setResults] = useState<ImageSearchItem[]>([])
   const [unifiedResults, setUnifiedResults] = useState<UnifiedSearchItem[]>([])
 
   useEffect(() => {
+    setInitLoading(true)
     api
       .get<KnowledgeBaseListResponse>('/knowledge-bases')
       .then((res) => setKnowledgeBases(res.knowledge_bases || []))
       .catch(() => {})
+      .finally(() => setInitLoading(false))
   }, [])
 
   const handleTextSearch = async () => {
@@ -179,6 +183,8 @@ export default function ImageSearch() {
     { value: undefined as number | undefined, label: '全部知识库' },
     ...knowledgeBases.map((kb) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count ?? 0} 块）` })),
   ]
+
+  if (initLoading) return <PageSkeleton rows={4} />
 
   return (
     <div>
@@ -322,9 +328,9 @@ export default function ImageSearch() {
                         title={item.original_filename}
                         description={
                           item.snippet ? (
-                            <span style={{ fontSize: 12, color: '#666' }}>{item.snippet}</span>
+                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>{item.snippet}</span>
                           ) : item.score != null ? (
-                            <span style={{ fontSize: 12, color: '#999' }}>相似度: {(item.score * 100).toFixed(0)}%</span>
+                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>相似度: {(item.score * 100).toFixed(0)}%</span>
                           ) : undefined
                         }
                       />
@@ -368,8 +374,8 @@ export default function ImageSearch() {
                               alignItems: 'center',
                             }}
                           >
-                            <FileTextOutlined style={{ marginRight: 8, color: '#999' }} />
-                            <span style={{ fontSize: 12, color: '#666', flex: 1 }}>{item.snippet || '无摘要'}</span>
+                            <FileTextOutlined style={{ marginRight: 8, color: 'var(--app-text-muted)' }} />
+                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)', flex: 1 }}>{item.snippet || '无摘要'}</span>
                           </div>
                         )
                       }
@@ -377,7 +383,7 @@ export default function ImageSearch() {
                       <Card.Meta
                         title={item.original_filename}
                         description={
-                          <span style={{ fontSize: 12, color: '#999' }}>
+                          <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
                             {item.is_image ? '图片' : '文档'} · 相关度 {(item.score * 100).toFixed(0)}%
                           </span>
                         }

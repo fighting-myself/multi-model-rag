@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse } from 'antd'
+import { useNavigate } from 'react-router-dom'
+import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal } from 'antd'
 import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
-import api from '../services/api'
+import api, { streamPost } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
+import PageSkeleton from '../components/PageSkeleton'
 import type { KnowledgeBaseListResponse, ConversationItem, ConversationListResponse, MessageItem, SourceItem } from '../types/api'
 
 /** 判断 JSON 是否为 ECharts 常用 option 结构（含 series 或 xAxis/yAxis） */
@@ -60,8 +62,11 @@ export default function Chat() {
   // 当前会话 ID：同窗口内多次发送均为同一会话；仅「新对话」时置空以开启新会话
   const [currentConvId, setCurrentConvId] = useState<number | null>(null)
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
+  const [pageLoading, setPageLoading] = useState(true)
+  const [sourcePreview, setSourcePreview] = useState<SourceItem | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const justSentMessageRef = useRef(false)  // 标记是否刚刚发送了消息
+  const justSentMessageRef = useRef(false)
+  const navigate = useNavigate()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -95,12 +100,13 @@ export default function Chat() {
     try {
       const res = await api.get<ConversationListResponse>('/chat/conversations?page_size=50')
       setConversations(res.conversations || [])
-      // 自动加载最新对话（仅当未选对话且未要求跳过时）
       if (!skipAutoSelect && res.conversations && res.conversations.length > 0 && !currentConvId) {
         setCurrentConvId(res.conversations[0].id)
       }
     } catch {
       setConversations([])
+    } finally {
+      setPageLoading(false)
     }
   }
 
@@ -185,24 +191,11 @@ export default function Chat() {
     ])
 
     try {
-      const token = useAuthStore.getState().token
-      const res = await fetch('/api/v1/chat/completions/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          content: messageContent,
-          knowledge_base_id: selectedKbId ?? null,
-          conversation_id: currentConvId ?? null, // 同窗口同会话；新对话时为 null，后端会创建新会话
-        }),
+      const { reader } = await streamPost('chat/completions/stream', {
+        content: messageContent,
+        knowledge_base_id: selectedKbId ?? null,
+        conversation_id: currentConvId ?? null,
       })
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}))
-        throw new Error(errBody.detail || res.statusText)
-      }
-      const reader = res.body?.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
       let newConvId: number | null = null
@@ -225,8 +218,7 @@ export default function Chat() {
         }
       }
 
-      if (reader) {
-        while (true) {
+      while (true) {
           const { done, value } = await reader.read()
           if (done) break
           buffer += decoder.decode(value, { stream: true })
@@ -265,8 +257,6 @@ export default function Chat() {
             }
           }
         }
-      }
-
       justSentMessageRef.current = true
       if (!currentConvId && newConvId) {
         setCurrentConvId(newConvId)
@@ -289,6 +279,8 @@ export default function Chat() {
   }
 
   const currentConversation = conversations.find((c) => c.id === currentConvId)
+
+  if (pageLoading) return <PageSkeleton rows={5} />
 
   return (
     <div style={{ height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -327,10 +319,10 @@ export default function Chat() {
         bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}
       >
         {currentConvId && currentConversation && (
-          <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
+          <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--app-border-subtle)', flexShrink: 0 }}>
             <Space>
-              <span style={{ fontWeight: 500 }}>{currentConversation.title || '未命名对话'}</span>
-              <span style={{ color: '#999', fontSize: 12 }}>
+              <span style={{ fontWeight: 500, color: 'var(--app-text-primary)' }}>{currentConversation.title || '未命名对话'}</span>
+              <span style={{ color: 'var(--app-text-muted)', fontSize: 12 }}>
                 {new Date(currentConversation.updated_at).toLocaleString('zh-CN')}
               </span>
             </Space>
@@ -338,7 +330,7 @@ export default function Chat() {
         )}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', marginBottom: 16, minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
           {messages.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--app-text-muted)' }}>
               暂无消息，开始对话吧
             </div>
           ) : (
@@ -362,10 +354,11 @@ export default function Chat() {
                           <span style={{ 
                             fontSize: 12, 
                             color: item.confidence < 0.6 ? '#ff4d4f' : '#52c41a',
-                            backgroundColor: item.confidence < 0.6 ? '#fff1f0' : '#f6ffed',
+                            backgroundColor: item.confidence < 0.6 ? 'var(--app-error-bg)' : 'var(--app-success-bg)',
                             padding: '2px 8px',
                             borderRadius: 4,
-                            border: item.confidence < 0.6 ? '1px solid #ffccc7' : '1px solid #b7eb8f'
+                            border: item.confidence < 0.6 ? '1px solid rgba(255,77,79,0.4)' : '1px solid rgba(82,196,26,0.4)',
+                            color: 'var(--app-text-primary)'
                           }}>
                             置信度: {(item.confidence * 100).toFixed(1)}% {item.confidence < 0.6 ? '(低)' : ''}
                           </span>
@@ -377,7 +370,7 @@ export default function Chat() {
                         <div style={{ marginBottom: (item.max_confidence_context || item.retrieved_context) ? 12 : 0 }}>
                           {parseContentWithCharts(item.content).map((part, idx) =>
                             part.type === 'text' ? (
-                              <div key={idx} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                              <div key={idx} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-primary)' }}>
                                 {part.content as string}
                               </div>
                             ) : (
@@ -389,7 +382,7 @@ export default function Chat() {
                         </div>
                         {/* 本回复调用的 MCP 工具 */}
                         {item.role === 'assistant' && item.tools_used && item.tools_used.length > 0 && (
-                          <div style={{ marginTop: 8, marginBottom: 4, fontSize: 12, color: '#666' }}>
+                          <div style={{ marginTop: 8, marginBottom: 4, fontSize: 12, color: 'var(--app-text-muted)' }}>
                             <span style={{ color: '#1890ff', fontWeight: 500 }}>调用了以下工具：</span>{' '}
                             {item.tools_used.join('、')}
                           </div>
@@ -399,14 +392,14 @@ export default function Chat() {
                           <div style={{
                             marginTop: 12,
                             padding: 12,
-                            backgroundColor: '#f0f9ff',
-                            border: '1px solid #91d5ff',
+                            backgroundColor: 'var(--app-info-bg)',
+                            border: '1px solid var(--app-border-info)',
                             borderRadius: 4,
                             maxHeight: '300px',
                             overflowY: 'auto',
                             overflowX: 'hidden',
                             fontSize: 12,
-                            color: '#666',
+                            color: 'var(--app-text-muted)',
                             WebkitOverflowScrolling: 'touch'
                           }}>
                             <div style={{ fontWeight: 500, marginBottom: 8, color: '#1890ff', flexShrink: 0 }}>
@@ -416,7 +409,7 @@ export default function Chat() {
                               )}
                               ：
                             </div>
-                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-primary)' }}>
                               {item.max_confidence_context}
                             </div>
                           </div>
@@ -426,17 +419,17 @@ export default function Chat() {
                           <div style={{
                             marginTop: 12,
                             padding: 12,
-                            backgroundColor: '#fafafa',
+                            backgroundColor: 'var(--app-bg-subtle)',
                             border: '1px solid #d9d9d9',
                             borderRadius: 4,
                             maxHeight: '300px',
                             overflowY: 'auto',
                             overflowX: 'hidden',
                             fontSize: 12,
-                            color: '#666',
+                            color: 'var(--app-text-muted)',
                             WebkitOverflowScrolling: 'touch'
                           }}>
-                            <div style={{ fontWeight: 500, marginBottom: 8, color: '#333', flexShrink: 0 }}>
+                            <div style={{ fontWeight: 500, marginBottom: 8, color: 'var(--app-text-primary)', flexShrink: 0 }}>
                               所有检索到的上下文（置信度: {(item.confidence * 100).toFixed(1)}%）：
                             </div>
                             <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -453,27 +446,27 @@ export default function Chat() {
                               {
                                 key: 'sources',
                                 label: (
-                                  <span style={{ fontSize: 12, color: '#1890ff' }}>
+                                  <span style={{ fontSize: 12, color: 'var(--app-accent)' }}>
                                     <FileTextOutlined /> 参考来源（{item.sources.length} 条）
                                   </span>
                                 ),
                                 children: (
-                                  <div style={{ fontSize: 12, color: '#666' }}>
+                                  <div style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
                                     {item.sources.map((s: SourceItem, i: number) => (
                                       <div
                                         key={`${s.file_id}-${s.chunk_index}-${i}`}
                                         style={{
                                           marginBottom: 8,
                                           padding: 8,
-                                          backgroundColor: '#f5f5f5',
+                                          backgroundColor: 'var(--app-bg-muted)',
                                           borderRadius: 4,
-                                          borderLeft: '3px solid #1890ff',
+                                          borderLeft: '3px solid var(--app-accent)',
                                         }}
                                       >
-                                        <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                                        <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--app-text-primary)' }}>
                                           {s.original_filename} · 第 {s.chunk_index + 1} 段
                                         </div>
-                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-primary)' }}>
                                           {s.snippet}
                                           {s.snippet.length >= 200 ? '…' : ''}
                                         </div>
@@ -519,6 +512,33 @@ export default function Chat() {
         </div>
       </Card>
 
+      <Modal
+        title={sourcePreview ? `${sourcePreview.original_filename} · 第 ${(sourcePreview.chunk_index ?? 0) + 1} 段` : '引用来源'}
+        open={!!sourcePreview}
+        onCancel={() => setSourcePreview(null)}
+        footer={
+          sourcePreview ? (
+            <Space>
+              {sourcePreview.knowledge_base_id != null && (
+                <Button type="primary" onClick={() => { navigate('/knowledge-bases'); setSourcePreview(null); }}>
+                  在知识库中查看
+                </Button>
+              )}
+              <Button onClick={() => { navigate('/files'); setSourcePreview(null); }}>
+                在文件管理中查看
+              </Button>
+            </Space>
+          ) : null
+        }
+      >
+        {sourcePreview && (
+          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 320, overflow: 'auto' }}>
+            {sourcePreview.snippet}
+            {sourcePreview.snippet.length >= 200 ? '…' : ''}
+          </div>
+        )}
+      </Modal>
+
       <Drawer
         title="对话历史"
         placement="left"
@@ -532,7 +552,7 @@ export default function Chat() {
             <List.Item
               style={{
                 cursor: 'pointer',
-                backgroundColor: currentConvId === conv.id ? '#e6f7ff' : 'transparent',
+                backgroundColor: currentConvId === conv.id ? 'var(--app-list-active)' : 'transparent',
                 padding: '12px',
                 borderRadius: 4,
                 marginBottom: 8,
@@ -557,7 +577,7 @@ export default function Chat() {
               <List.Item.Meta
                 title={<div style={{ fontWeight: currentConvId === conv.id ? 600 : 400 }}>{conv.title || '未命名对话'}</div>}
                 description={
-                  <div style={{ fontSize: 12, color: '#999' }}>
+                  <div style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
                     {new Date(conv.updated_at).toLocaleString('zh-CN')}
                   </div>
                 }

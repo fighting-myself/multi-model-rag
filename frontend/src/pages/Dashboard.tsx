@@ -62,7 +62,7 @@ export default function Dashboard() {
             · 对话 {usageLimits.conversation_today}/{usageLimits.conversation_limit_per_day} 条
             · 检索 QPS 上限 {usageLimits.search_qps_limit}/秒
           </Typography.Text>
-          <Typography.Text style={{ marginLeft: 8 }}>
+          <Typography.Text style={{ marginLeft: 8, color: 'var(--app-text-primary)' }}>
             <Link to="/billing"><LinkOutlined /> 计费中心</Link>
           </Typography.Text>
         </Card>

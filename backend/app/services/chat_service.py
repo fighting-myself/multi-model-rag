@@ -473,6 +473,7 @@ class ChatService:
                     original_filename=name,
                     chunk_index=c.chunk_index or 0,
                     snippet=snippet,
+                    knowledge_base_id=getattr(c, "knowledge_base_id", None),
                 )
             )
         return sources

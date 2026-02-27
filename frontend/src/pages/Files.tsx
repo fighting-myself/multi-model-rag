@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Table, Button, Upload, message, Space, Popconfirm } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
-import api from '../services/api'
+import api, { fetchWithAuth } from '../services/api'
 import { useAuthStore, type AuthState } from '../stores/authStore'
 import type { FileItem, FileListResponse } from '../types/api'
 
@@ -30,9 +30,7 @@ export default function Files() {
   const handleDownload = async (record: FileItem) => {
     if (!token) return
     try {
-      const res = await fetch(`/api/v1/files/${record.id}/download`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      const res = await fetchWithAuth(`/api/v1/files/${record.id}/download`)
       if (!res.ok) throw new Error('下载失败')
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
@@ -149,6 +147,7 @@ export default function Files() {
         dataSource={files}
         loading={loading}
         rowKey="id"
+        scroll={{ x: 'max-content' }}
       />
     </div>
   )

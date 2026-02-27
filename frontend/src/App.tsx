@@ -12,6 +12,7 @@ import ImageSearch from './pages/ImageSearch'
 import AuditLog from './pages/AuditLog'
 import McpServers from './pages/McpServers'
 import AppLayout from './components/AppLayout'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useAuthStore } from './stores/authStore'
 
 const { Content } = Layout
@@ -32,11 +33,11 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/files" element={<Files />} />
-                  <Route path="/knowledge-bases" element={<KnowledgeBases />} />
-                  <Route path="/chat" element={<Chat />} />
+                  <Route path="/knowledge-bases" element={<ErrorBoundary><KnowledgeBases /></ErrorBoundary>} />
+                  <Route path="/chat" element={<ErrorBoundary><Chat /></ErrorBoundary>} />
                   <Route path="/billing" element={<Billing />} />
                   <Route path="/profile" element={<Profile />} />
-                  <Route path="/image-search" element={<ImageSearch />} />
+                  <Route path="/image-search" element={<ErrorBoundary><ImageSearch /></ErrorBoundary>} />
                   <Route path="/audit-log" element={<AuditLog />} />
                   <Route path="/mcp-servers" element={<McpServers />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

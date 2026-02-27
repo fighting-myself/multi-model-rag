@@ -1,4 +1,5 @@
-import { Layout, Menu, Avatar, Dropdown, Button } from 'antd'
+import { useState } from 'react'
+import { Layout, Menu, Avatar, Dropdown, Button, Space } from 'antd'
 import { 
   HomeOutlined, 
   FileOutlined, 
@@ -9,10 +10,13 @@ import {
   UserOutlined,
   LogoutOutlined,
   AuditOutlined,
-  ApiOutlined
+  ApiOutlined,
+  BulbOutlined,
+  BulbFilled,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { useThemeStore } from '../stores/themeStore'
 
 const { Header, Sider, Content } = Layout
 
@@ -47,6 +51,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuthStore()
+  const { theme, toggleTheme } = useThemeStore()
 
   const menuItems = [
     { key: '/', icon: <HomeOutlined />, label: '首页' },
@@ -81,6 +86,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       navigate('/profile')
     } else {
       navigate(key)
+      setSiderCollapsed(true)
     }
   }
 
@@ -118,27 +124,36 @@ export default function AppLayout({ children }: AppLayoutProps) {
       <Layout>
         <Header style={headerStyle}>
           <div />
-          <Dropdown
-            menu={{ items: userMenuItems, onClick: handleMenuClick }}
-            placement="bottomRight"
-            overlayStyle={{ minWidth: 140 }}
-          >
+          <Space size="middle">
             <Button
               type="text"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                color: 'rgba(255,255,255,0.9)',
-                height: 40,
-              }}
+              icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
+              onClick={toggleTheme}
+              style={{ color: 'rgba(255,255,255,0.9)' }}
+              title={theme === 'dark' ? '切换为亮色' : '切换为暗色'}
+            />
+            <Dropdown
+              menu={{ items: userMenuItems, onClick: handleMenuClick }}
+              placement="bottomRight"
+              overlayStyle={{ minWidth: 140 }}
             >
-              <Avatar size="small" style={{ background: 'var(--app-accent)' }} icon={<UserOutlined />} />
-              <span style={{ fontWeight: 500 }}>{user?.username || '用户'}</span>
-            </Button>
-          </Dropdown>
+              <Button
+                type="text"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  color: 'rgba(255,255,255,0.9)',
+                  height: 40,
+                }}
+              >
+                <Avatar size="small" style={{ background: 'var(--app-accent)' }} icon={<UserOutlined />} />
+                <span style={{ fontWeight: 500 }}>{user?.username || '用户'}</span>
+              </Button>
+            </Dropdown>
+          </Space>
         </Header>
-        <Content className="app-content-area" style={{ margin: 24, padding: 24, borderRadius: 12 }}>
+        <Content className="app-content-area app-content-area-padding">
           {children}
         </Content>
       </Layout>
