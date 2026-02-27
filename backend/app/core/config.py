@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379/0"
     
+    # 缓存配置（使用同一 Redis，key 前缀区分）
+    CACHE_ENABLED: bool = True
+    CACHE_KEY_PREFIX: str = "cache:"
+    CACHE_TTL_STATS: int = 60          # 仪表盘统计、用量快照 60 秒
+    CACHE_TTL_LIST: int = 60           # 列表类（知识库/文件）60 秒
+    CACHE_TTL_CONV: int = 30           # 会话列表、会话详情 30 秒
+    CACHE_TTL_DETAIL: int = 60         # 单条详情（知识库详情等）60 秒
+    
     # Celery配置（不填则与 REDIS_URL 一致，只维护一份 Redis 地址即可）
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""

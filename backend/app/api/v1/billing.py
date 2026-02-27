@@ -1,16 +1,19 @@
 """
 计费相关API
 """
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.schemas.billing import UsageResponse, UsageLimitsResponse, PlanResponse, PlanListResponse, OrderCreate, OrderResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
 from app.services.billing_service import BillingService
 from app.services.rate_limit_service import get_usage_snapshot
+from app.services import cache_service
 
 router = APIRouter()
 
@@ -36,8 +39,15 @@ async def get_usage(
 async def get_usage_limits(
     current_user: UserResponse = Depends(get_current_active_user),
 ):
-    """获取当前用量与限流快照（当日上传/对话数、当前秒检索数及上限），用于仪表盘展示、避免滥用。"""
-    snapshot = get_usage_snapshot(current_user.id)
+    """获取当前用量与限流快照（当日上传/对话数、当前秒检索数及上限），带短时缓存加速。"""
+    user_id = current_user.id
+    cache_key = cache_service.key_usage_limits(user_id)
+    cached = await asyncio.to_thread(cache_service.get, cache_key)
+    if cached is not None:
+        return UsageLimitsResponse(**cached)
+    snapshot = get_usage_snapshot(user_id)
+    ttl = getattr(settings, "CACHE_TTL_STATS", 60)
+    await asyncio.to_thread(cache_service.set, cache_key, snapshot, ttl)
     return UsageLimitsResponse(**snapshot)
 
 

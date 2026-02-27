@@ -1,6 +1,7 @@
 """
 文件相关API
 """
+import asyncio
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Query, Request
 from fastapi.responses import Response
@@ -8,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.schemas.file import FileResponse, FileListResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
 from app.api.deps import get_client_ip, require_upload_rate_limit
 from app.services.file_service import FileService
 from app.services.audit_service import log_audit
+from app.services import cache_service
 
 router = APIRouter()
 
@@ -57,6 +60,9 @@ async def batch_upload_files(
     ip = get_client_ip(request)
     for rec in file_records:
         await log_audit(db, current_user.id, "upload_file", "file", str(rec.id), {"filename": rec.original_filename}, ip, getattr(request.state, "request_id", None))
+    await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_file_list(current_user.id))
+    await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
+    await asyncio.to_thread(cache_service.delete, cache_service.key_usage_limits(current_user.id))
     return file_records
 
 
@@ -90,13 +96,16 @@ async def get_files(
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取文件列表"""
+    """获取文件列表（带 Redis 缓存）"""
+    user_id = current_user.id
+    cache_key = cache_service.key_file_list(user_id, page, page_size)
+    cached = await asyncio.to_thread(cache_service.get, cache_key)
+    if cached is not None:
+        return FileListResponse(**cached)
     file_service = FileService(db)
-    result = await file_service.get_files(
-        user_id=current_user.id,
-        page=page,
-        page_size=page_size
-    )
+    result = await file_service.get_files(user_id=user_id, page=page, page_size=page_size)
+    ttl = getattr(settings, "CACHE_TTL_LIST", 60)
+    await asyncio.to_thread(cache_service.set, cache_key, result.model_dump(), ttl)
     return result
 
 
@@ -125,4 +134,6 @@ async def delete_file(
     file_service = FileService(db)
     await file_service.delete_file(file_id, current_user.id)
     await log_audit(db, current_user.id, "delete_file", "file", str(file_id), None, get_client_ip(request), getattr(request.state, "request_id", None))
+    await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_file_list(current_user.id))
+    await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
     return None

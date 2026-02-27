@@ -1,6 +1,7 @@
 """
 问答服务：支持基于知识库的 RAG（向量检索 + LLM）
 """
+import asyncio
 import json as _json
 from typing import Optional, AsyncGenerator, List, Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -703,7 +704,11 @@ class ChatService:
             conv.title = message[:50] if len(message) > 50 else message
         await self.db.commit()
         await self.db.refresh(conv)  # 刷新以获取 updated_at
-        
+        try:
+            await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
+        except Exception as e:
+            logging.warning("会话缓存失效失败（不影响回复）: %s", e)
+
         # 返回置信度和检索上下文
         # 判断是否有真实的检索结果：
         # 1. retrieved_context_original 不为空且不是系统提示
@@ -773,8 +778,12 @@ class ChatService:
         self.db.add(user_msg)
         await self.db.flush()
 
-        # 1) 先判断工具库是否有能用上的工具，若有则调用并得到工具结果与工具名列表
-        tool_results, tools_used = await self._try_tool_phase(message)
+        # 1) 先判断工具库是否有能用上的工具，若有则调用并得到工具结果与工具名列表（失败则跳过工具阶段）
+        try:
+            tool_results, tools_used = await self._try_tool_phase(message)
+        except Exception as e:
+            logging.warning("工具阶段失败，将不调用工具继续回答: %s", e)
+            tool_results, tools_used = "", []
 
         # 2) RAG + 历史上下文（与 _chat_after_user_message 一致）
         rag_context = ""
@@ -867,6 +876,10 @@ class ChatService:
             conv.title = message[:50] if len(message) > 50 else message
         await self.db.commit()
         await self.db.refresh(conv)
+        try:
+            await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
+        except Exception as e:
+            logging.warning("会话缓存失效失败（不影响回复）: %s", e)
         has_real = (
             (rag_context and rag_context.strip() and not rag_context.startswith("[系统提示：")) or
             (max_confidence_context and max_confidence_context.strip())
