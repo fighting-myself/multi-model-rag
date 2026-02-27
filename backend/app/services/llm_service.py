@@ -99,17 +99,20 @@ async def chat_completion_with_tools(
     messages: List[Dict[str, Any]],
     tools: Optional[List[Dict[str, Any]]] = None,
     max_tokens: int = 2048,
+    model: Optional[str] = None,
 ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     """
     支持 tool_calls 的对话：传入消息列表与可选 tools，返回 (content, tool_calls)。
     若模型返回 tool_calls，content 可能为空，调用方执行工具后把结果 append 到 messages 再调用本函数直至返回 content。
-    messages: 标准 OpenAI 格式，可含 role=tool 及 assistant 的 tool_calls。
+    messages: 标准 OpenAI 格式，可含 role=tool、content 可为文本或多模态数组（含 image_url 用于视觉）。
     tools: OpenAI 格式 [ {"type": "function", "function": {"name", "description", "parameters"}} ]
+    model: 指定模型，不传则用 LLM_MODEL。
     返回: (assistant 文本内容 或 None, tool_calls 列表 [{ "id", "name", "arguments" }])
     """
     client = _client()
+    use_model = model or settings.LLM_MODEL
     kwargs = {
-        "model": settings.LLM_MODEL,
+        "model": use_model,
         "messages": messages,
         "max_tokens": max_tokens,
     }

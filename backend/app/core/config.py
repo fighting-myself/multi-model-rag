@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     EMBEDDING_MODEL: str = "qwen3-vl-embedding"
     LLM_MODEL: str = "qwen3-vl-plus"
+    VISION_MODEL: str = ""  # 视觉模型（截图分析等），为空则使用 LLM_MODEL
     RERANK_MODEL: str = "qwen3-rerank"  # Rerank模型
     OCR_MODEL: str = "qwen-vl-ocr-2025-11-20"  # 图片 OCR 模型（阿里百炼）
     

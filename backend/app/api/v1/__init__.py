@@ -2,7 +2,7 @@
 API v1 路由
 """
 from fastapi import APIRouter
-from app.api.v1 import auth, files, knowledge_bases, chat, billing, dashboard, search, tasks, audit, mcp, steward
+from app.api.v1 import auth, files, knowledge_bases, chat, billing, dashboard, search, tasks, audit, mcp, steward, computer_steward
 
 api_router = APIRouter()
 
@@ -18,3 +18,4 @@ api_router.include_router(billing.router, prefix="/billing", tags=["计费"])
 api_router.include_router(audit.router, prefix="/audit-logs", tags=["审计"])
 api_router.include_router(mcp.router, prefix="/mcp-servers", tags=["MCP 工具"])
 api_router.include_router(steward.router, prefix="/steward", tags=["浏览器助手"])
+api_router.include_router(computer_steward.router, prefix="/computer-steward", tags=["电脑管家"])

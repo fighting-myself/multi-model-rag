@@ -66,6 +66,9 @@ aiohttp==3.9.1
 # 浏览器助手：浏览器自动化（需执行 playwright install 安装浏览器）
 playwright>=1.40.0
 
+# 电脑管家：桌面 Computer Use（截图、键鼠，需有图形界面如 Windows 桌面）
+pyautogui==0.9.54
+
 # MCP 客户端（接入外部 MCP 服务；anyio 需 >=4.7 以兼容 sse-starlette / mcp）
 mcp>=1.0.0
 anyio==4.7.0
