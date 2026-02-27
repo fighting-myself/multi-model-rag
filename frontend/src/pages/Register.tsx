@@ -27,15 +27,9 @@ export default function Register() {
   }
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      minHeight: '100vh',
-      background: 'linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #334155 100%)'
-    }}>
-      <Card style={{ width: 400, borderRadius: 16, boxShadow: '0 24px 48px rgba(0,0,0,0.2)' }}>
-        <h1 style={{ textAlign: 'center', marginBottom: 24 }}>用户注册</h1>
+    <div className="app-fullpage-tech">
+      <Card style={{ width: 400 }}>
+        <h1 className="login-title">用户注册</h1>
         <Form
           name="register"
           onFinish={onFinish}

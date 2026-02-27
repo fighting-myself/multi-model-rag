@@ -14,7 +14,7 @@ const THEME_KEY = 'app-theme'
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
-      theme: 'light',
+      theme: 'dark',
       setTheme: (theme) => {
         document.documentElement.setAttribute('data-theme', theme)
         set({ theme })

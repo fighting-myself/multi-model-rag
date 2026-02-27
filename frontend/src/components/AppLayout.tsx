@@ -1,9 +1,8 @@
-import { useState } from 'react'
 import { Layout, Menu, Avatar, Dropdown, Button, Space } from 'antd'
-import { 
-  HomeOutlined, 
-  FileOutlined, 
-  DatabaseOutlined, 
+import {
+  HomeOutlined,
+  FileOutlined,
+  DatabaseOutlined,
   MessageOutlined,
   DollarOutlined,
   PictureOutlined,
@@ -24,27 +23,12 @@ interface AppLayoutProps {
   children: React.ReactNode
 }
 
-const siderStyle: React.CSSProperties = {
-  background: 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)',
-  boxShadow: '4px 0 24px rgba(0,0,0,0.08)',
-}
-
 const logoStyle: React.CSSProperties = {
   height: 64,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  borderBottom: '1px solid rgba(255,255,255,0.06)',
-}
-
-const headerStyle: React.CSSProperties = {
-  background: 'linear-gradient(90deg, #1e293b 0%, #334155 100%)',
-  padding: '0 24px',
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  borderBottom: '1px solid rgba(255,255,255,0.06)',
-  boxShadow: '0 1px 0 0 rgba(255,255,255,0.04)',
+  borderBottom: '1px solid rgba(0, 245, 255, 0.12)',
 }
 
 export default function AppLayout({ children }: AppLayoutProps) {
@@ -65,17 +49,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
   ]
 
   const userMenuItems = [
-    {
-      key: 'profile',
-      icon: <UserOutlined />,
-      label: '个人中心',
-    },
-    {
-      key: 'logout',
-      icon: <LogoutOutlined />,
-      label: '退出登录',
-      danger: true,
-    },
+    { key: 'profile', icon: <UserOutlined />, label: '个人中心' },
+    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
   ]
 
   const handleMenuClick = ({ key }: { key: string }) => {
@@ -86,24 +61,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
       navigate('/profile')
     } else {
       navigate(key)
-      setSiderCollapsed(true)
     }
   }
 
   return (
-    <Layout style={{ minHeight: '100vh', background: 'var(--app-bg)' }}>
-      <Sider width={220} style={siderStyle}>
-        <div style={logoStyle}>
-          <span style={{ 
-            fontSize: 18, 
-            fontWeight: 700, 
-            color: '#fff', 
-            letterSpacing: '-0.02em',
-            background: 'linear-gradient(135deg, #fff 0%, #94a3b8 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text',
-          }}>
+    <Layout style={{ minHeight: '100vh', background: 'transparent', position: 'relative' }}>
+      <div className="app-bg-canvas" aria-hidden />
+      <Sider width={220} className="tech-sider" style={{ position: 'relative', zIndex: 2 }}>
+        <div style={logoStyle} className="tech-logo-wrap">
+          <span className="tech-logo-text">
             RAG 助手
           </span>
         </div>
@@ -113,7 +79,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           items={menuItems}
           onClick={handleMenuClick}
           style={{
-            marginTop: 12,
+            marginTop: 16,
             background: 'transparent',
             border: 'none',
             color: 'rgba(255,255,255,0.75)',
@@ -121,8 +87,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
           theme="dark"
         />
       </Sider>
-      <Layout>
-        <Header style={headerStyle}>
+      <Layout style={{ position: 'relative', zIndex: 1 }}>
+        <Header
+          className="tech-header"
+          style={{
+            padding: '0 24px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            height: 64,
+          }}
+        >
           <div />
           <Space size="middle">
             <Button
@@ -147,7 +122,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   height: 40,
                 }}
               >
-                <Avatar size="small" style={{ background: 'var(--app-accent)' }} icon={<UserOutlined />} />
+                <Avatar
+                  size="small"
+                  className="tech-avatar"
+                  style={{
+                    background: 'linear-gradient(135deg, #00f5ff, #a855f7)',
+                    boxShadow: '0 0 12px rgba(0, 245, 255, 0.5)',
+                  }}
+                  icon={<UserOutlined />}
+                />
                 <span style={{ fontWeight: 500 }}>{user?.username || '用户'}</span>
               </Button>
             </Dropdown>

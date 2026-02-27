@@ -499,7 +499,7 @@ export default function Chat() {
           )}
           <div ref={messagesEndRef} />
         </div>
-        <div style={{ flexShrink: 0, marginTop: 'auto' }}>
+        <div className="tech-input-wrap" style={{ flexShrink: 0, marginTop: 'auto' }}>
           <Input.Group compact>
             <Input
               value={inputValue}
