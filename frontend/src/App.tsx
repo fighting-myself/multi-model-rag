@@ -11,6 +11,7 @@ import Profile from './pages/Profile'
 import ImageSearch from './pages/ImageSearch'
 import AuditLog from './pages/AuditLog'
 import McpServers from './pages/McpServers'
+import Steward from './pages/Steward'
 import AppLayout from './components/AppLayout'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import PageTitle from './components/PageTitle'
@@ -42,6 +43,7 @@ function App() {
                   <Route path="/image-search" element={<ErrorBoundary><ImageSearch /></ErrorBoundary>} />
                   <Route path="/audit-log" element={<AuditLog />} />
                   <Route path="/mcp-servers" element={<McpServers />} />
+                  <Route path="/steward" element={<ErrorBoundary><Steward /></ErrorBoundary>} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </AppLayout>

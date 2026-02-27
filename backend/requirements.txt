@@ -63,6 +63,9 @@ flower==2.0.1
 httpx>=0.27.1
 aiohttp==3.9.1
 
+# 浏览器助手：浏览器自动化（需执行 playwright install 安装浏览器）
+playwright>=1.40.0
+
 # MCP 客户端（接入外部 MCP 服务；anyio 需 >=4.7 以兼容 sse-starlette / mcp）
 mcp>=1.0.0
 anyio==4.7.0
