@@ -128,7 +128,7 @@ async def search_unified(
 @router.post("/by-image", response_model=ImageSearchResponse)
 async def search_by_image(
     body: ByImageSearchRequest,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_search_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """图搜图：上传图片的 base64，在知识库中检索相似图片。"""

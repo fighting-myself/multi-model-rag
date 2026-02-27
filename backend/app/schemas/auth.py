@@ -26,7 +26,8 @@ class UserResponse(BaseModel):
     credits: float
     is_active: bool
     created_at: datetime
-    
+    last_login_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 

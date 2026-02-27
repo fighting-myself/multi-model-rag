@@ -52,7 +52,13 @@ async def login(
             detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    from sqlalchemy import update, func
+    from app.models.user import User
+    await db.execute(update(User).where(User.id == user.id).values(last_login_at=func.now()))
+    await db.commit()
+    await db.refresh(user)
+
     access_token_expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth_service.create_access_token(
         data={"sub": user.username},

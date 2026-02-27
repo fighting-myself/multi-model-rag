@@ -13,6 +13,7 @@ import AuditLog from './pages/AuditLog'
 import McpServers from './pages/McpServers'
 import AppLayout from './components/AppLayout'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import PageTitle from './components/PageTitle'
 import { useAuthStore } from './stores/authStore'
 
 const { Content } = Layout
@@ -22,6 +23,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <PageTitle />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />

@@ -36,7 +36,9 @@ export default function Files() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = record.original_filename || record.filename || 'download'
+      const ts = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)
+      const baseName = record.original_filename || record.filename || 'download'
+      a.download = `${ts}_${baseName}`
       a.click()
       window.URL.revokeObjectURL(url)
       message.success('下载已开始')

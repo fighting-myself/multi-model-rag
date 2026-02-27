@@ -455,16 +455,26 @@ export default function Chat() {
                                     {item.sources.map((s: SourceItem, i: number) => (
                                       <div
                                         key={`${s.file_id}-${s.chunk_index}-${i}`}
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={() => setSourcePreview(s)}
+                                        onKeyDown={(e) => e.key === 'Enter' && setSourcePreview(s)}
                                         style={{
                                           marginBottom: 8,
                                           padding: 8,
                                           backgroundColor: 'var(--app-bg-muted)',
                                           borderRadius: 4,
                                           borderLeft: '3px solid var(--app-accent)',
+                                          cursor: 'pointer',
                                         }}
+                                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--app-list-hover)' }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--app-bg-muted)' }}
                                       >
-                                        <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--app-text-primary)' }}>
-                                          {s.original_filename} · 第 {s.chunk_index + 1} 段
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                          <span style={{ fontWeight: 500, color: 'var(--app-text-primary)' }}>
+                                            {s.original_filename} · 第 {s.chunk_index + 1} 段
+                                          </span>
+                                          <span style={{ fontSize: 12, color: 'var(--app-accent)' }}>点击查看原文</span>
                                         </div>
                                         <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-primary)' }}>
                                           {s.snippet}

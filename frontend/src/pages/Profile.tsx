@@ -15,6 +15,7 @@ interface UserInfo {
   credits: number
   is_active: boolean
   created_at: string
+  last_login_at?: string | null
 }
 
 export default function Profile() {
@@ -70,6 +71,11 @@ export default function Profile() {
             <Descriptions.Item label="注册时间">
               {displayUser.created_at
                 ? new Date(displayUser.created_at).toLocaleString('zh-CN')
+                : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="上次登录">
+              {displayUser.last_login_at
+                ? new Date(displayUser.last_login_at).toLocaleString('zh-CN')
                 : '-'}
             </Descriptions.Item>
           </Descriptions>

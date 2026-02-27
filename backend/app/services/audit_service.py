@@ -18,6 +18,7 @@ async def log_audit(
     resource_id: Optional[str] = None,
     detail: Optional[dict[str, Any]] = None,
     ip: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> None:
     """写入一条审计日志。若未启用 AUDIT_LOG_ENABLED 则跳过。"""
     if not getattr(settings, "AUDIT_LOG_ENABLED", True):
@@ -31,6 +32,7 @@ async def log_audit(
             resource_id=resource_id,
             detail=detail_str,
             ip=ip,
+            request_id=request_id,
         )
         db.add(entry)
         await db.commit()

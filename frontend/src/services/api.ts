@@ -26,6 +26,15 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    if (error.code === 'ECONNABORTED') {
+      error.message = '请求超时，请检查网络或稍后重试'
+    } else if (error.message === 'Network Error' || !error.response) {
+      error.message = '网络异常，请检查连接后重试'
+    } else if (error.response?.data?.detail) {
+      error.message = typeof error.response.data.detail === 'string'
+        ? error.response.data.detail
+        : error.message
+    }
     const isAuthRequest =
       error.config?.url === '/auth/login' || error.config?.url === '/auth/register'
     if (error.response?.status === 401 && !isAuthRequest) {

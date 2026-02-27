@@ -442,7 +442,8 @@ export default function KnowledgeBases() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `kb_${kbId}_export.${format === 'zip' ? 'zip' : 'json'}`
+      const ts = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)
+      a.download = `kb_${kbId}_export_${ts}.${format === 'zip' ? 'zip' : 'json'}`
       a.click()
       window.URL.revokeObjectURL(url)
       message.success('导出成功')

@@ -23,7 +23,15 @@ export default function AuditLog() {
   const [loading, setLoading] = useState(false)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const PAGE_SIZE_KEY = 'audit-log-page-size'
+  const [pageSize, setPageSize] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem(PAGE_SIZE_KEY) || '20', 10)
+      return [10, 20, 50].includes(v) ? v : 20
+    } catch {
+      return 20
+    }
+  })
   const [actionFilter, setActionFilter] = useState<string | undefined>(undefined)
   const [resourceTypeFilter, setResourceTypeFilter] = useState<string | undefined>(undefined)
 
@@ -120,6 +128,20 @@ export default function AuditLog() {
           value={resourceTypeFilter}
           onChange={setResourceTypeFilter}
           options={Object.entries(RESOURCE_LABELS).map(([k, v]) => ({ label: v, value: k }))}
+        />
+        <Select
+          value={pageSize}
+          onChange={(v) => {
+            setPageSize(v)
+            localStorage.setItem(PAGE_SIZE_KEY, String(v))
+            setPage(1)
+          }}
+          options={[
+            { label: '10 条/页', value: 10 },
+            { label: '20 条/页', value: 20 },
+            { label: '50 条/页', value: 50 },
+          ]}
+          style={{ width: 110 }}
         />
       </div>
       <Table<AuditLogItem>

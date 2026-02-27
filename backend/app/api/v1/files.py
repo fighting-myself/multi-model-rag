@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.schemas.file import FileResponse, FileListResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
-from app.api.deps import get_client_ip
+from app.api.deps import get_client_ip, require_upload_rate_limit
 from app.services.file_service import FileService
 from app.services.audit_service import log_audit
 
@@ -23,7 +23,7 @@ async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     knowledge_base_id: int = None,
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_upload_rate_limit),
     db: AsyncSession = Depends(get_db)
 ):
     """上传文件"""
@@ -33,7 +33,7 @@ async def upload_file(
         user_id=current_user.id,
         knowledge_base_id=knowledge_base_id
     )
-    await log_audit(db, current_user.id, "upload_file", "file", str(file_record.id), {"filename": file_record.original_filename}, get_client_ip(request))
+    await log_audit(db, current_user.id, "upload_file", "file", str(file_record.id), {"filename": file_record.original_filename}, get_client_ip(request), getattr(request.state, "request_id", None))
     return file_record
 
 
@@ -43,7 +43,7 @@ async def batch_upload_files(
     files: List[UploadFile] = File(...),
     knowledge_base_id: int = None,
     on_duplicate: str = Query("use_existing", description="同 MD5 时：use_existing=返回已有，overwrite=覆盖并清空分块"),
-    current_user: UserResponse = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(require_upload_rate_limit),
     db: AsyncSession = Depends(get_db)
 ):
     """批量上传文件"""
@@ -56,7 +56,7 @@ async def batch_upload_files(
     )
     ip = get_client_ip(request)
     for rec in file_records:
-        await log_audit(db, current_user.id, "upload_file", "file", str(rec.id), {"filename": rec.original_filename}, ip)
+        await log_audit(db, current_user.id, "upload_file", "file", str(rec.id), {"filename": rec.original_filename}, ip, getattr(request.state, "request_id", None))
     return file_records
 
 
@@ -124,5 +124,5 @@ async def delete_file(
     """删除文件"""
     file_service = FileService(db)
     await file_service.delete_file(file_id, current_user.id)
-    await log_audit(db, current_user.id, "delete_file", "file", str(file_id), None, get_client_ip(request))
+    await log_audit(db, current_user.id, "delete_file", "file", str(file_id), None, get_client_ip(request), getattr(request.state, "request_id", None))
     return None
