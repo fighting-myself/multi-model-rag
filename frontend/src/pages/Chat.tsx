@@ -1,9 +1,54 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse } from 'antd'
 import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
+import ReactECharts from 'echarts-for-react'
 import api from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import type { KnowledgeBaseListResponse, ConversationItem, ConversationListResponse, MessageItem, SourceItem } from '../types/api'
+
+/** 判断 JSON 是否为 ECharts 常用 option 结构（含 series 或 xAxis/yAxis） */
+function isEChartsOption(obj: unknown): obj is Record<string, unknown> {
+  if (!obj || typeof obj !== 'object') return false
+  const o = obj as Record<string, unknown>
+  return Array.isArray(o.series) || (o.xAxis != null && o.yAxis != null) || (o.series != null && typeof o.series === 'object')
+}
+
+/** 解析消息内容：拆出 ```json ... ``` 中可渲染为图表的 ECharts option，其余按文本展示 */
+function parseContentWithCharts(content: string | undefined): Array<{ type: 'text' | 'chart'; content: string | Record<string, unknown> }> {
+  if (!content || typeof content !== 'string') return [{ type: 'text', content: '' }]
+  const parts: Array<{ type: 'text' | 'chart'; content: string | Record<string, unknown> }> = []
+  const re = /```(\w*)\s*\n([\s\S]*?)```/g
+  let lastEnd = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > lastEnd) {
+      parts.push({ type: 'text', content: content.slice(lastEnd, m.index) })
+    }
+    const lang = (m[1] || '').toLowerCase()
+    const code = m[2].trim()
+    if (lang === 'json' && code) {
+      try {
+        const parsed = JSON.parse(code) as unknown
+        if (isEChartsOption(parsed)) {
+          parts.push({ type: 'chart', content: parsed as Record<string, unknown> })
+          lastEnd = re.lastIndex
+          continue
+        }
+      } catch {
+        // 非合法 JSON 或非 ECharts，当普通代码块当文本展示
+      }
+    }
+    parts.push({ type: 'text', content: m[0] })
+    lastEnd = re.lastIndex
+  }
+  if (lastEnd < content.length) {
+    parts.push({ type: 'text', content: content.slice(lastEnd) })
+  }
+  if (parts.length === 0) {
+    parts.push({ type: 'text', content })
+  }
+  return parts
+}
 
 export default function Chat() {
   const [messages, setMessages] = useState<MessageItem[]>([])
@@ -191,7 +236,7 @@ export default function Chat() {
             const data = line.slice(6).trim()
             if (data === '[DONE]') continue
             try {
-              const event = JSON.parse(data) as { type: string; content?: string; conversation_id?: number; confidence?: number; sources?: SourceItem[] }
+              const event = JSON.parse(data) as { type: string; content?: string; conversation_id?: number; confidence?: number; sources?: SourceItem[]; tools_used?: string[] }
               if (event.type === 'token' && event.content) {
                 tokenQueue.push(event.content)
                 if (!drainScheduled) {
@@ -202,10 +247,11 @@ export default function Chat() {
                 newConvId = event.conversation_id ?? null
                 confidence = event.confidence ?? null
                 sources = event.sources ?? []
+                const toolsUsed = event.tools_used ?? []
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === tempAssistantId
-                      ? { ...m, confidence: confidence ?? undefined, sources: sources.length ? sources : undefined }
+                      ? { ...m, confidence: confidence ?? undefined, sources: sources.length ? sources : undefined, tools_used: toolsUsed.length ? toolsUsed : undefined }
                       : m
                   )
                 )
@@ -327,9 +373,26 @@ export default function Chat() {
                     }
                     description={
                       <div>
-                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: (item.max_confidence_context || item.retrieved_context) ? 12 : 0 }}>
-                          {item.content}
+                        <div style={{ marginBottom: (item.max_confidence_context || item.retrieved_context) ? 12 : 0 }}>
+                          {parseContentWithCharts(item.content).map((part, idx) =>
+                            part.type === 'text' ? (
+                              <div key={idx} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                {part.content as string}
+                              </div>
+                            ) : (
+                              <div key={idx} style={{ width: '100%', minHeight: 280, marginTop: 8, marginBottom: 8 }}>
+                                <ReactECharts option={part.content as Record<string, unknown>} style={{ height: 320 }} notMerge />
+                              </div>
+                            )
+                          )}
                         </div>
+                        {/* 本回复调用的 MCP 工具 */}
+                        {item.role === 'assistant' && item.tools_used && item.tools_used.length > 0 && (
+                          <div style={{ marginTop: 8, marginBottom: 4, fontSize: 12, color: '#666' }}>
+                            <span style={{ color: '#1890ff', fontWeight: 500 }}>调用了以下工具：</span>{' '}
+                            {item.tools_used.join('、')}
+                          </div>
+                        )}
                         {/* 有参考来源时以溯源为主；无 sources 时再显示最高置信度上下文（兼容旧数据） */}
                         {item.max_confidence_context && !(item.sources && item.sources.length > 0) && (
                           <div style={{

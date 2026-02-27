@@ -157,6 +157,7 @@ export interface MessageItem {
   retrieved_context?: string  // 检索到的上下文内容
   max_confidence_context?: string  // 最高置信度对应的单个上下文
   sources?: SourceItem[]  // 引用来源列表
+  tools_used?: string[]  // 本回复调用的 MCP 工具名列表
 }
 
 export interface ConversationItem {
@@ -185,6 +186,7 @@ export interface ChatCompletionResponse {
   retrieved_context?: string  // 检索到的上下文内容
   max_confidence_context?: string  // 最高置信度对应的单个上下文
   sources?: SourceItem[]  // 引用来源列表
+  tools_used?: string[]  // 本回复调用的 MCP 工具名列表
 }
 
 /** 以文搜图 / 图搜图单条结果 */

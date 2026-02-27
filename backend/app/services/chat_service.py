@@ -545,6 +545,52 @@ class ChatService:
                 sources=None,
             )
 
+    async def _try_tool_phase(self, message: str) -> tuple[str, List[str]]:
+        """先判断工具库中是否有能用上的工具：让模型决定是否调用，若调用则执行并返回 (工具结果文本, 调用的工具名列表)；否则返回 ("", [])。"""
+        import logging
+        if not (MCP_AVAILABLE and gather_openai_tools_and_call_map and call_tool_on_server):
+            return "", []
+        mcp_result = await self.db.execute(
+            select(McpServer.id, McpServer.name, McpServer.transport_type, McpServer.config).where(
+                McpServer.enabled == True
+            )
+        )
+        servers = mcp_result.all()
+        if not servers:
+            return "", []
+        openai_tools, call_map = await gather_openai_tools_and_call_map(servers)
+        if not openai_tools or not call_map:
+            return "", []
+        system_tool = (
+            "根据用户问题判断是否需要调用以下工具获取信息。若需要请调用相应工具；若不需要则直接回复「不需要调用工具」。"
+        )
+        messages = [
+            {"role": "system", "content": system_tool},
+            {"role": "user", "content": message},
+        ]
+        content, tool_calls = await chat_completion_with_tools(messages, tools=openai_tools)
+        if not tool_calls:
+            return "", []
+        results: List[str] = []
+        tools_used_names: List[str] = []
+        for tc in tool_calls:
+            name = tc.get("name") or ""
+            args = tc.get("arguments") or {}
+            tools_used_names.append(name)
+            if name not in call_map:
+                results.append(f"[{name}]: [错误] 未知工具")
+                continue
+            transport_type, config_json, mcp_tool_name = call_map[name]
+            try:
+                tool_result = await call_tool_on_server(
+                    transport_type, config_json, mcp_tool_name, args
+                )
+                results.append(f"[{name}]: {tool_result}")
+            except Exception as e:
+                logging.warning("MCP 工具调用失败 %s: %s", name, e)
+                results.append(f"[{name}]: [工具执行错误] {str(e)}")
+        return "\n\n".join(results), tools_used_names
+
     async def _chat_after_user_message(
         self,
         conv: Conversation,
@@ -552,139 +598,78 @@ class ChatService:
         message: str,
         knowledge_base_id: Optional[int],
     ) -> ChatResponse:
-        """在已添加用户消息后执行 RAG + LLM，并返回 ChatResponse（由 chat() 在 try 内调用）。"""
-        # RAG 上下文（知识库检索）
+        """在已添加用户消息后执行：先判断并调用工具（若有）→ RAG 检索 → 结合工具结果与 RAG 上下文由 LLM 回答。"""
+        import logging
+        assistant_content = ""
         rag_context = ""
         rag_confidence = 0.0
         low_confidence_warning = ""
-        retrieved_context_original = ""  # 保存原始检索上下文（不含警告）
-        
+        retrieved_context_original = ""
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
-        if knowledge_base_id:
-            kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
-            kb = kb_result.scalar_one_or_none()
-            use_rerank = getattr(kb, "enable_rerank", True) if kb else True
-            use_hybrid = getattr(kb, "enable_hybrid", True) if kb else True
-            rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(
-                message, knowledge_base_id, top_k=10, use_rerank=use_rerank, use_hybrid=use_hybrid
-            )
-            retrieved_context_original = rag_context
-            if not rag_context.strip():
-                try:
-                    fallback = await self.db.execute(
-                        select(Chunk).where(
-                            Chunk.knowledge_base_id == knowledge_base_id,
-                            Chunk.content != "",
-                        ).order_by(Chunk.id).limit(20)
-                    )
-                    chunks = fallback.scalars().all()
-                    if chunks:
-                        rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
-                        retrieved_context_original = rag_context
-                        rag_confidence = 0.5
-                        selected_chunks = chunks
-                except Exception:
-                    pass
-            if not rag_context.strip():
-                rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
-        else:
-            try:
-                rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_all_kbs(message, conv.user_id, top_k=10)
-            except Exception as e:
-                import logging
-                logging.warning(f"全知识库检索失败: {e}，将使用空上下文继续对话")
-                rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
-            retrieved_context_original = rag_context
-            if rag_context and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
-                # 置信度低于阈值，提示用户并使用 LLM 自身知识
-                low_confidence_warning = f"[系统提示：当前内部知识库检索结果的置信度为 {rag_confidence:.2f}，低于阈值 {settings.RAG_CONFIDENCE_THRESHOLD}。请明确告知用户「当前内部知识库置信度比较低，将使用AI自身知识解答问题」，然后结合检索到的上下文（如有）和AI自身知识回答问题。]"
-                # 仍然使用检索到的上下文，但添加警告
-                rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
-
-        # 对话历史上下文
-        history_context = await self._build_chat_history_context(conv.id)
-        
-        # 合并上下文
-        full_context = ""
-        if rag_context:
-            if low_confidence_warning and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
-                # 低置信度时，明确告知 LLM 使用自身知识
-                full_context += f"【知识库上下文（置信度较低，请结合AI自身知识）】\n{rag_context}\n\n"
-            else:
-                full_context += f"【知识库上下文】\n{rag_context}\n\n"
-        if history_context:
-            full_context += f"【对话历史】\n{history_context}\n\n"
-
-        assistant_content = ""
         try:
-            # 若启用了 MCP 且存在已启用服务，则聚合工具并在需要时走工具调用循环
-            openai_tools = []
-            call_map = {}
-            if MCP_AVAILABLE and gather_openai_tools_and_call_map and call_tool_on_server:
-                mcp_result = await self.db.execute(
-                    select(McpServer.id, McpServer.name, McpServer.transport_type, McpServer.config).where(
-                        McpServer.enabled == True
-                    )
-                )
-                servers = mcp_result.all()
-                if servers:
-                    openai_tools, call_map = await gather_openai_tools_and_call_map(servers)
+            # 1) 先判断工具库是否有能用上的工具，若有则调用并得到工具结果与工具名列表
+            tool_results, tools_used = await self._try_tool_phase(message)
 
-            if openai_tools and call_map:
-                # 带工具的对话：系统提示 + 用户消息，循环处理 tool_calls
-                system_content = (
-                    "你是一个有帮助的AI助手。请根据以下信息回答用户问题；若需要调用外部工具（如查数据、计算等），请使用提供的工具。"
-                    + ("\n\n" + full_context.strip() if full_context.strip() else "")
+            # 2) RAG 上下文（知识库检索）
+            if knowledge_base_id:
+                kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
+                kb = kb_result.scalar_one_or_none()
+                use_rerank = getattr(kb, "enable_rerank", True) if kb else True
+                use_hybrid = getattr(kb, "enable_hybrid", True) if kb else True
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(
+                    message, knowledge_base_id, top_k=10, use_rerank=use_rerank, use_hybrid=use_hybrid
                 )
-                messages = [
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": message},
-                ]
-                max_tool_rounds = 5
-                for _ in range(max_tool_rounds):
-                    content, tool_calls = await chat_completion_with_tools(messages, tools=openai_tools)
-                    if content:
-                        assistant_content = content
-                        break
-                    if not tool_calls:
-                        assistant_content = "抱歉，未能生成有效回答。"
-                        break
-                    assistant_msg = {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {"id": tc.get("id") or "", "type": "function", "function": {"name": tc.get("name") or "", "arguments": _json.dumps(tc.get("arguments") or {})}}
-                            for tc in tool_calls
-                        ],
-                    }
-                    messages.append(assistant_msg)
-                    for tc in tool_calls:
-                        name = tc.get("name") or ""
-                        args = tc.get("arguments") or {}
-                        tid = tc.get("id") or ""
-                        if name not in call_map:
-                            tool_result = f"[错误] 未知工具: {name}"
-                        else:
-                            transport_type, config_json, mcp_tool_name = call_map[name]
-                            try:
-                                tool_result = await call_tool_on_server(
-                                    transport_type, config_json, mcp_tool_name, args
-                                )
-                            except Exception as e:
-                                import logging
-                                logging.warning("MCP 工具调用失败 %s: %s", name, e)
-                                tool_result = f"[工具执行错误] {str(e)}"
-                        messages.append({"role": "tool", "tool_call_id": tid, "content": tool_result})
-                if not assistant_content:
-                    assistant_content = "抱歉，工具调用后未能生成最终回答，请稍后重试。"
+                retrieved_context_original = rag_context
+                if not rag_context.strip():
+                    try:
+                        fallback = await self.db.execute(
+                            select(Chunk).where(
+                                Chunk.knowledge_base_id == knowledge_base_id,
+                                Chunk.content != "",
+                            ).order_by(Chunk.id).limit(20)
+                        )
+                        chunks = fallback.scalars().all()
+                        if chunks:
+                            rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
+                            retrieved_context_original = rag_context
+                            rag_confidence = 0.5
+                            selected_chunks = chunks
+                    except Exception:
+                        pass
+                if not rag_context.strip():
+                    rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
             else:
-                assistant_content = await llm_chat(
-                    user_content=message,
-                    context=full_context.strip(),
-                )
+                try:
+                    rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_all_kbs(message, conv.user_id, top_k=10)
+                except Exception as e:
+                    logging.warning(f"全知识库检索失败: {e}，将使用空上下文继续对话")
+                    rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+                retrieved_context_original = rag_context
+                if rag_context and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
+                    low_confidence_warning = f"[系统提示：当前内部知识库检索结果的置信度为 {rag_confidence:.2f}，低于阈值 {settings.RAG_CONFIDENCE_THRESHOLD}。请明确告知用户「当前内部知识库置信度比较低，将使用AI自身知识解答问题」，然后结合检索到的上下文（如有）和AI自身知识回答问题。]"
+                    rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
+
+            # 对话历史上下文
+            history_context = await self._build_chat_history_context(conv.id)
+
+            # 3) 合并上下文：工具结果 + RAG + 对话历史，再交给 LLM 一次性回答
+            full_context = ""
+            if tool_results:
+                full_context += f"【工具调用结果】\n{tool_results}\n\n"
+            if rag_context:
+                if low_confidence_warning and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
+                    full_context += f"【知识库上下文（置信度较低，请结合AI自身知识）】\n{rag_context}\n\n"
+                else:
+                    full_context += f"【知识库上下文】\n{rag_context}\n\n"
+            if history_context:
+                full_context += f"【对话历史】\n{history_context}\n\n"
+
+            assistant_content = await llm_chat(
+                user_content=message,
+                context=full_context.strip(),
+            )
         except Exception:
-            import logging
             logging.exception("聊天/工具调用异常")
             assistant_content = "抱歉，当前无法生成回答，请检查模型配置或网络。"
         
@@ -697,6 +682,7 @@ class ChatService:
         )
         sources = await self._build_sources_from_chunks(selected_chunks)
         sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
+        tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
 
         assistant_msg = Message(
             conversation_id=conv.id,
@@ -708,6 +694,7 @@ class ChatService:
             retrieved_context=retrieved_context_original if (has_real_retrieval and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD) else None,
             max_confidence_context=max_confidence_context if max_confidence_context else None,
             sources=sources_json,
+            tools_used=tools_used_json,
         )
         self.db.add(assistant_msg)
         # 更新对话标题（第一条消息时）和更新时间（模型有 onupdate，但显式更新更可靠）
@@ -749,6 +736,7 @@ class ChatService:
             retrieved_context=return_context,
             max_confidence_context=max_confidence_context,
             sources=sources,
+            tools_used=tools_used if tools_used else None,
         )
     
     async def chat_stream(
@@ -784,7 +772,10 @@ class ChatService:
         self.db.add(user_msg)
         await self.db.flush()
 
-        # 与 _chat_after_user_message 一致的 RAG + 历史上下文
+        # 1) 先判断工具库是否有能用上的工具，若有则调用并得到工具结果与工具名列表
+        tool_results, tools_used = await self._try_tool_phase(message)
+
+        # 2) RAG + 历史上下文（与 _chat_after_user_message 一致）
         rag_context = ""
         rag_confidence = 0.0
         low_confidence_warning = ""
@@ -831,7 +822,10 @@ class ChatService:
                 rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
 
         history_context = await self._build_chat_history_context(conv.id)
+        # 与非流式一致：先工具阶段再 RAG，此处工具阶段在 RAG 之前已执行
         full_context = ""
+        if tool_results:
+            full_context += f"【工具调用结果】\n{tool_results}\n\n"
         if rag_context:
             if low_confidence_warning and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
                 full_context += f"【知识库上下文（置信度较低，请结合AI自身知识）】\n{rag_context}\n\n"
@@ -845,14 +839,16 @@ class ChatService:
             async for delta in llm_chat_stream(user_content=message, context=full_context.strip()):
                 full_content.append(delta)
                 yield {"type": "token", "content": delta}
-        except Exception as e:
+        except Exception:
             logging.exception("流式生成失败")
-            full_content.append("抱歉，生成回答时遇到问题，请稍后重试。")
-            yield {"type": "token", "content": "抱歉，生成回答时遇到问题，请稍后重试。"}
+            err_msg = "抱歉，生成回答时遇到问题，请稍后重试。"
+            full_content = [err_msg]
+            yield {"type": "token", "content": err_msg}
 
         assistant_content = "".join(full_content)
         sources = await self._build_sources_from_chunks(selected_chunks)
         sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
+        tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
         assistant_msg = Message(
             conversation_id=conv.id,
             role="assistant",
@@ -863,6 +859,7 @@ class ChatService:
             retrieved_context=None,
             max_confidence_context=max_confidence_context,
             sources=sources_json,
+            tools_used=tools_used_json,
         )
         self.db.add(assistant_msg)
         if not conv.title or conv.title == message[:50]:
@@ -879,6 +876,7 @@ class ChatService:
             "conversation_id": conv.id,
             "confidence": return_confidence,
             "sources": [s.model_dump() for s in sources],
+            "tools_used": tools_used if tools_used else None,
         }
     
     async def get_conversations(

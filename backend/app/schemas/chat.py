@@ -33,6 +33,7 @@ class ChatResponse(BaseModel):
     retrieved_context: Optional[str] = None  # 检索到的上下文内容
     max_confidence_context: Optional[str] = None  # 最高置信度对应的单个上下文
     sources: Optional[List[SourceItem]] = None  # 引用来源列表
+    tools_used: Optional[List[str]] = None  # 本回复调用的 MCP 工具名列表
 
 
 class MessageResponse(BaseModel):
@@ -47,6 +48,22 @@ class MessageResponse(BaseModel):
     retrieved_context: Optional[str] = None  # 检索到的上下文内容
     max_confidence_context: Optional[str] = None  # 最高置信度对应的单个上下文
     sources: Optional[List[SourceItem]] = None  # 引用来源（溯源）
+    tools_used: Optional[List[str]] = None  # 本回复调用的 MCP 工具名列表
+
+    @field_validator("tools_used", mode="before")
+    @classmethod
+    def parse_tools_used(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                data = _json.loads(v)
+                return data if isinstance(data, list) else None
+            except Exception:
+                return None
+        return None
 
     @field_validator("sources", mode="before")
     @classmethod

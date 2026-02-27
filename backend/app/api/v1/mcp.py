@@ -181,9 +181,8 @@ async def list_server_tools(
     try:
         tools = await list_tools_from_server(server.transport_type, server.config)
     except Exception as e:
-        logger.exception("MCP 服务 %s (id=%s) 列举工具失败: %s", server.name, server_id, e)
-        # 从 ExceptionGroup 中取出第一个子异常信息，避免 502 里堆栈刷屏
         detail = _mcp_error_message(e)
+        logger.exception("MCP 服务 %s (id=%s) 列举工具失败: %s", server.name, server_id, detail)
         if "empty or missing Content-Type" in detail or "empty" in detail.lower() and "content" in detail.lower():
             detail = (
                 "MCP 服务端对 initialize 的 POST 返回了空 body 且未带 Content-Type，"
