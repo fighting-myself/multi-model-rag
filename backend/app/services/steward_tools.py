@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.core.config import settings
+from app.services.skill_loader import get_skills_summary, load_skill_documentation
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,28 @@ STEWARD_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "skill_list",
+            "description": "扫描 .skill 目录，返回当前可用技能列表（名称与简介）。在需要判断「有哪些技能可用」时调用；具体用法请再调用 skill_load 加载对应技能的完整文档。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skill_load",
+            "description": "按需加载指定技能的完整使用文档。传入 skill_id（与 skill_list 或 system 中可用技能列表括号内标识一致），返回该技能的详细说明（含工具名、参数、用法）。使用某技能前应先调用本工具获取文档再按文档调用对应工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_id": {"type": "string", "description": "技能标识，如 save_file，与可用技能列表中的 skill_id 一致"},
+                },
+                "required": ["skill_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "browser_close",
             "description": "关闭浏览器并释放资源。完成所有操作后应调用此工具。",
             "parameters": {"type": "object", "properties": {}},
@@ -194,6 +217,10 @@ async def run_steward_tool(name: str, arguments: Dict[str, Any]) -> str:
             return await _tool_page_cookies()
         if name == "file_write":
             return await _tool_file_write_async(arguments.get("path", ""), arguments.get("content", ""))
+        if name == "skill_list":
+            return _tool_skill_list()
+        if name == "skill_load":
+            return _tool_skill_load(arguments.get("skill_id", ""))
         if name == "browser_close":
             return await _tool_browser_close()
         return f"未知工具: {name}"
@@ -348,6 +375,17 @@ def _tool_file_write(path: str, content: str) -> str:
 async def _tool_file_write_async(path: str, content: str) -> str:
     import asyncio
     return await asyncio.to_thread(_tool_file_write, path, content)
+
+
+def _tool_skill_list() -> str:
+    """扫描 .skill 并返回可用技能摘要。"""
+    summary = get_skills_summary()
+    return summary if summary else "当前 .skill 目录下暂无技能，或目录不存在。"
+
+
+def _tool_skill_load(skill_id: str) -> str:
+    """按需加载指定技能的完整使用文档。"""
+    return load_skill_documentation(skill_id)
 
 
 async def _tool_browser_close() -> str:

@@ -6,11 +6,12 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.services.llm_service import chat_completion_with_tools
+from app.services.skill_loader import get_skills_summary
 from app.services.steward_tools import STEWARD_TOOLS, run_steward_tool, _tool_browser_close, clear_browser_context
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """你是浏览器助手，可以控制浏览器完成用户交给的任务。
+SYSTEM_PROMPT_BASE = """你是浏览器助手，可以控制浏览器完成用户交给的任务。
 你可以使用的工具有：
 - browser_launch：启动浏览器（必须最先调用且成功后再做后续操作；若之前失败可重试）
 - page_goto：打开指定 URL
@@ -19,9 +20,14 @@ SYSTEM_PROMPT = """你是浏览器助手，可以控制浏览器完成用户交�
 - page_wait：等待若干秒
 - page_get_text：获取页面可见文本（可选 selector 指定正文区域），用于打开文章/新闻页后读取内容并总结
 - page_cookies：获取当前页面的 Cookie（JSON），适合在用户登录后执行并返回给用户
+- file_write：将文本保存到服务器 data 目录下（path 相对 data，content 为内容）
+- skill_list：扫描 .skill 目录，返回当前可用技能列表（名称与简介）
+- skill_load：按需加载某一技能的完整使用文档（传入 skill_id），使用某技能前应先调用以获取工具名、参数与用法
 - browser_close：关闭浏览器
 
 请根据用户指令，按步骤调用上述工具完成任务。
+
+**技能使用约定**：当任务涉及「保存到文件」「写入 data」「使用某能力」等且与下方可用技能相关时，请先调用 skill_load(skill_id) 加载该技能的完整文档，再严格按文档中的工具名、参数与用法调用对应工具。若不确定有哪些技能，可先调用 skill_list 查看。
 
 若用户要求「打开某网页并总结 / 讲了什么」：必须先 browser_launch -> page_goto(该 URL) -> page_wait(2 或 3) -> page_get_text（先不传 selector 取整页；若结果噪音多可再试 selector 如 article、main、.article-content、.content）-> 根据返回的全文或正文进行总结并回复用户 -> browser_close。
 若用户要求「打开某网页登录并返回 cookie」，请依次：启动浏览器 -> 打开 URL -> 填写账号密码 -> 点击登录 -> page_wait -> page_cookies -> 将 cookie 总结或原样告诉用户 -> browser_close。
@@ -30,14 +36,24 @@ SYSTEM_PROMPT = """你是浏览器助手，可以控制浏览器完成用户交�
 对于加载较慢的网站，打开页面后先调用 page_wait 等待 2～5 秒再 page_get_text 或点击；整次任务耗时较长属正常。"""
 
 
+def _build_system_prompt() -> str:
+    """按需扫描 .skill 并拼装 system prompt。"""
+    prompt = SYSTEM_PROMPT_BASE
+    skills = get_skills_summary()
+    if skills:
+        prompt = prompt.rstrip() + "\n\n" + skills
+    return prompt
+
+
 async def run_steward(instruction: str) -> Tuple[bool, str, List[Dict[str, Any]], Optional[str]]:
     """
     执行浏览器助手任务。
     返回: (success, summary, steps, error_message)
     """
     clear_browser_context()
+    system_content = _build_system_prompt()
     messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
         {"role": "user", "content": instruction},
     ]
     steps: List[Dict[str, Any]] = []
