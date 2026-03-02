@@ -50,7 +50,7 @@ langchain-text-splitters>=1.0.0
 langchain-classic>=1.0.0
 sentence-transformers==2.2.2
 transformers==4.35.2
-#torch==2.1.1
+torch==2.10.0
 
 # 向量数据库（支持 Qdrant / Zilliz Cloud）
 qdrant-client==1.7.0
