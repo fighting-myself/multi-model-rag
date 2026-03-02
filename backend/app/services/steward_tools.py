@@ -195,6 +195,10 @@ def _playwright_friendly_error(e: Exception) -> str | None:
         return "浏览器未安装。请在服务器上执行: playwright install（仅需执行一次）"
     if "XServer" in msg or "headed browser" in msg or "TargetClosedError" in msg and "closed" in msg:
         return "当前环境无图形界面，请勿使用有界面模式。服务端已固定为无头模式，若仍报错请重启后端再试。"
+    if "Timeout" in type(e).__name__ or "Timeout" in msg or "timeout" in msg.lower():
+        if "page_goto" in msg or "goto" in msg or "60000" in msg:
+            return "打开页面超时（60 秒内未完成加载），可能网络较慢或目标站点响应较慢，请稍后重试或换用更快的站点。"
+        return "操作超时，请稍后重试或简化操作。"
     return None
 
 
@@ -266,8 +270,16 @@ async def _tool_page_goto(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     page = _get_page()
-    # 12306 等站点加载较慢，给 60 秒
-    resp = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    try:
+        # 12306 等站点加载较慢，给 60 秒；超时后返回友好提示不抛异常
+        resp = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        if "Timeout" in type(e).__name__ or "timeout" in str(e).lower():
+            return (
+                f"打开页面超时（60 秒内未完成加载）：{url}。"
+                "可能原因：网络较慢、目标站点响应慢或不可达。建议稍后重试或换用更快的站点。"
+            )
+        raise
     status = resp.status if resp else 0
     return f"已打开 {url}，状态码: {status}"
 

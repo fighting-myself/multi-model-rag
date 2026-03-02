@@ -97,9 +97,12 @@ async def run_steward_langchain(instruction: str) -> Tuple[bool, str, List[Dict[
     clear_browser_context()
     try:
         from langchain_openai import ChatOpenAI
-        from langchain.agents import create_tool_calling_agent, AgentExecutor
         from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
         from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+        try:
+            from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
+        except ImportError:
+            from langchain.agents import create_tool_calling_agent, AgentExecutor
     except ImportError as e:
         logger.warning("LangChain 或 Agent 依赖未安装: %s", e)
         raise  # 由 steward_agent.run_steward 捕获后执行原生循环
