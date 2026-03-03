@@ -2,7 +2,9 @@
 问答服务：支持基于知识库的 RAG（向量检索 + LLM）
 """
 import asyncio
+import base64
 import json as _json
+import logging
 from typing import Optional, AsyncGenerator, List, Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -44,6 +46,10 @@ except ImportError:
     list_tools_from_server = None
 
 from app.services.steward_tools import get_skills_openai_tools, run_steward_tool, SKILLS_TOOL_NAMES
+from app.services.knowledge_base_service import KnowledgeBaseService
+
+# 用户上传文件（PDF 等）提取文本后注入上下文的总长度上限，避免超出模型上下文
+CHAT_FILE_CONTENT_MAX_CHARS = 80000
 
 
 class ChatService:
@@ -491,6 +497,65 @@ class ChatService:
             )
         return sources
 
+    def _build_user_content_for_llm(
+        self, message: str, attachments: Optional[List[Dict[str, Any]]] = None
+    ) -> Any:
+        """构建发给 LLM 的用户消息 content：纯文本或多模态数组（文本含上传文件提取内容 + 图片）。"""
+        if not attachments:
+            return message
+        text = message or ""
+        file_content_parts: List[str] = []
+        total_file_chars = 0
+        for a in attachments:
+            if not isinstance(a, dict) or a.get("type") != "file":
+                continue
+            file_name = a.get("file_name") or "附件"
+            content_b64 = a.get("content_base64")
+            logging.info(
+                "智能问答 _build_user_content 文件附件 file_name=%s content_base64_len=%s",
+                file_name, len(content_b64) if content_b64 else 0,
+            )
+            if not content_b64:
+                file_content_parts.append(f"## {file_name}\n（未提供文件内容，仅知文件名）")
+                continue
+            try:
+                raw = base64.b64decode(content_b64, validate=True)
+            except Exception as e:
+                logging.warning("智能问答附件 base64 解码失败 %s: %s", file_name, e)
+                file_content_parts.append(f"## {file_name}\n（文件内容解码失败）")
+                continue
+            ext = (file_name.split(".")[-1] or "txt").lower()
+            if ext == "doc":
+                ext = "docx"
+            if ext == "xls":
+                ext = "xlsx"
+            try:
+                extracted = KnowledgeBaseService._extract_text(raw, ext)
+            except Exception as e:
+                logging.warning("智能问答附件文本提取失败 %s: %s", file_name, e)
+                extracted = ""
+            if not extracted or not extracted.strip():
+                logging.warning("智能问答附件提取结果为空 file_name=%s ext=%s", file_name, ext)
+                file_content_parts.append(f"## {file_name}\n（未能提取到文本内容）")
+                continue
+            remaining = CHAT_FILE_CONTENT_MAX_CHARS - total_file_chars
+            if remaining <= 0:
+                file_content_parts.append(f"## {file_name}\n（内容已截断，前文已达上限）")
+                continue
+            if len(extracted) > remaining:
+                extracted = extracted[:remaining] + "\n\n…（已截断）"
+            total_file_chars += len(extracted)
+            file_content_parts.append(f"## {file_name}\n\n{extracted}")
+        if file_content_parts:
+            text = (text + "\n\n【用户上传的文件内容】\n\n" + "\n\n---\n\n".join(file_content_parts)).strip()
+        parts: List[Dict[str, Any]] = [{"type": "text", "text": text}]
+        for a in attachments:
+            if not isinstance(a, dict):
+                continue
+            if a.get("type") == "image_url" and a.get("image_url") and a["image_url"].get("url"):
+                parts.append({"type": "image_url", "image_url": {"url": a["image_url"]["url"]}})
+        return parts if len(parts) > 1 else (text or "")
+
     async def chat(
         self,
         user_id: int,
@@ -501,6 +566,7 @@ class ChatService:
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> ChatResponse:
         """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史；工具分 MCP 与 Skills 两档开关。"""
         import logging
@@ -697,6 +763,7 @@ class ChatService:
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> ChatResponse:
         """在已添加用户消息后执行：先判断并调用工具（若有）→ RAG 检索 → 结合工具结果与 RAG 上下文由 LLM 回答。"""
         import logging
@@ -796,8 +863,9 @@ class ChatService:
                             for r in web_results
                         ]
 
+            user_content_llm = self._build_user_content_for_llm(message, attachments)
             assistant_content = await llm_chat(
-                user_content=message,
+                user_content=user_content_llm,
                 context=full_context.strip(),
             )
         except Exception:
@@ -889,6 +957,7 @@ class ChatService:
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）；工具分 MCP 与 Skills 两档开关。"""
         import logging
@@ -1008,9 +1077,10 @@ class ChatService:
                         for r in web_results
                     ]
 
+        user_content_llm = self._build_user_content_for_llm(message, attachments)
         full_content: List[str] = []
         try:
-            async for delta in llm_chat_stream(user_content=message, context=full_context.strip()):
+            async for delta in llm_chat_stream(user_content=user_content_llm, context=full_context.strip()):
                 full_content.append(delta)
                 yield {"type": "token", "content": delta}
         except Exception:

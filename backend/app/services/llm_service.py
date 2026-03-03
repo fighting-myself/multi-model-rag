@@ -1,7 +1,7 @@
 """
 LLM 服务：调用 OpenAI 兼容接口生成回答
 """
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 from openai import AsyncOpenAI
 from app.core.config import settings
 from app.services.time_context import get_system_time_context
@@ -14,12 +14,17 @@ def _client() -> AsyncOpenAI:
     )
 
 
+def _user_message_content(user_content: Union[str, List[Dict[str, Any]]]) -> Any:
+    """OpenAI 格式：user_content 为 str 或多模态 content 数组（含 text + image_url）。"""
+    return user_content
+
+
 async def chat_completion_stream(
-    user_content: str,
+    user_content: Union[str, List[Dict[str, Any]]],
     system_content: str = "你是一个有帮助的AI助手。",
     context: str = "",
 ) -> AsyncGenerator[str, None]:
-    """流式对话：逐 token 产出内容。"""
+    """流式对话：逐 token 产出内容。user_content 可为纯文本或多模态数组（文本+图片）。"""
     if context:
         kb_part = ""
         history_part = ""
@@ -40,11 +45,12 @@ async def chat_completion_stream(
         system_parts.append("\n请基于以上信息回答用户问题，保持对话连贯性。")
         system_content = "".join(system_parts)
     client = _client()
+    user_msg = {"role": "user", "content": _user_message_content(user_content)}
     stream = await client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[
             {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
+            user_msg,
         ],
         max_tokens=2048,
         stream=True,
@@ -56,11 +62,11 @@ async def chat_completion_stream(
 
 
 async def chat_completion(
-    user_content: str,
+    user_content: Union[str, List[Dict[str, Any]]],
     system_content: str = "你是一个有帮助的AI助手。请根据给定的上下文回答用户问题，若上下文中没有相关信息可说明并基于常识简要回答。",
     context: str = "",
 ) -> str:
-    """单轮对话，可带上下文（RAG + 对话历史）。"""
+    """单轮对话，可带上下文（RAG + 对话历史）。user_content 可为纯文本或多模态数组（文本+图片）。"""
     if context:
         # 解析上下文：知识库上下文和对话历史
         kb_part = ""
@@ -86,11 +92,12 @@ async def chat_completion(
         system_content = "".join(system_parts)
     system_content = system_content.rstrip() + "\n\n" + get_system_time_context()
     client = _client()
+    user_msg = {"role": "user", "content": _user_message_content(user_content)}
     resp = await client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[
             {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
+            user_msg,
         ],
         max_tokens=2048,
     )

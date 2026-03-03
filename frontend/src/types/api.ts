@@ -154,6 +154,14 @@ export interface WebSourceItem {
   snippet: string
 }
 
+/** 用户消息中附件的展示信息（豆包式：图片展示缩略图，文件展示文件名+格式） */
+export interface MessageAttachmentDisplay {
+  type: 'image' | 'file'
+  file_name: string
+  dataUrl?: string  // 仅图片：用于在气泡内展示
+  format?: string   // 仅文件：如 PDF、DOCX
+}
+
 export interface MessageItem {
   id: number
   role: 'user' | 'assistant' | 'system'
@@ -168,6 +176,8 @@ export interface MessageItem {
   tools_used?: string[]  // 本回复调用的 MCP 工具名列表
   web_retrieved_context?: string  // 联网检索得到的文本
   web_sources?: WebSourceItem[]  // 联网检索来源列表
+  /** 用户消息附件的展示用（图片缩略图、文件名+格式） */
+  attachments?: MessageAttachmentDisplay[]
 }
 
 export interface ConversationItem {

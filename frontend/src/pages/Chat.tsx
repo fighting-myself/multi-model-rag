@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
-import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, GlobalOutlined } from '@ant-design/icons'
+import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
-import api, { streamPost } from '../services/api'
+import api, { streamPost, uploadChatFile } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import PageSkeleton from '../components/PageSkeleton'
-import type { KnowledgeBaseListResponse, ConversationItem, ConversationListResponse, MessageItem, SourceItem, WebSourceItem } from '../types/api'
+import type { KnowledgeBaseListResponse, ConversationItem, ConversationListResponse, MessageItem, MessageAttachmentDisplay, SourceItem, WebSourceItem } from '../types/api'
 
 /** 判断 JSON 是否为 ECharts 常用 option 结构（含 series 或 xAxis/yAxis） */
 function isEChartsOption(obj: unknown): obj is Record<string, unknown> {
@@ -52,10 +52,43 @@ function parseContentWithCharts(content: string | undefined): Array<{ type: 'tex
   return parts
 }
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result as string)
+    r.onerror = () => reject(new Error('读取失败'))
+    r.readAsDataURL(file)
+  })
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const dataUrl = r.result as string
+      const base64 = dataUrl.indexOf(',') >= 0 ? dataUrl.slice(dataUrl.indexOf(',') + 1) : ''
+      resolve(base64)
+    }
+    r.onerror = () => reject(new Error('读取失败'))
+    r.readAsDataURL(file)
+  })
+}
+
+export interface ChatAttachmentConfig {
+  max_count: number
+  max_size_bytes: number
+  image_types: string[]
+  file_extensions: string[]
+}
+
 export default function Chat() {
   const [messages, setMessages] = useState<MessageItem[]>([])
   const [inputValue, setInputValue] = useState('')
+  const [attachmentConfig, setAttachmentConfig] = useState<ChatAttachmentConfig | null>(null)
+  const [attachmentList, setAttachmentList] = useState<Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; fileName: string; uploadId?: string }>>([])
   const [loading, setLoading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
   const [selectedKbId, setSelectedKbId] = useState<number | undefined>(undefined)
   const [conversations, setConversations] = useState<ConversationItem[]>([])
@@ -83,6 +116,9 @@ export default function Chat() {
     api.get<KnowledgeBaseListResponse>('/knowledge-bases?page_size=100')
       .then((res: KnowledgeBaseListResponse) => setKnowledgeBases(res?.knowledge_bases ?? []))
       .catch(() => {})
+    api.get<ChatAttachmentConfig>('/chat/settings/chat-attachment')
+      .then((res: ChatAttachmentConfig) => setAttachmentConfig(res))
+      .catch(() => setAttachmentConfig({ max_count: 10, max_size_bytes: 20 * 1024 * 1024, image_types: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], file_extensions: ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md'] }))
     loadConversations()
   }, [])
 
@@ -166,19 +202,92 @@ export default function Chat() {
     }
   }
 
-  const handleSend = async () => {
-    if (!inputValue.trim()) return
+  const isImageType = (type: string) => (attachmentConfig?.image_types ?? ['image/jpeg', 'image/png', 'image/gif', 'image/webp']).includes(type.toLowerCase())
+  const isAllowedFileExt = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase()
+    return ext && (attachmentConfig?.file_extensions ?? ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md']).includes(ext)
+  }
 
+  const addAttachmentFiles = async (files: FileList | File[]) => {
+    const cfg = attachmentConfig
+    const maxCount = cfg?.max_count ?? 10
+    const maxSize = cfg?.max_size_bytes ?? 20 * 1024 * 1024
+    const arr = Array.from(files)
+    const next: Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; fileName: string; uploadId?: string }> = []
+    for (const file of arr) {
+      if (attachmentList.length + next.length >= maxCount) {
+        message.warning('附件数量已达上限')
+        break
+      }
+      if (file.size > maxSize) {
+        message.warning(`跳过 ${file.name}：文件过大`)
+        continue
+      }
+      const isImage = isImageType(file.type)
+      const isFile = !isImage && isAllowedFileExt(file.name)
+      if (!isImage && !isFile) {
+        message.warning(`跳过 ${file.name}：类型不允许`)
+        continue
+      }
+      const item: { id: string; file: File; dataUrl?: string; isImage: boolean; fileName: string; uploadId?: string } = {
+        id: `${Date.now()}-${Math.random()}`,
+        file,
+        fileName: file.name,
+        isImage,
+        dataUrl: undefined,
+        uploadId: undefined,
+      }
+      if (isImage) {
+        try {
+          item.dataUrl = await fileToDataUrl(file)
+        } catch {
+          message.warning(`读取失败: ${file.name}`)
+          continue
+        }
+      }
+      try {
+        const res = await uploadChatFile(file)
+        item.uploadId = res.upload_id
+      } catch (e) {
+        message.warning(`上传失败: ${file.name}，${(e as Error).message}`)
+        continue
+      }
+      next.push(item)
+    }
+    if (next.length) setAttachmentList(prev => [...prev, ...next])
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachmentList(prev => prev.filter(a => a.id !== id))
+  }
+
+  const handleSend = async () => {
+    if (!inputValue.trim() && attachmentList.length === 0) return
+
+    const displayContent = [inputValue.trim(), attachmentList.length ? `[${attachmentList.length} 个附件]` : ''].filter(Boolean).join(' ') || '(附件)'
+    const attachmentsDisplay: MessageAttachmentDisplay[] = attachmentList.map((a) => {
+      const ext = (a.fileName.split('.').pop() || '').toUpperCase()
+      const formatMap: Record<string, string> = { PDF: 'PDF', DOC: 'DOC', DOCX: 'DOCX', TXT: 'TXT', XLS: 'XLS', XLSX: 'XLSX', PPT: 'PPT', PPTX: 'PPTX', MD: 'MD' }
+      return {
+        type: a.isImage ? 'image' : 'file',
+        file_name: a.fileName,
+        ...(a.isImage && a.dataUrl ? { dataUrl: a.dataUrl } : {}),
+        ...(!a.isImage && ext ? { format: formatMap[ext] || ext } : {}),
+      }
+    })
     const userMessage: MessageItem = {
       id: Date.now(),
       role: 'user',
-      content: inputValue,
+      content: displayContent,
       tokens: 0,
       created_at: new Date().toISOString(),
+      ...(attachmentsDisplay.length ? { attachments: attachmentsDisplay } : {}),
     }
     setMessages((prev: MessageItem[]) => [...prev, userMessage])
-    const messageContent = inputValue
+    const messageContent = inputValue.trim() || '(请根据上述附件内容回答)'
+    const listToSend = attachmentList
     setInputValue('')
+    setAttachmentList([])
     setLoading(true)
 
     const tempAssistantId = Date.now() + 1
@@ -194,14 +303,21 @@ export default function Chat() {
     ])
 
     try {
-      const { reader } = await streamPost('chat/completions/stream', {
+      const attachmentsToSend = listToSend.map((a) => ({
+        type: (a.isImage ? 'image' : 'file') as 'image' | 'file',
+        upload_id: a.uploadId,
+        file_name: a.fileName,
+      }))
+      const out = await streamPost('chat/completions/stream', {
         content: messageContent,
         knowledge_base_id: selectedKbId ?? null,
         conversation_id: currentConvId ?? null,
         enable_mcp_tools: enableMcpTools,
         enable_skills_tools: enableSkillsTools,
         enable_rag: enableRag,
+        ...(attachmentsToSend.length ? { attachments: attachmentsToSend } : {}),
       })
+      const reader = out.reader
       const decoder = new TextDecoder()
       let buffer = ''
       let newConvId: number | null = null
@@ -420,6 +536,63 @@ export default function Chat() {
                             )
                           )}
                         </div>
+                        {/* 用户消息附件：豆包式展示 - 图片用缩略图，文件用文件名+格式 */}
+                        {item.role === 'user' && item.attachments && item.attachments.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
+                            {item.attachments.map((att, idx) =>
+                              att.type === 'image' && att.dataUrl ? (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    padding: 8,
+                                    backgroundColor: 'var(--app-bg-subtle)',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--app-border)',
+                                  }}
+                                >
+                                  <img
+                                    src={att.dataUrl}
+                                    alt={att.file_name}
+                                    style={{
+                                      width: 72,
+                                      height: 72,
+                                      objectFit: 'cover',
+                                      borderRadius: '50%',
+                                      display: 'block',
+                                    }}
+                                  />
+                                  <span style={{ fontSize: 12, color: 'var(--app-text-muted)', marginTop: 6 }}>里面有什么</span>
+                                </div>
+                              ) : (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: '12px 16px',
+                                    backgroundColor: 'var(--app-bg-subtle)',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--app-border)',
+                                    minWidth: 100,
+                                  }}
+                                >
+                                  <FileTextOutlined style={{ fontSize: 28, color: 'var(--app-text-secondary)', marginBottom: 6 }} />
+                                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--app-text-primary)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={att.file_name}>
+                                    {att.file_name}
+                                  </span>
+                                  {att.format && (
+                                    <span style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>{att.format}</span>
+                                  )}
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
                         {/* 本回复调用的 MCP 工具 */}
                         {item.role === 'assistant' && item.tools_used && item.tools_used.length > 0 && (
                           <div style={{ marginTop: 8, marginBottom: 4, fontSize: 12, color: 'var(--app-text-muted)' }}>
@@ -595,28 +768,70 @@ export default function Chat() {
           <div ref={messagesEndRef} />
         </div>
         <div className="tech-input-wrap" style={{ flexShrink: 0, marginTop: 'auto' }}>
-          <Input.Group compact>
+          {attachmentList.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+              {attachmentList.map((a) => (
+                <div key={a.id} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', borderRadius: 6, border: '1px solid var(--app-border-subtle)', overflow: 'hidden', background: 'var(--app-bg-subtle)' }}>
+                  {a.isImage && a.dataUrl ? (
+                    <img src={a.dataUrl} alt="" style={{ width: 40, height: 40, objectFit: 'cover' }} />
+                  ) : (
+                    <span style={{ padding: '6px 8px', fontSize: 12, color: 'var(--app-text-secondary)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.fileName}</span>
+                  )}
+                  <Button type="text" size="small" icon={<CloseOutlined />} style={{ minWidth: 24, height: 24, padding: 0, color: 'var(--app-text-muted)' }} onClick={() => removeAttachment(a.id)} />
+                </div>
+              ))}
+            </div>
+          )}
+          <div
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
+            onDragLeave={(e) => { e.preventDefault(); setDragOver(false) }}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              if (e.dataTransfer.files.length) addAttachmentFiles(e.dataTransfer.files)
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: 12,
+              border: `1px solid ${dragOver ? 'var(--app-primary)' : 'var(--app-border-subtle)'}`,
+              background: dragOver ? 'var(--app-bg-subtle)' : 'var(--app-bg)',
+              padding: '8px 12px',
+              transition: 'border-color .15s, background .15s',
+            }}
+          >
             <Input
               value={inputValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
               onPressEnter={handleSend}
-              placeholder="输入您的问题..."
-              style={{ width: 'calc(100% - 80px)' }}
-              size="large"
+              placeholder="输入消息..."
+              variant="borderless"
+              style={{ flex: 1, fontSize: 14 }}
               disabled={loading}
+            />
+            <Button type="text" icon={<PaperClipOutlined />} onClick={() => fileInputRef.current?.click()} disabled={loading} style={{ color: 'var(--app-text-secondary)' }} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={[
+                ...(attachmentConfig?.image_types ?? ['image/jpeg', 'image/png', 'image/gif', 'image/webp']),
+                ...(attachmentConfig?.file_extensions ?? ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md']).map(e => `.${e}`),
+              ].join(',')}
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => { const f = e.target.files; if (f?.length) addAttachmentFiles(f); e.target.value = '' }}
             />
             <Button
               type="primary"
               icon={<SendOutlined />}
               onClick={handleSend}
               loading={loading}
-              size="large"
-              disabled={loading}
-              className="app-btn-3d app-glow-pulse"
+              disabled={loading || (!inputValue.trim() && attachmentList.length === 0)}
+              style={{ borderRadius: 8 }}
             >
               发送
             </Button>
-          </Input.Group>
+          </div>
         </div>
       </Card>
 

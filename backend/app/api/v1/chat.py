@@ -3,10 +3,12 @@
 """
 import asyncio
 import json
+import logging
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
+from typing import Optional, List
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -16,8 +18,23 @@ from app.api.v1.auth import get_current_active_user
 from app.api.deps import require_chat_rate_limit
 from app.services.chat_service import ChatService
 from app.services import cache_service
+from app.services.knowledge_base_service import KnowledgeBaseService
+from app.services.ocr_service import extract_text_from_image
 
 router = APIRouter()
+
+
+@router.get("/settings/chat-attachment")
+async def get_chat_attachment_settings(
+    current_user: UserResponse = Depends(get_current_active_user),
+):
+    """智能问答附件限制（数量、大小、类型），前端用于校验与 accept，不在界面展示具体数值。"""
+    return {
+        "max_count": getattr(settings, "CHAT_ATTACHMENT_MAX_COUNT", 10),
+        "max_size_bytes": getattr(settings, "CHAT_ATTACHMENT_MAX_SIZE_BYTES", 20 * 1024 * 1024),
+        "image_types": getattr(settings, "chat_attachment_image_types_list", ["image/jpeg", "image/png", "image/gif", "image/webp"]),
+        "file_extensions": getattr(settings, "chat_attachment_file_extensions_list", ["pdf", "doc", "docx", "txt", "xlsx", "xls", "pptx", "ppt", "md"]),
+    }
 
 
 @router.post("/completions", response_model=ChatResponse)
@@ -37,6 +54,12 @@ async def chat_completion(
         enable_mcp_tools = message.enable_mcp_tools if message.enable_mcp_tools is not None else default_tools
         enable_skills_tools = message.enable_skills_tools if message.enable_skills_tools is not None else default_tools
         enable_rag = message.enable_rag if message.enable_rag is not None else True
+        attachments_list = None
+        if message.attachments:
+            attachments_list = [
+                {"type": a.type, "image_url": a.image_url or {}, "file_name": getattr(a, "file_name", None), "content_base64": getattr(a, "content_base64", None)}
+                for a in message.attachments
+            ]
         response = await chat_service.chat(
             user_id=current_user.id,
             message=message.content,
@@ -46,6 +69,7 @@ async def chat_completion(
             enable_mcp_tools=enable_mcp_tools,
             enable_skills_tools=enable_skills_tools,
             enable_rag=enable_rag,
+            attachments=attachments_list,
         )
         return response
     except Exception as e:
@@ -53,34 +77,180 @@ async def chat_completion(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _parse_int_or_none(v) -> Optional[int]:
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_bool_or_default(v, default: bool) -> bool:
+    if v is None or v == "":
+        return default
+    if isinstance(v, bool):
+        return v
+    return str(v).lower() in ("true", "1", "yes")
+
+
+# 单次请求中上传文件内容总字符数上限（与 chat_service 一致）
+_STREAM_FILE_CONTENT_MAX_CHARS = 80000
+
+
+def _is_image_extension(ext: str) -> bool:
+    return (ext or "").lower() in ("jpg", "jpeg", "png", "gif", "webp")
+
+
+@router.post("/attachments/upload")
+async def chat_upload_file(
+    request: Request,
+    current_user: UserResponse = Depends(require_chat_rate_limit),
+):
+    """
+    上传即解析：非图片用内部解析（PDF/Word/TXT 等），图片用 LLM 辅助解析（OCR/描述）。
+    解析结果缓存后与消息一并走 RAG/MCP/Skills 流程。
+    返回 upload_id；发消息时在 attachments 中传 { type, upload_id, file_name }。
+    """
+    max_size = getattr(settings, "CHAT_ATTACHMENT_MAX_SIZE_BYTES", 20 * 1024 * 1024)
+    if "multipart/form-data" not in (request.headers.get("content-type") or "").lower():
+        raise HTTPException(status_code=400, detail="请使用 multipart/form-data 上传，字段名 file")
+    try:
+        form = await request.form(max_part_size=max_size)
+    except Exception as e:
+        logging.warning("智能问答上传 form 解析失败: %s", e)
+        raise HTTPException(status_code=400, detail="表单解析失败")
+    file = form.get("file")
+    if not file or not hasattr(file, "read"):
+        raise HTTPException(status_code=400, detail="请上传文件，字段名 file")
+    filename = getattr(file, "filename", None) or "附件"
+    try:
+        raw = await file.read()
+    except Exception as e:
+        logging.warning("智能问答上传读取失败 %s: %s", filename, e)
+        raise HTTPException(status_code=400, detail="文件读取失败")
+    if len(raw) > max_size:
+        raise HTTPException(status_code=400, detail=f"文件超过大小限制（{max_size // (1024*1024)}MB）")
+    ext = (filename.split(".")[-1] or "txt").lower()
+    if ext == "doc":
+        ext = "docx"
+    if ext == "xls":
+        ext = "xlsx"
+
+    is_image = _is_image_extension(ext)
+    if is_image:
+        try:
+            extracted = await extract_text_from_image(raw, ext)
+        except Exception as e:
+            logging.warning("智能问答上传图片 LLM 解析失败 %s: %s", filename, e)
+            extracted = ""
+        if not extracted or not extracted.strip():
+            extracted = "图片内容描述：解析未返回文字，请结合上下文理解。"
+    else:
+        try:
+            extracted = KnowledgeBaseService._extract_text(raw, ext)
+        except Exception as e:
+            logging.warning("智能问答上传提取文本失败 %s: %s", filename, e)
+            extracted = ""
+        if not extracted or not extracted.strip():
+            raise HTTPException(status_code=400, detail="未能从文件中提取到文本，请换用支持格式（如 PDF、Word、TXT）")
+
+    if len(extracted) > _STREAM_FILE_CONTENT_MAX_CHARS:
+        extracted = extracted[:_STREAM_FILE_CONTENT_MAX_CHARS] + "\n\n…（已截断）"
+    upload_id = uuid.uuid4().hex
+    attach_type = "image" if is_image else "file"
+    ok = cache_service.set(
+        cache_service.key_chat_upload(upload_id),
+        {"file_name": filename, "type": attach_type, "extracted_text": extracted},
+        ttl=cache_service.CHAT_UPLOAD_TTL,
+    )
+    if not ok:
+        logging.warning("智能问答上传缓存写入失败（Redis 可能未就绪），upload_id=%s", upload_id)
+        raise HTTPException(status_code=503, detail="临时存储不可用，请稍后重试")
+    logging.info("智能问答上传成功 file_name=%s upload_id=%s type=%s 解析长度=%s", filename, upload_id, attach_type, len(extracted))
+    return {"upload_id": upload_id, "file_name": filename, "type": attach_type}
+
+
 @router.post("/completions/stream")
 async def chat_completion_stream(
     request: Request,
-    message: ChatMessage,
     conversation_id: Optional[int] = None,
     knowledge_base_id: Optional[int] = None,
     current_user: UserResponse = Depends(require_chat_rate_limit),
     db: AsyncSession = Depends(get_db)
 ):
-    """发送消息（流式），每个 token 单独推送。客户端断开时停止生成。"""
+    """发送消息（流式）。支持 application/json（含 attachments base64）或 multipart/form-data（直接上传文件，服务端提取文本后走 RAG）。"""
+    content = ""
+    conv_id = conversation_id
+    kb_id = knowledge_base_id
+    enable_mcp_tools = True
+    enable_skills_tools = True
+    enable_rag = True
+    attachments_list: Optional[List[dict]] = None
+
+    try:
+        body_bytes = await request.body()
+    except Exception as e:
+        logging.warning("流式接口读取 body 失败: %s", e)
+        raise HTTPException(status_code=400, detail="请求体读取失败")
+    try:
+        body = json.loads(body_bytes)
+    except json.JSONDecodeError as e:
+        logging.warning("流式接口 body 非合法 JSON: %s", e)
+        raise HTTPException(status_code=422, detail="请求体必须是合法 JSON")
+
+    content = body.get("content") or ""
+    conv_id = conv_id or body.get("conversation_id")
+    kb_id = kb_id or body.get("knowledge_base_id")
+    enable_tools = body.get("enable_tools")
+    enable_mcp_tools = body.get("enable_mcp_tools") if body.get("enable_mcp_tools") is not None else (enable_tools if enable_tools is not None else True)
+    enable_skills_tools = body.get("enable_skills_tools") if body.get("enable_skills_tools") is not None else (enable_tools if enable_tools is not None else True)
+    enable_rag = body.get("enable_rag") if body.get("enable_rag") is not None else True
+
+    raw_attachments = body.get("attachments")
+    attachments_list = []
+    file_content_parts: List[str] = []
+    if raw_attachments and isinstance(raw_attachments, list):
+        for a in raw_attachments:
+            if not isinstance(a, dict):
+                continue
+            atype = a.get("type") or "file"
+            upload_id = a.get("upload_id")
+            if upload_id:
+                got = await asyncio.to_thread(cache_service.get, cache_service.key_chat_upload(upload_id))
+                if isinstance(got, dict) and got.get("extracted_text"):
+                    fn = got.get("file_name") or "附件"
+                    file_content_parts.append(f"## {fn}\n\n{got['extracted_text']}")
+                else:
+                    file_content_parts.append(f"## {a.get('file_name') or '附件'}\n（上传已过期或无效，请重新上传）")
+                continue
+            item = {
+                "type": atype,
+                "image_url": a.get("image_url") or {},
+                "file_name": a.get("file_name"),
+                "content_base64": a.get("content_base64"),
+            }
+            attachments_list.append(item)
+    if file_content_parts:
+        content = (content + "\n\n【用户上传的文件内容】\n\n" + "\n\n---\n\n".join(file_content_parts)).strip()
+        logging.info("智能问答流式 已注入用户上传文件内容 共 %s 段 总字符约 %s", len(file_content_parts), len(content))
+    if not attachments_list:
+        attachments_list = None
+
     chat_service = ChatService(db)
-    conv_id = conversation_id or message.conversation_id
 
     async def generate():
         import logging
         try:
-            default_tools = message.enable_tools if message.enable_tools is not None else True
-            enable_mcp_tools = message.enable_mcp_tools if message.enable_mcp_tools is not None else default_tools
-            enable_skills_tools = message.enable_skills_tools if message.enable_skills_tools is not None else default_tools
-            enable_rag = message.enable_rag if message.enable_rag is not None else True
             async for event in chat_service.chat_stream(
                 user_id=current_user.id,
-                message=message.content,
+                message=content,
                 conversation_id=conv_id,
-                knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
+                knowledge_base_id=kb_id,
                 enable_mcp_tools=enable_mcp_tools,
                 enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,
+                attachments=attachments_list,
             ):
                 if await request.is_disconnected():
                     break

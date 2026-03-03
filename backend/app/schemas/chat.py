@@ -4,7 +4,15 @@
 import json as _json
 from pydantic import BaseModel, field_validator
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
+
+
+class ChatMessageAttachment(BaseModel):
+    """多模态附件：图片为 image_url（供视觉模型）；文件为 file（文件名 + 可选 content_base64，后端提取文本后注入上下文）"""
+    type: str = "image_url"   # image_url | file
+    image_url: Optional[dict] = None  # {"url": "data:image/...;base64,..." 或 "https://..."}
+    file_name: Optional[str] = None   # 非图片时文件名
+    content_base64: Optional[str] = None  # 非图片时文件内容（base64），后端据此提取文本供 LLM 阅读
 
 
 class ChatMessage(BaseModel):
@@ -16,6 +24,7 @@ class ChatMessage(BaseModel):
     enable_mcp_tools: Optional[bool] = None   # True=开启 MCP 工具，False=关闭，None=用 enable_tools 或 True
     enable_skills_tools: Optional[bool] = None  # True=开启 Skills 技能（skill_list/skill_load/file_write），False=关闭，None=用 enable_tools 或 True
     enable_rag: Optional[bool] = None    # True=开启 RAG 增强上下文，False=关闭，None=默认 True
+    attachments: Optional[List[ChatMessageAttachment]] = None  # 多模态：图片等，url 为 data URL 或可访问的 https
 
 
 class SourceItem(BaseModel):

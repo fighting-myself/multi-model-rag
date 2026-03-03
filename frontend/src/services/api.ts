@@ -69,7 +69,7 @@ export async function fetchWithAuth(
   return res
 }
 
-/** 封装流式 POST，返回 response 与 body 的 reader（仅可消费一次）；调用方需自行解析 SSE。 */
+/** 封装流式 POST（JSON body），返回 response 与 body 的 reader；调用方需自行解析 SSE。 */
 export async function streamPost(
   path: string,
   body: unknown
@@ -87,6 +87,19 @@ export async function streamPost(
   const reader = res.body?.getReader()
   if (!reader) throw new Error('无响应体')
   return { response: res, reader }
+}
+
+/** 智能问答：先上传文件，返回 upload_id；发消息时在 attachments 里带 upload_id 即可（与豆包/DeepSeek 一致） */
+export async function uploadChatFile(file: File): Promise<{ upload_id: string; file_name: string; type: string }> {
+  const url = `${BASE_URL}/chat/attachments/upload`
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+  const res = await fetchWithAuth(url, { method: 'POST', body: formData })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as { detail?: string }).detail || res.statusText)
+  }
+  return res.json()
 }
 
 export default api

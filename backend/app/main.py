@@ -124,29 +124,45 @@ def _error_response(detail: str, status_code: int, request_id: str | None = None
     return body
 
 
+def _make_json_serializable(obj):
+    """递归将对象转为可 JSON 序列化形式，避免 bytes 等导致 TypeError。"""
+    if isinstance(obj, bytes):
+        return "<binary>"
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(v) for v in obj]
+    return obj
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """统一 HTTP 异常响应格式"""
+    """统一 HTTP 异常响应格式（detail 可能为 bytes，统一转 str）"""
     rid = getattr(request.state, "request_id", None)
+    detail = exc.detail
+    if isinstance(detail, bytes):
+        detail = "<binary>"
+    else:
+        detail = str(detail) if detail is not None else ""
     return JSONResponse(
         status_code=exc.status_code,
-        content=_error_response(
-            detail=exc.detail if isinstance(exc.detail, str) else str(exc.detail),
-            status_code=exc.status_code,
-            request_id=rid,
-        ),
+        content=_make_json_serializable(_error_response(detail=detail, status_code=exc.status_code, request_id=rid)),
     )
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """422 校验错误统一格式"""
+    """422 校验错误统一格式；errors/detail 中可能含 bytes（如 raw body），整包转为可序列化后再返回。"""
     rid = getattr(request.state, "request_id", None)
     errs = exc.errors()
     detail = errs[0].get("msg", "请求参数校验失败") if errs else "请求参数校验失败"
+    if isinstance(detail, bytes):
+        detail = "<binary>"
+    else:
+        detail = str(detail) if detail is not None else "请求参数校验失败"
     body = _error_response(detail=detail, status_code=422, request_id=rid)
-    body["errors"] = errs
-    return JSONResponse(status_code=422, content=body)
+    body["errors"] = _make_json_serializable(errs)
+    return JSONResponse(status_code=422, content=_make_json_serializable(body))
 
 
 @app.exception_handler(Exception)

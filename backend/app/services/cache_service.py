@@ -134,6 +134,14 @@ def key_file_list(user_id: int, page: int, page_size: int) -> str:
     return f"file:list:user:{user_id}:p:{page}:ps:{page_size}"
 
 
+# 智能问答「先上传、再发消息」：临时存上传文件的提取结果，key_chat_upload(upload_id)，TTL 10 分钟
+CHAT_UPLOAD_TTL = 600
+
+
+def key_chat_upload(upload_id: str) -> str:
+    return f"chat_upload:{upload_id}"
+
+
 def prefix_user_kb_list(user_id: int) -> str:
     return f"kb:list:user:{user_id}:"
 

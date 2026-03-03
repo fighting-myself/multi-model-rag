@@ -111,7 +111,21 @@ class Settings(BaseSettings):
     def forbidden_file_extensions_list(self) -> List[str]:
         """禁止上传的扩展名列表（可执行/脚本等）"""
         return [x.strip().lower() for x in self.FILE_FORBIDDEN_EXTENSIONS.split(",") if x.strip()]
-    
+
+    # 智能问答多模态附件（图片/文件）限制，不展示在界面
+    CHAT_ATTACHMENT_MAX_COUNT: int = 20  # 单条消息最多附件数量
+    CHAT_ATTACHMENT_MAX_SIZE_BYTES: int = 20 * 1024 * 1024  # 单个附件最大体积（默认 20MB）
+    CHAT_ATTACHMENT_IMAGE_TYPES: str = "image/jpeg,image/png,image/gif,image/webp"  # 图片 MIME
+    CHAT_ATTACHMENT_FILE_EXTENSIONS: str = "pdf,doc,docx,txt,xlsx,xls,pptx,ppt,md"  # 允许的文件扩展名（非图片）
+
+    @property
+    def chat_attachment_image_types_list(self) -> List[str]:
+        return [x.strip().lower() for x in self.CHAT_ATTACHMENT_IMAGE_TYPES.split(",") if x.strip()]
+
+    @property
+    def chat_attachment_file_extensions_list(self) -> List[str]:
+        return [x.strip().lower() for x in self.CHAT_ATTACHMENT_FILE_EXTENSIONS.split(",") if x.strip()]
+
     # 对话历史配置（均为会话级别：一个 conversation_id = 一次会话，其下多条消息为对话历史）
     CHAT_HISTORY_MAX_COUNT: int = 100   # 最多保留的会话数量，超出时删除最旧的会话
     CHAT_HISTORY_DEFAULT_COUNT: int = 50  # 列表默认每页展示的会话数
