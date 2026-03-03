@@ -6,3 +6,6 @@ frontend/node_modules/
 
 # 本地 Python 虚拟环境
 py312/
+
+# 后端 Python 字节码
+backend/**/*.pyc
