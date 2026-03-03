@@ -1,6 +1,6 @@
 # AI 多模态智能问答助手
 
-企业级 AI 多模态智能问答与自动化系统，支持多格式文档 RAG 问答、多模态检索、浏览器自动化与**电脑管家**（Computer Use），并可结合 `.skill` 技能与 MCP 工具综合完成任务。
+企业级 AI 多模态智能问答与自动化系统，支持多格式文档 RAG 问答、多模态检索、浏览器自动化与**电脑管家**（Computer Use），并可结合 **skills** 技能（OpenClaw 方式）与 MCP 工具综合完成任务。
 
 ## 功能特性
 
@@ -14,8 +14,8 @@
 ### 智能助手与技能
 
 - **浏览器助手**：多 Agent + Playwright，根据指令在浏览器中执行操作（打开网页、登录、获取 Cookie、填表、总结页面等）
-- **电脑管家**：视觉识别 + AI 决策 + 键鼠操作，像人一样看屏幕、移动鼠标、敲键盘，操作整机（任意软件、Windows 桌面等）；结合 `.skill` 技能综合解决问题
-- **.skill 技能**：项目根目录 `.skill` 下可放置技能文档（单文件 `.md` 或目录 + README），浏览器助手与电脑管家按需扫描并加载使用文档，按描述调用对应工具（如保存到 data 目录）
+- **电脑管家**：视觉识别 + AI 决策 + 键鼠操作，像人一样看屏幕、移动鼠标、敲键盘，操作整机（任意软件、Windows 桌面等）；结合 **skills** 技能综合解决问题
+- **skills 技能**：项目根目录 `skills/<name>/SKILL.md`（OpenClaw 方式），每个技能为子目录 + 必选 SKILL.md（支持 YAML frontmatter：name, description），浏览器助手与电脑管家按需扫描并加载，按文档调用对应工具（如保存到 data 目录）
 
 ### 扩展与部署
 
@@ -103,8 +103,8 @@ docker-compose up -d --build
 
 ```
 multi-model-rag/
-├── .skill/                    # 技能文档目录（可选）
-│   └── *.md 或 <name>/README.md   # 单文件技能或目录技能
+├── skills/                    # 技能目录（OpenClaw 方式）
+│   └── <name>/SKILL.md        # 每个技能一个子目录，内含 SKILL.md（可含 frontmatter）
 ├── backend/                   # 后端
 │   ├── app/
 │   │   ├── api/v1/            # API 路由（认证、文件、知识库、问答、计费、审计、MCP、浏览器助手、电脑管家等）
@@ -129,23 +129,23 @@ multi-model-rag/
 
 ## 技能与管家说明
 
-### .skill 技能
+### skills 技能（OpenClaw 方式）
 
-- 在项目根目录下创建 `.skill` 目录，可放置：
-  - **单文件技能**：`<name>.md`，首行 `# 标题` 为技能名，正文为描述（含工具名、参数、用法）
-  - **目录技能**：`<name>/` 下放 `README.md` 或 `index.md` 或 `doc.md` 为主文档，其他 `.md` 会一并加载
+- 在项目根目录下创建 `skills` 目录，每个技能为子目录 `<name>/`，内含必选 **SKILL.md**：
+  - 支持 YAML frontmatter：`name`、`description`（用于摘要与列表）
+  - 正文为使用说明（工具名、参数、用法）
 - **浏览器助手**与**电脑管家**在 system prompt 中会注入「可用技能」摘要；需要某技能时先调用 `skill_load(skill_id)` 加载完整文档，再按文档使用对应工具（如 `file_write` 保存到 data 目录）。
 
 ### 浏览器助手
 
 - 入口：前端「浏览器助手」→ 输入自然语言指令。
-- 能力：启动无头浏览器，打开 URL、填表、点击、获取页面文本/Cookie 等，并可调用 `file_write` 与 `.skill` 技能。
+- 能力：启动无头浏览器，打开 URL、填表、点击、获取页面文本/Cookie 等，并可调用 `file_write` 与 skills 技能。
 - 依赖：Playwright，需执行 `playwright install`。
 
 ### 电脑管家
 
 - 入口：前端「电脑管家」→ 输入任务目标。
-- 能力：截取当前屏幕 → 视觉模型分析截图 → 决策下一步（点击、输入、滚动、按键等）→ 执行键鼠操作；可结合 `skill_list` / `skill_load` 使用 `.skill` 能力。
+- 能力：截取当前屏幕 → 视觉模型分析截图 → 决策下一步（点击、输入、滚动、按键等）→ 执行键鼠操作；可结合 `skill_list` / `skill_load` 使用 skills 能力。
 - 依赖：pyautogui，且需在**有图形界面的环境**（如 Windows 桌面）运行；视觉模型可通过 `VISION_MODEL` 配置，为空则使用 `LLM_MODEL`。
 
 ## 文档

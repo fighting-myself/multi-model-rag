@@ -1,7 +1,7 @@
 """
 认证服务（直接使用 bcrypt，避免 passlib 与 bcrypt 版本不兼容）
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import bcrypt
 from jose import jwt, JWTError
@@ -51,9 +51,9 @@ class AuthService:
         """创建访问令牌"""
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=15)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=15)
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
         return encoded_jwt

@@ -1,5 +1,5 @@
 """
-电脑管家 API：视觉 + 键鼠操作 + .skill，操作整机屏幕
+电脑管家 API：视觉 + 键鼠操作 + skills，操作整机屏幕
 """
 import logging
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,7 +18,7 @@ async def computer_steward_run(
     body: StewardRunRequest,
     current_user: UserResponse = Depends(get_current_active_user),
 ):
-    """执行电脑管家任务：根据用户目标看屏、移动鼠标、敲键盘，结合 .skill 技能综合完成。"""
+    """执行电脑管家任务：根据用户目标看屏、移动鼠标、敲键盘，结合 skills 技能综合完成。"""
     try:
         success, summary, steps, error = await run_computer_steward(body.instruction)
         step_items = [StewardStepItem(tool=s["tool"], args=s["args"], result=s["result"]) for s in steps]

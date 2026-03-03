@@ -4,6 +4,7 @@ LLM 服务：调用 OpenAI 兼容接口生成回答
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 from openai import AsyncOpenAI
 from app.core.config import settings
+from app.services.time_context import get_system_time_context
 
 
 def _client() -> AsyncOpenAI:
@@ -83,6 +84,7 @@ async def chat_completion(
             system_parts.append(f"\n【对话历史】\n{history_part}")
         system_parts.append("\n请基于以上信息回答用户问题，保持对话连贯性。")
         system_content = "".join(system_parts)
+    system_content = system_content.rstrip() + "\n\n" + get_system_time_context()
     client = _client()
     resp = await client.chat.completions.create(
         model=settings.LLM_MODEL,
@@ -135,9 +137,12 @@ async def chat_completion_with_tools(
                     args = _json.loads(args_str)
                 except Exception:
                     args = {}
+                tc_name = (getattr(fn, "name", None) or "").strip()
+                if not tc_name and isinstance(args, dict) and "x" in args and "y" in args:
+                    tc_name = "mouse_click"
                 tool_calls.append({
                     "id": getattr(tc, "id", ""),
-                    "name": getattr(fn, "name", ""),
+                    "name": tc_name,
                     "arguments": args,
                 })
     return (content, tool_calls)

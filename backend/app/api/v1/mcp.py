@@ -183,7 +183,14 @@ async def list_server_tools(
     except Exception as e:
         detail = _mcp_error_message(e)
         logger.exception("MCP 服务 %s (id=%s) 列举工具失败: %s", server.name, server_id, detail)
-        if "empty or missing Content-Type" in detail or "empty" in detail.lower() and "content" in detail.lower():
+        if "text/event-stream" in detail and ("Expected" in detail or "contain" in detail or "got ''" in detail):
+            detail = (
+                "SSE 连接失败：服务端对 GET 请求的响应未返回 Content-Type: text/event-stream（当前为空或不符合）。"
+                "请确认：1) 该 URL 是否为 MCP SSE 端点（非 Streamable HTTP POST 端点）；"
+                "2) 阿里云/天气等 MCP 若使用 SSE，需提供返回 text/event-stream 的 GET 地址；"
+                "3) 若该服务仅支持 Streamable HTTP，请选用 streamable_http 传输类型并确认服务端实现。"
+            )
+        elif "empty or missing Content-Type" in detail or "empty" in detail.lower() and "content" in detail.lower():
             detail = (
                 "MCP 服务端对 initialize 的 POST 返回了空 body 且未带 Content-Type，"
                 "与 MCP Streamable HTTP 协议不符。若为阿里云百炼 MCP，请确认：1) 该端点是否声明兼容 MCP Streamable HTTP；"
@@ -192,7 +199,7 @@ async def list_server_tools(
         elif "Unexpected content type" in detail or "content type" in detail.lower():
             detail = (
                 f"{detail} "
-                "（MCP 服务端对 POST 的响应须为 Content-Type: application/json 或 text/event-stream）"
+                "（MCP 服务端对 POST 的响应须为 Content-Type: application/json；SSE 对 GET 的响应须为 text/event-stream）"
             )
         elif "Invalid JSON" in detail or "EOF while parsing" in detail or "Error parsing JSON" in detail or "input_value=b''" in detail:
             detail = (

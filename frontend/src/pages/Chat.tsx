@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
-import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined } from '@ant-design/icons'
+import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, GlobalOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import api, { streamPost } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import PageSkeleton from '../components/PageSkeleton'
-import type { KnowledgeBaseListResponse, ConversationItem, ConversationListResponse, MessageItem, SourceItem } from '../types/api'
+import type { KnowledgeBaseListResponse, ConversationItem, ConversationListResponse, MessageItem, SourceItem, WebSourceItem } from '../types/api'
 
 /** 判断 JSON 是否为 ECharts 常用 option 结构（含 series 或 xAxis/yAxis） */
 function isEChartsOption(obj: unknown): obj is Record<string, unknown> {
@@ -64,7 +64,8 @@ export default function Chat() {
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [sourcePreview, setSourcePreview] = useState<SourceItem | null>(null)
-  const [enableTools, setEnableTools] = useState(false)
+  const [enableMcpTools, setEnableMcpTools] = useState(false)
+  const [enableSkillsTools, setEnableSkillsTools] = useState(false)
   const [enableRag, setEnableRag] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const justSentMessageRef = useRef(false)
@@ -197,7 +198,8 @@ export default function Chat() {
         content: messageContent,
         knowledge_base_id: selectedKbId ?? null,
         conversation_id: currentConvId ?? null,
-        enable_tools: enableTools,
+        enable_mcp_tools: enableMcpTools,
+        enable_skills_tools: enableSkillsTools,
         enable_rag: enableRag,
       })
       const decoder = new TextDecoder()
@@ -205,6 +207,8 @@ export default function Chat() {
       let newConvId: number | null = null
       let confidence: number | null = null
       let sources: SourceItem[] = []
+      let webSources: WebSourceItem[] = []
+      let webRetrievedContext: string | null = null
       const tokenQueue: string[] = []
       let drainScheduled = false
       const drainTokenQueue = () => {
@@ -233,7 +237,16 @@ export default function Chat() {
             const data = line.slice(6).trim()
             if (data === '[DONE]') continue
             try {
-              const event = JSON.parse(data) as { type: string; content?: string; conversation_id?: number; confidence?: number; sources?: SourceItem[]; tools_used?: string[] }
+              const event = JSON.parse(data) as {
+                type: string
+                content?: string
+                conversation_id?: number
+                confidence?: number
+                sources?: SourceItem[]
+                tools_used?: string[]
+                web_retrieved_context?: string | null
+                web_sources?: WebSourceItem[] | null
+              }
               if (event.type === 'token' && event.content) {
                 tokenQueue.push(event.content)
                 if (!drainScheduled) {
@@ -244,11 +257,20 @@ export default function Chat() {
                 newConvId = event.conversation_id ?? null
                 confidence = event.confidence ?? null
                 sources = event.sources ?? []
+                webSources = event.web_sources ?? []
+                webRetrievedContext = event.web_retrieved_context ?? null
                 const toolsUsed = event.tools_used ?? []
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === tempAssistantId
-                      ? { ...m, confidence: confidence ?? undefined, sources: sources.length ? sources : undefined, tools_used: toolsUsed.length ? toolsUsed : undefined }
+                      ? {
+                          ...m,
+                          confidence: confidence ?? undefined,
+                          sources: sources.length ? sources : undefined,
+                          tools_used: toolsUsed.length ? toolsUsed : undefined,
+                          web_sources: webSources.length ? webSources : undefined,
+                          web_retrieved_context: webRetrievedContext ?? undefined,
+                        }
                       : m
                   )
                 )
@@ -318,8 +340,12 @@ export default function Chat() {
           />
           <Space split="|" style={{ color: 'var(--app-text-muted)', fontSize: 13 }}>
             <Space size={6}>
-              <span>工具调用</span>
-              <Switch size="small" checked={enableTools} onChange={setEnableTools} />
+              <span>MCP 工具</span>
+              <Switch size="small" checked={enableMcpTools} onChange={setEnableMcpTools} />
+            </Space>
+            <Space size={6}>
+              <span>Skills 技能</span>
+              <Switch size="small" checked={enableSkillsTools} onChange={setEnableSkillsTools} />
             </Space>
             <Space size={6}>
               <span>RAG 增强</span>
@@ -503,6 +529,62 @@ export default function Chat() {
                             ]}
                           />
                         )}
+                        {/* 联网检索内容（与知识库来源区分展示） */}
+                        {(item.web_sources && item.web_sources.length > 0) || (item.web_retrieved_context && item.web_retrieved_context.trim()) ? (
+                          <Collapse
+                            size="small"
+                            style={{ marginTop: 12 }}
+                            items={[
+                              {
+                                key: 'web',
+                                label: (
+                                  <span style={{ fontSize: 12, color: '#52c41a' }}>
+                                    <GlobalOutlined /> 联网检索内容
+                                    {item.web_sources && item.web_sources.length > 0 ? `（${item.web_sources.length} 条）` : ''}
+                                  </span>
+                                ),
+                                children: (
+                                  <div style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
+                                    {item.web_retrieved_context && item.web_retrieved_context.trim() && (
+                                      <div style={{
+                                        marginBottom: 12,
+                                        padding: 8,
+                                        backgroundColor: 'var(--app-bg-muted)',
+                                        borderRadius: 4,
+                                        whiteSpace: 'pre-wrap',
+                                        wordBreak: 'break-word',
+                                        borderLeft: '3px solid #52c41a',
+                                      }}>
+                                        {item.web_retrieved_context}
+                                      </div>
+                                    )}
+                                    {item.web_sources && item.web_sources.map((w: WebSourceItem, i: number) => (
+                                      <div
+                                        key={i}
+                                        style={{
+                                          marginBottom: 8,
+                                          padding: 8,
+                                          backgroundColor: 'var(--app-bg-muted)',
+                                          borderRadius: 8,
+                                          borderLeft: '3px solid #52c41a',
+                                        }}
+                                      >
+                                        <a href={w.url} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 500, color: '#52c41a' }}>
+                                          {w.title || w.url || `链接 ${i + 1}`}
+                                        </a>
+                                        {w.snippet && (
+                                          <div style={{ marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-primary)' }}>
+                                            {w.snippet}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ),
+                              },
+                            ]}
+                          />
+                        ) : null}
                       </div>
                     }
                   />

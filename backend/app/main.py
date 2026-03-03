@@ -1,7 +1,15 @@
 """
 FastAPI主应用入口
 """
+import asyncio
+import logging
+import sys
 import warnings
+
+# Windows：强制使用 ProactorEventLoop，否则 Playwright 等 create_subprocess_exec 会触发 NotImplementedError
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 # 屏蔽 transformers 与 torch 的 pytree 弃用告警（来自第三方库，不影响功能）
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*_register_pytree_node.*")
 
@@ -37,11 +45,36 @@ from app.core.logging import setup_logging
 from app.core.health import check_db, check_redis, check_vector, check_minio
 
 
+def _asyncio_exception_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+    """自定义 asyncio 异常处理器：对 Playwright/子进程的 NotImplementedError 只打一行日志，避免刷屏。"""
+    exc = context.get("exception")
+    if exc is not None and isinstance(exc, NotImplementedError):
+        msg = context.get("message", "")
+        if "subprocess" in msg or "subprocess" in str(exc):
+            logging.getLogger(__name__).warning(
+                "异步任务异常（当前环境不支持子进程，如 Windows 下 Playwright 浏览器助手）: %s", exc
+            )
+            return
+    # 其他异常按默认方式输出
+    if exc is not None:
+        logging.getLogger(__name__).error(
+            "%s", context.get("message", "Unhandled exception in async operation"), exc_info=exc
+        )
+    else:
+        logging.getLogger(__name__).error("%s", context.get("message", "Unknown async error"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时执行
     setup_logging()
+    # 减少 Windows 下 Playwright 子进程导致的 "Task exception was never retrieved" 刷屏
+    try:
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(_asyncio_exception_handler)
+    except RuntimeError:
+        pass
     # 创建数据库表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -8,6 +8,7 @@ import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from app.core.config import settings
+from app.services.time_context import get_system_time_context
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,7 @@ async def chat_completion_stream(
             system_parts.append(f"\n【对话历史】\n{history_part}")
         system_parts.append("\n请基于以上信息回答用户问题，保持对话连贯性。")
         system_content = "".join(system_parts)
+    system_content = system_content.rstrip() + "\n\n" + get_system_time_context()
     llm = _get_llm()
     from langchain_core.messages import SystemMessage, HumanMessage
     messages = [SystemMessage(content=system_content), HumanMessage(content=user_content)]

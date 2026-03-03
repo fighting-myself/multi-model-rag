@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     CHAT_HISTORY_DEFAULT_COUNT: int = 50  # 列表默认每页展示的会话数
     CHAT_CONTEXT_MESSAGE_COUNT: int = 8  # 单次会话内最近 N 条消息完整保留，更早的用总结替代
     
+    # 实时联网检索（豆包式：即时 RAG + 联网，用于很新/小众/专业名词等）
+    ENABLE_WEB_SEARCH: bool = True
+    WEB_SEARCH_MAX_RESULTS: int = 5
+
     # RAG检索配置
     RAG_CONFIDENCE_THRESHOLD: float = 0.6
     RRF_K: int = 60  # RRF混合打分的k值
@@ -137,6 +141,21 @@ class Settings(BaseSettings):
     # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Path = PROJECT_ROOT / "logs" / "app.log"
+
+    # 本地记忆（OpenClaw 风格：用户指令/执行结果/偏好，支持断点续做）
+    MEMORY_ENABLED: bool = True  # 是否启用记忆检索与存储
+    MEMORY_DB_PATH: str = ""  # 留空则使用 data/memory.db
+
+    # Bash/Shell 执行（OpenClaw exec 能力：供 skills 调用 gh、curl、op 等 CLI）
+    BASH_ENABLED: bool = True  # 是否允许 Agent 调用 bash 工具
+    BASH_TIMEOUT_SEC: int = 120  # 单次命令超时（秒）
+    BASH_MAX_OUTPUT_CHARS: int = 50000  # 输出最大字符数，超出截断
+    # 命令白名单：仅允许首命令在此列表中（空或不配置表示不限制）
+    BASH_SAFE_BINS: str = "gh,curl,jq,git,wget,op,memo,remindctl,grizzly,blogwatcher,summarize,node,python,python3,npx,npm"
+    # 审批模式：off=不审批 on-miss=仅当命令不在 safeBins 时需审批 always=始终需审批
+    BASH_REQUIRE_APPROVAL: str = "on-miss"
+    BASH_APPROVAL_EXPIRE_SEC: int = 300  # 审批请求过期时间（秒）
+    BASH_USE_PTY: bool = False  # 是否使用 PTY（交互式 CLI，仅 Unix 有效；Windows 忽略）
 
     # 用量与限流（按用户）
     RATE_LIMIT_UPLOAD_PER_DAY: int = 500  # 每日上传文件次数上限

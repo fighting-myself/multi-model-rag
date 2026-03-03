@@ -255,9 +255,14 @@ async def add_files_to_knowledge_base_stream(
         raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
     async def generate():
-        async for event in kb_service.add_files_stream(kb_id, body.file_ids, current_user.id):
-            yield f"data: {json.dumps(event, ensure_ascii=False, default=_json_serial)}\n\n"
-        yield "data: [DONE]\n\n"
+        try:
+            async for event in kb_service.add_files_stream(kb_id, body.file_ids, current_user.id):
+                yield f"data: {json.dumps(event, ensure_ascii=False, default=_json_serial)}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            await asyncio.to_thread(cache_service.delete, cache_service.key_kb_detail(kb_id))
+            await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_kb_list(current_user.id))
+            await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

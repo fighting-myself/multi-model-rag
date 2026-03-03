@@ -14,6 +14,7 @@ from app.models.knowledge_base import KnowledgeBaseFile
 from sqlalchemy import select
 
 from app.celery_app import celery_app
+from app.services import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,12 @@ def add_files_to_kb_task(self, kb_id: int, file_ids: List[int], user_id: int) ->
         if kb:
             await db.commit()
             await db.refresh(kb)
+        try:
+            cache_service.delete(cache_service.key_kb_detail(kb_id))
+            cache_service.delete_by_prefix(cache_service.prefix_user_kb_list(user_id))
+            cache_service.delete(cache_service.key_dashboard_stats(user_id))
+        except Exception as ce:
+            logger.debug("Celery 任务后缓存失效失败（不影响结果）: %s", ce)
         return {
             "kb_id": kb_id,
             "file_count": kb.file_count if kb else 0,

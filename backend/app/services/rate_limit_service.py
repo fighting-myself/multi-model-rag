@@ -3,6 +3,7 @@
 """
 import time
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.core.config import settings
@@ -39,7 +40,7 @@ def check_and_incr_upload(user_id: int) -> tuple[bool, int, int]:
     if not r:
         return True, 0, limit
     from datetime import datetime
-    day = datetime.utcnow().strftime("%Y-%m-%d")
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = f"rate:upload:user:{user_id}:day:{day}"
     try:
         n = r.incr(key)
@@ -60,7 +61,7 @@ def check_and_incr_conversation(user_id: int) -> tuple[bool, int, int]:
     if not r:
         return True, 0, limit
     from datetime import datetime
-    day = datetime.utcnow().strftime("%Y-%m-%d")
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = f"rate:chat:user:{user_id}:day:{day}"
     try:
         n = r.incr(key)
@@ -96,7 +97,7 @@ def check_and_incr_search_qps(user_id: int) -> tuple[bool, int, float]:
 def get_usage_snapshot(user_id: int) -> dict:
     """获取当前用户用量快照（用于仪表盘）：当日上传数、当日对话数、当前秒检索数及对应上限。"""
     from datetime import datetime
-    day = datetime.utcnow().strftime("%Y-%m-%d")
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     sec = int(time.time())
     r = _get_redis()
     upload_key = f"rate:upload:user:{user_id}:day:{day}"

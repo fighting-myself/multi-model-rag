@@ -42,6 +42,9 @@ class Message(Base):
     max_confidence_context = Column(Text, nullable=True)  # 最高置信度对应的单个上下文
     sources = Column(Text, nullable=True)  # 引用来源 JSON：[{"file_id", "original_filename", "chunk_index", "snippet"}]
     tools_used = Column(Text, nullable=True)  # 本条回复调用的 MCP 工具名列表 JSON：["tool_a", "tool_b"]
+    # 实时联网检索（豆包式）
+    web_retrieved_context = Column(Text, nullable=True)  # 联网检索得到的文本摘要
+    web_sources = Column(Text, nullable=True)  # 联网来源 JSON：[{"title", "url", "snippet"}]
     
     # 关系
     conversation = relationship("Conversation", back_populates="messages")

@@ -33,7 +33,9 @@ async def chat_completion(
     import logging
     chat_service = ChatService(db)
     try:
-        enable_tools = message.enable_tools if message.enable_tools is not None else True
+        default_tools = message.enable_tools if message.enable_tools is not None else True
+        enable_mcp_tools = message.enable_mcp_tools if message.enable_mcp_tools is not None else default_tools
+        enable_skills_tools = message.enable_skills_tools if message.enable_skills_tools is not None else default_tools
         enable_rag = message.enable_rag if message.enable_rag is not None else True
         response = await chat_service.chat(
             user_id=current_user.id,
@@ -41,7 +43,8 @@ async def chat_completion(
             conversation_id=conversation_id or message.conversation_id,
             knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
             stream=stream,
-            enable_tools=enable_tools,
+            enable_mcp_tools=enable_mcp_tools,
+            enable_skills_tools=enable_skills_tools,
             enable_rag=enable_rag,
         )
         return response
@@ -66,14 +69,17 @@ async def chat_completion_stream(
     async def generate():
         import logging
         try:
-            enable_tools = message.enable_tools if message.enable_tools is not None else True
+            default_tools = message.enable_tools if message.enable_tools is not None else True
+            enable_mcp_tools = message.enable_mcp_tools if message.enable_mcp_tools is not None else default_tools
+            enable_skills_tools = message.enable_skills_tools if message.enable_skills_tools is not None else default_tools
             enable_rag = message.enable_rag if message.enable_rag is not None else True
             async for event in chat_service.chat_stream(
                 user_id=current_user.id,
                 message=message.content,
                 conversation_id=conv_id,
                 knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
-                enable_tools=enable_tools,
+                enable_mcp_tools=enable_mcp_tools,
+                enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,
             ):
                 if await request.is_disconnected():

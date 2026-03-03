@@ -81,25 +81,34 @@ def _normalize_mcp_config(config: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         transport = "sse" if transport in ("http", "https") else transport
     return transport, config
 
-# 可选依赖：未安装 mcp 时仅做占位，不报错
+# 可选依赖：未安装 mcp 时仅做占位，不报错。mcp 1.1.x 移除了 streamable_http，阿里云/百炼等为 POST 协议会报 Content-Type 错误，需 mcp>=1.15 恢复 streamable_http_client
 try:
     import httpx
     from mcp import ClientSession
     from mcp.client.stdio import stdio_client
     from mcp.client.stdio import StdioServerParameters
-    from mcp.client.streamable_http import streamable_http_client
+    try:
+        from mcp.client.streamable_http import streamable_http_client
+    except ImportError:
+        streamable_http_client = None  # mcp 1.1+ 已移除，用 sse_client 替代
+    try:
+        from mcp.client.sse import sse_client as _sse_client
+    except ImportError:
+        _sse_client = None
     try:
         from mcp.shared._httpx_utils import create_mcp_http_client
     except ImportError:
         create_mcp_http_client = None
     MCP_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("MCP SDK 未安装或导入失败，MCP 功能不可用: %s", e)
     httpx = None  # type: ignore[assignment]
     MCP_AVAILABLE = False
     ClientSession = None
     stdio_client = None
     StdioServerParameters = None
     streamable_http_client = None
+    _sse_client = None
     create_mcp_http_client = None
 
 
@@ -252,14 +261,28 @@ def _session_for_server(transport_type: str, config: Dict[str, Any]):
                 timeout_sec = float(timeout_sec)
             except (TypeError, ValueError):
                 timeout_sec = None
-        http_client = _create_http_client_with_content_type_fix(timeout_sec)
-        if http_client is None and create_mcp_http_client:
-            http_client = create_mcp_http_client()
-        if http_client and headers:
-            http_client.headers.update(headers)
-        if http_client:
-            http_client.headers["Accept-Encoding"] = "identity"  # 防止服务端返回异常压缩导致 decompress Error -3
-        return streamable_http_client(url, http_client=http_client)
+        # mcp 1.0 有 streamable_http_client；mcp 1.1+ 仅保留 sse_client，且仅用于 type=sse（GET + text/event-stream）
+        # streamable_http 为 POST 协议，不可用 sse_client 替代
+        if streamable_http_client is not None:
+            http_client = _create_http_client_with_content_type_fix(timeout_sec)
+            if http_client is None and create_mcp_http_client:
+                http_client = create_mcp_http_client()
+            if http_client and headers:
+                http_client.headers.update(headers)
+            if http_client:
+                http_client.headers["Accept-Encoding"] = "identity"  # 防止服务端返回异常压缩导致 decompress Error -3
+            return streamable_http_client(url, http_client=http_client)
+        if transport_type in ("sse", "streamableHttp") and _sse_client is not None:
+            # 仅对 sse 使用 sse_client；streamable_http 在无 streamable_http_client 时不兼容
+            timeout_float = float(timeout_sec) if timeout_sec is not None else 120.0
+            sse_read = min(300.0, max(60.0, timeout_float * 2))
+            return _sse_client(url, headers=headers or None, timeout=timeout_float, sse_read_timeout=sse_read)
+        if transport_type == "streamable_http":
+            raise ValueError(
+                "当前 MCP SDK 版本(1.1+) 已移除 streamable_http 客户端，仅支持 sse。"
+                "请将该 MCP 服务的传输类型改为 sse，或确认服务端提供的是 SSE 端点（GET 返回 Content-Type: text/event-stream）。"
+            )
+        raise ValueError("当前 MCP SDK 版本不支持 streamable_http/sse，请升级或安装 mcp[streamable_http]")
     raise ValueError(f"不支持的 transport_type: {transport_type}")
 
 

@@ -12,7 +12,9 @@ class ChatMessage(BaseModel):
     content: str
     knowledge_base_id: Optional[int] = None
     conversation_id: Optional[int] = None
-    enable_tools: Optional[bool] = None   # True=开启工具调用，False=关闭，None=默认 True
+    enable_tools: Optional[bool] = None   # 兼容旧前端：未传 enable_mcp_tools/enable_skills_tools 时同时控制两者
+    enable_mcp_tools: Optional[bool] = None   # True=开启 MCP 工具，False=关闭，None=用 enable_tools 或 True
+    enable_skills_tools: Optional[bool] = None  # True=开启 Skills 技能（skill_list/skill_load/file_write），False=关闭，None=用 enable_tools 或 True
     enable_rag: Optional[bool] = None    # True=开启 RAG 增强上下文，False=关闭，None=默认 True
 
 
@@ -23,6 +25,13 @@ class SourceItem(BaseModel):
     chunk_index: int
     snippet: str  # 片段，约前 200 字
     knowledge_base_id: Optional[int] = None  # 所属知识库，便于前端跳转
+
+
+class WebSourceItem(BaseModel):
+    """联网检索来源（标题、链接、摘要）"""
+    title: str = ""
+    url: str = ""
+    snippet: str = ""
 
 
 class ChatResponse(BaseModel):
@@ -37,6 +46,8 @@ class ChatResponse(BaseModel):
     max_confidence_context: Optional[str] = None  # 最高置信度对应的单个上下文
     sources: Optional[List[SourceItem]] = None  # 引用来源列表
     tools_used: Optional[List[str]] = None  # 本回复调用的 MCP 工具名列表
+    web_retrieved_context: Optional[str] = None  # 联网检索得到的文本
+    web_sources: Optional[List[WebSourceItem]] = None  # 联网检索来源列表
 
 
 class MessageResponse(BaseModel):
@@ -52,6 +63,8 @@ class MessageResponse(BaseModel):
     max_confidence_context: Optional[str] = None  # 最高置信度对应的单个上下文
     sources: Optional[List[SourceItem]] = None  # 引用来源（溯源）
     tools_used: Optional[List[str]] = None  # 本回复调用的 MCP 工具名列表
+    web_retrieved_context: Optional[str] = None  # 联网检索得到的文本
+    web_sources: Optional[List[WebSourceItem]] = None  # 联网检索来源列表
 
     @field_validator("tools_used", mode="before")
     @classmethod
@@ -79,6 +92,21 @@ class MessageResponse(BaseModel):
             try:
                 data = _json.loads(v)
                 return [SourceItem(**x) for x in data] if data else []
+            except Exception:
+                return []
+        return None
+
+    @field_validator("web_sources", mode="before")
+    @classmethod
+    def parse_web_sources(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return [WebSourceItem(**x) if isinstance(x, dict) else x for x in v]
+        if isinstance(v, str):
+            try:
+                data = _json.loads(v)
+                return [WebSourceItem(**x) for x in data] if data else []
             except Exception:
                 return []
         return None

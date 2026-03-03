@@ -6,14 +6,14 @@ import json as _json
 from typing import Optional, AsyncGenerator, List, Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models.conversation import Conversation, Message
 from app.models.chunk import Chunk
 from app.models.file import File
 from app.models.knowledge_base import KnowledgeBase
 from app.models.mcp_server import McpServer
-from app.schemas.chat import ChatResponse, ConversationResponse, ConversationListResponse, SourceItem
+from app.schemas.chat import ChatResponse, ConversationResponse, ConversationListResponse, SourceItem, WebSourceItem
 from app.services.embedding_service import get_embedding
 from app.services.llm_service import (
     chat_completion as llm_chat,
@@ -24,6 +24,7 @@ from app.services.llm_service import (
 from app.services.vector_store import get_vector_client, chunk_id_to_vector_id
 from app.services.rerank_service import rerank
 from app.services.bm25_service import bm25_score
+from app.services.web_search_service import should_use_web_search, web_search, format_web_context
 from app.core.config import settings
 from app.services import cache_service
 from sqlalchemy.orm import selectinload
@@ -34,11 +35,15 @@ try:
         MCP_AVAILABLE,
         gather_openai_tools_and_call_map,
         call_tool_on_server,
+        list_tools_from_server,
     )
 except ImportError:
     MCP_AVAILABLE = False
     gather_openai_tools_and_call_map = None
     call_tool_on_server = None
+    list_tools_from_server = None
+
+from app.services.steward_tools import get_skills_openai_tools, run_steward_tool, SKILLS_TOOL_NAMES
 
 
 class ChatService:
@@ -493,10 +498,11 @@ class ChatService:
         conversation_id: Optional[int] = None,
         knowledge_base_id: Optional[int] = None,
         stream: bool = False,
-        enable_tools: bool = True,
+        enable_mcp_tools: bool = True,
+        enable_skills_tools: bool = True,
         enable_rag: bool = True,
     ) -> ChatResponse:
-        """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史"""
+        """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史；工具分 MCP 与 Skills 两档开关。"""
         import logging
         conv = None
         try:
@@ -529,7 +535,8 @@ class ChatService:
         try:
             return await self._chat_after_user_message(
                 conv, user_msg, message, knowledge_base_id,
-                enable_tools=enable_tools,
+                enable_mcp_tools=enable_mcp_tools,
+                enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,
             )
         except Exception:
@@ -553,29 +560,61 @@ class ChatService:
                 message=fallback_content,
                 tokens=0,
                 model=settings.LLM_MODEL,
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
                 confidence=None,
                 retrieved_context=None,
                 max_confidence_context=None,
                 sources=None,
             )
 
-    async def _try_tool_phase(self, message: str) -> tuple[str, List[str]]:
-        """先判断工具库中是否有能用上的工具：让模型决定是否调用，若调用则执行并返回 (工具结果文本, 调用的工具名列表)；否则返回 ("", [])。"""
+    async def _try_tool_phase(
+        self, message: str, enable_mcp_tools: bool = True, enable_skills_tools: bool = True
+    ) -> tuple[str, List[str]]:
+        """先判断工具库中是否有能用上的工具：让模型决定是否调用，若调用则执行并返回 (工具结果文本, 调用的工具名列表)；否则返回 ("", [])。
+        支持 MCP 工具与 Skills 工具（skill_list/skill_load/file_write）合并；由 enable_mcp_tools / enable_skills_tools 分别控制。"""
         import logging
-        if not (MCP_AVAILABLE and gather_openai_tools_and_call_map and call_tool_on_server):
+        MCP_LIST_TOOLS_NAME = "mcp_list_tools"  # 用户问「有哪些 MCP 工具」时由模型调用，动态查询
+        openai_tools: List[Dict[str, Any]] = []
+        mcp_call_map: Dict[str, tuple] = {}
+        skills_tool_names = set(SKILLS_TOOL_NAMES) if enable_skills_tools else set()
+        existing_names: set = set()
+        if enable_mcp_tools and MCP_AVAILABLE:
+            # 始终加入「列出 MCP 工具」工具，用户问有哪些 MCP 能力时模型调用此工具动态查询（新接入的 MCP 也能查到）
+            if list_tools_from_server and MCP_LIST_TOOLS_NAME not in existing_names:
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": MCP_LIST_TOOLS_NAME,
+                        "description": "列出当前系统已启用的所有 MCP 服务及其工具名称与描述。用户询问「有哪些 MCP 工具」「有哪些 MCP 能力」「现在有哪些 MCP」时请调用此工具获取最新列表（动态查询，新接入的 MCP 也会被列出）。",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                })
+                existing_names.add(MCP_LIST_TOOLS_NAME)
+            if gather_openai_tools_and_call_map and call_tool_on_server:
+                mcp_result = await self.db.execute(
+                    select(McpServer.id, McpServer.name, McpServer.transport_type, McpServer.config).where(
+                        McpServer.enabled == True
+                    )
+                )
+                servers = mcp_result.all()
+                if servers:
+                    mcp_tools, mcp_call_map = await gather_openai_tools_and_call_map(servers)
+                    for t in mcp_tools or []:
+                        fn = (t.get("function") or {}).get("name")
+                        if fn and fn not in existing_names:
+                            openai_tools.append(t)
+                            existing_names.add(fn)
+
+        if enable_skills_tools:
+            for t in get_skills_openai_tools():
+                fn = (t.get("function") or {}).get("name")
+                if fn and fn not in existing_names:
+                    openai_tools.append(t)
+                    existing_names.add(fn)
+
+        if not openai_tools:
             return "", []
-        mcp_result = await self.db.execute(
-            select(McpServer.id, McpServer.name, McpServer.transport_type, McpServer.config).where(
-                McpServer.enabled == True
-            )
-        )
-        servers = mcp_result.all()
-        if not servers:
-            return "", []
-        openai_tools, call_map = await gather_openai_tools_and_call_map(servers)
-        if not openai_tools or not call_map:
-            return "", []
+
         system_tool = (
             "根据用户问题判断是否需要调用以下工具获取信息。若需要请调用相应工具；若不需要则直接回复「不需要调用工具」。"
         )
@@ -592,19 +631,62 @@ class ChatService:
             name = tc.get("name") or ""
             args = tc.get("arguments") or {}
             tools_used_names.append(name)
-            if name not in call_map:
+            if name == MCP_LIST_TOOLS_NAME:
+                try:
+                    tool_result = await self._tool_mcp_list_tools()
+                    results.append(f"[{name}]: {tool_result}")
+                except Exception as e:
+                    logging.warning("mcp_list_tools 调用失败: %s", e)
+                    results.append(f"[{name}]: [工具执行错误] {str(e)}")
+            elif name in skills_tool_names:
+                try:
+                    tool_result = await run_steward_tool(name, args)
+                    results.append(f"[{name}]: {tool_result}")
+                except Exception as e:
+                    logging.warning("Skills 工具调用失败 %s: %s", name, e)
+                    results.append(f"[{name}]: [工具执行错误] {str(e)}")
+            elif name in mcp_call_map:
+                transport_type, config_json, mcp_tool_name = mcp_call_map[name]
+                try:
+                    tool_result = await call_tool_on_server(
+                        transport_type, config_json, mcp_tool_name, args
+                    )
+                    results.append(f"[{name}]: {tool_result}")
+                except Exception as e:
+                    logging.warning("MCP 工具调用失败 %s: %s", name, e)
+                    results.append(f"[{name}]: [工具执行错误] {str(e)}")
+            else:
                 results.append(f"[{name}]: [错误] 未知工具")
-                continue
-            transport_type, config_json, mcp_tool_name = call_map[name]
-            try:
-                tool_result = await call_tool_on_server(
-                    transport_type, config_json, mcp_tool_name, args
-                )
-                results.append(f"[{name}]: {tool_result}")
-            except Exception as e:
-                logging.warning("MCP 工具调用失败 %s: %s", name, e)
-                results.append(f"[{name}]: [工具执行错误] {str(e)}")
         return "\n\n".join(results), tools_used_names
+
+    async def _tool_mcp_list_tools(self) -> str:
+        """列出当前已启用的 MCP 服务及其工具（动态查询，新接入的 MCP 也能查到）。用户问「有哪些 MCP 工具」时由模型调用。"""
+        if not MCP_AVAILABLE or not list_tools_from_server:
+            return "当前环境未安装或未启用 MCP，无法列出 MCP 工具。"
+        mcp_result = await self.db.execute(
+            select(McpServer.name, McpServer.transport_type, McpServer.config).where(
+                McpServer.enabled == True
+            )
+        )
+        servers = mcp_result.all()
+        if not servers:
+            return "当前未配置或未启用任何 MCP 服务，暂无 MCP 工具。"
+        lines: List[str] = []
+        for sname, transport_type, config in servers:
+            try:
+                cfg_str = config if isinstance(config, str) else _json.dumps(config or {})
+                tools = await list_tools_from_server(transport_type, cfg_str)
+            except Exception:
+                lines.append(f"- **{sname}**: (获取工具列表失败)")
+                continue
+            if not tools:
+                lines.append(f"- **{sname}**: (暂无工具)")
+            else:
+                for t in tools:
+                    name = t.get("name") or ""
+                    desc = (t.get("description") or "")[:120]
+                    lines.append(f"- **{sname}** / {name}: {desc}")
+        return "当前已启用的 MCP 工具：\n\n" + "\n".join(lines)
 
     async def _chat_after_user_message(
         self,
@@ -612,7 +694,8 @@ class ChatService:
         user_msg: Message,
         message: str,
         knowledge_base_id: Optional[int],
-        enable_tools: bool = True,
+        enable_mcp_tools: bool = True,
+        enable_skills_tools: bool = True,
         enable_rag: bool = True,
     ) -> ChatResponse:
         """在已添加用户消息后执行：先判断并调用工具（若有）→ RAG 检索 → 结合工具结果与 RAG 上下文由 LLM 回答。"""
@@ -624,11 +707,15 @@ class ChatService:
         retrieved_context_original = ""
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
+        web_retrieved_context = ""
+        web_sources_list: List[Dict[str, str]] = []
         try:
-            # 1) 工具阶段（可由前端关闭）
-            if enable_tools:
+            # 1) 工具阶段（可由前端分别关闭 MCP / Skills）
+            if enable_mcp_tools or enable_skills_tools:
                 try:
-                    tool_results, tools_used = await self._try_tool_phase(message)
+                    tool_results, tools_used = await self._try_tool_phase(
+                        message, enable_mcp_tools=enable_mcp_tools, enable_skills_tools=enable_skills_tools
+                    )
                 except Exception as e:
                     logging.warning("工具阶段失败，将不调用工具继续回答: %s", e)
                     tool_results, tools_used = "", []
@@ -677,10 +764,10 @@ class ChatService:
             # enable_rag=False 时 rag_context 保持空
 
             # 对话历史上下文（未开 RAG/工具时为降低首字延迟不做历史总结 LLM 调用）
-            skip_summary = not (enable_rag or enable_tools)
+            skip_summary = not (enable_rag or enable_mcp_tools or enable_skills_tools)
             history_context = await self._build_chat_history_context(conv.id, skip_summary=skip_summary)
 
-            # 3) 合并上下文：工具结果 + RAG + 对话历史，再交给 LLM 一次性回答
+            # 3) 合并上下文：工具结果 + RAG + 对话历史（MCP/Skills 列表由模型通过 mcp_list_tools / skill_list 动态查询）
             full_context = ""
             if tool_results:
                 full_context += f"【工具调用结果】\n{tool_results}\n\n"
@@ -691,6 +778,23 @@ class ChatService:
                     full_context += f"【知识库上下文】\n{rag_context}\n\n"
             if history_context:
                 full_context += f"【对话历史】\n{history_context}\n\n"
+
+            # 实时联网检索（豆包式：很新/小众/专业名词等与 RAG 一并参与回答）
+            if getattr(settings, "ENABLE_WEB_SEARCH", True):
+                rag_has_content = bool(
+                    retrieved_context_original
+                    and retrieved_context_original.strip()
+                    and not retrieved_context_original.startswith("[系统提示：")
+                )
+                if should_use_web_search(message, rag_has_content=rag_has_content):
+                    web_results = await web_search(message)
+                    if web_results:
+                        web_retrieved_context = format_web_context(web_results)
+                        full_context += f"【联网检索内容】\n{web_retrieved_context}\n\n"
+                        web_sources_list = [
+                            {"title": (r.get("title") or "")[:200], "url": (r.get("url") or "")[:500], "snippet": (r.get("snippet") or "")[:800]}
+                            for r in web_results
+                        ]
 
             assistant_content = await llm_chat(
                 user_content=message,
@@ -710,6 +814,7 @@ class ChatService:
         sources = await self._build_sources_from_chunks(selected_chunks)
         sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
         tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
+        web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
 
         assistant_msg = Message(
             conversation_id=conv.id,
@@ -722,6 +827,8 @@ class ChatService:
             max_confidence_context=max_confidence_context if max_confidence_context else None,
             sources=sources_json,
             tools_used=tools_used_json,
+            web_retrieved_context=web_retrieved_context or None,
+            web_sources=web_sources_json,
         )
         self.db.add(assistant_msg)
         # 更新对话标题（第一条消息时）和更新时间（模型有 onupdate，但显式更新更可靠）
@@ -757,17 +864,20 @@ class ChatService:
             elif rag_context and rag_context.strip() and not rag_context.startswith("[系统提示："):
                 return_context = rag_context
         
+        web_sources_response = [WebSourceItem(**w) for w in web_sources_list] if web_sources_list else None
         return ChatResponse(
             conversation_id=conv.id,
             message=assistant_content,
             tokens=assistant_msg.tokens,
             model=assistant_msg.model,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             confidence=return_confidence,
             retrieved_context=return_context,
             max_confidence_context=max_confidence_context,
             sources=sources,
             tools_used=tools_used if tools_used else None,
+            web_retrieved_context=web_retrieved_context or None,
+            web_sources=web_sources_response,
         )
     
     async def chat_stream(
@@ -776,10 +886,11 @@ class ChatService:
         message: str,
         conversation_id: Optional[int] = None,
         knowledge_base_id: Optional[int] = None,
-        enable_tools: bool = True,
+        enable_mcp_tools: bool = True,
+        enable_skills_tools: bool = True,
         enable_rag: bool = True,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）。"""
+        """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）；工具分 MCP 与 Skills 两档开关。"""
         import logging
         conv = None
         try:
@@ -805,10 +916,12 @@ class ChatService:
         self.db.add(user_msg)
         await self.db.flush()
 
-        # 1) 工具阶段（可由前端关闭）
-        if enable_tools:
+        # 1) 工具阶段（可由前端分别关闭 MCP / Skills）
+        if enable_mcp_tools or enable_skills_tools:
             try:
-                tool_results, tools_used = await self._try_tool_phase(message)
+                tool_results, tools_used = await self._try_tool_phase(
+                    message, enable_mcp_tools=enable_mcp_tools, enable_skills_tools=enable_skills_tools
+                )
             except Exception as e:
                 logging.warning("工具阶段失败，将不调用工具继续回答: %s", e)
                 tool_results, tools_used = "", []
@@ -821,6 +934,8 @@ class ChatService:
         low_confidence_warning = ""
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
+        web_retrieved_context = ""
+        web_sources_list: List[Dict[str, str]] = []
         if enable_rag and knowledge_base_id:
             kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
             kb = kb_result.scalar_one_or_none()
@@ -864,7 +979,7 @@ class ChatService:
 
         # 流式为追求首字延迟，不做历史总结 LLM 调用
         history_context = await self._build_chat_history_context(conv.id, skip_summary=True)
-        # 与非流式一致：先工具阶段再 RAG，此处工具阶段在 RAG 之前已执行
+        # 与非流式一致：工具结果 + RAG + 对话历史
         full_context = ""
         if tool_results:
             full_context += f"【工具调用结果】\n{tool_results}\n\n"
@@ -875,6 +990,23 @@ class ChatService:
                 full_context += f"【知识库上下文】\n{rag_context}\n\n"
         if history_context:
             full_context += f"【对话历史】\n{history_context}\n\n"
+
+        # 实时联网检索（与 _chat_after_user_message 一致）
+        if getattr(settings, "ENABLE_WEB_SEARCH", True):
+            rag_has = bool(
+                rag_context
+                and rag_context.strip()
+                and not rag_context.startswith("[系统提示：")
+            )
+            if should_use_web_search(message, rag_has_content=rag_has):
+                web_results = await web_search(message)
+                if web_results:
+                    web_retrieved_context = format_web_context(web_results)
+                    full_context += f"【联网检索内容】\n{web_retrieved_context}\n\n"
+                    web_sources_list = [
+                        {"title": (r.get("title") or "")[:200], "url": (r.get("url") or "")[:500], "snippet": (r.get("snippet") or "")[:800]}
+                        for r in web_results
+                    ]
 
         full_content: List[str] = []
         try:
@@ -891,6 +1023,7 @@ class ChatService:
         sources = await self._build_sources_from_chunks(selected_chunks)
         sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
         tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
+        web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
         assistant_msg = Message(
             conversation_id=conv.id,
             role="assistant",
@@ -902,6 +1035,8 @@ class ChatService:
             max_confidence_context=max_confidence_context,
             sources=sources_json,
             tools_used=tools_used_json,
+            web_retrieved_context=web_retrieved_context or None,
+            web_sources=web_sources_json,
         )
         self.db.add(assistant_msg)
         if not conv.title or conv.title == message[:50]:
@@ -917,12 +1052,15 @@ class ChatService:
             (max_confidence_context and max_confidence_context.strip())
         )
         return_confidence = rag_confidence if has_real else None
+        web_sources_response = [WebSourceItem(**w) for w in web_sources_list] if web_sources_list else None
         yield {
             "type": "done",
             "conversation_id": conv.id,
             "confidence": return_confidence,
             "sources": [s.model_dump() for s in sources],
             "tools_used": tools_used if tools_used else None,
+            "web_retrieved_context": web_retrieved_context or None,
+            "web_sources": [s.model_dump() for s in web_sources_response] if web_sources_response else None,
         }
     
     async def get_conversations(

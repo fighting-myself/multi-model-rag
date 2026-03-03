@@ -1,7 +1,7 @@
 """
-电脑管家 Agent：视觉识别 + AI 决策 + 键鼠操作 + .skill 技能
+电脑管家 Agent：视觉识别 + AI 决策 + 键鼠操作 + skills 技能
 通过截图分析屏幕，像人一样看屏、移动鼠标、敲键盘，操作整机（任意软件/桌面）；
-并结合 .skill 下的技能文档综合解决问题。
+并结合 skills 下的技能文档综合解决问题。
 """
 import asyncio
 import json
@@ -20,6 +20,10 @@ from app.services.desktop_tools import (
 )
 from app.services.skill_loader import get_skills_summary, load_skill_documentation
 from app.services.llm_service import chat_completion_with_tools
+from app.services.memory_tools import get_memory_tools_for_prompt, run_memory_tool
+from app.services.web_tools import WEB_FETCH_TOOL, run_web_fetch_tool
+from app.services.bash_tools import BASH_TOOL, run_bash_tool, is_bash_enabled
+from app.services.time_context import get_system_time_context
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +101,7 @@ COMPUTER_STEWARD_TOOLS = [
         "type": "function",
         "function": {
             "name": "skill_list",
-            "description": "扫描 .skill 目录，返回当前可用技能列表。需要时先调用以查看有哪些技能可用。",
+            "description": "扫描 skills 目录，返回当前可用技能列表。需要时先调用以查看有哪些技能可用。",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -128,27 +132,68 @@ COMPUTER_STEWARD_TOOLS = [
 ]
 
 
+def get_computer_steward_tools() -> list:
+    """返回电脑管家完整工具列表（含可选 memory、web_fetch、bash）。"""
+    tools = list(COMPUTER_STEWARD_TOOLS)
+    tools.append(WEB_FETCH_TOOL)
+    tools.extend(get_memory_tools_for_prompt())
+    if is_bash_enabled():
+        tools.append(BASH_TOOL)
+    return tools
+
+
 def _build_system_prompt() -> str:
     base = """你是电脑管家，具备「Computer Use」能力：通过看屏幕截图做决策，像人一样操作电脑。
-你可以使用的工具有：
+你可以使用的工具有（调用时必须使用以下**英文工具名**，不要用中文或空名称）：
 - mouse_click(x, y [, button])：在屏幕相对位置 (0～1) 点击，根据截图判断要点的位置
 - mouse_move(x, y)：移动鼠标到相对位置
 - keyboard_type(text)：在焦点处输入英文/数字文本（先点击输入框）
 - keyboard_key(key)：按单键或组合键，如 enter、ctrl+c
 - scroll(delta)：滚轮滚动，正数向上
-- skill_list：查看 .skill 下可用技能列表
+- skill_list：查看 skills 下可用技能列表
 - skill_load(skill_id)：加载某技能的完整文档后再按文档使用对应能力
 - done(summary)：任务完成或需结束时调用并给出总结
 
-请根据每次提供的**当前屏幕截图**，结合用户目标，决定下一步操作。坐标 (x,y) 使用 0～1 的归一化坐标，根据画面中元素的大致位置估算。若任务涉及保存文件、使用某类能力，可先 skill_load 再执行。完成或无法继续时务必调用 done。"""
+请根据每次提供的**当前屏幕截图**，结合用户目标，决定下一步操作。坐标 (x,y) 使用 0～1 的归一化坐标，根据画面中元素的大致位置估算。**每次只调用一个工具，且 tool name 必须为上述英文名之一**（如 mouse_click、keyboard_type）。若任务涉及保存文件、使用某类能力，可先 skill_load 再执行。完成或无法继续时务必调用 done。
+
+**12306 查票流程**：1) 打开浏览器，在地址栏输入 https://www.12306.cn/index/ 并回车；2) 等待页面加载后点击「车票」或「单程」；3) 依次点击并填写出发地、到达地、出发日期；4) 点击「查询」；5) 若用户要求「17点后」等时间范围，在结果页使用「发车时间」筛选项选择 17:00-24:00 或对应时间段。每步根据当前截图确认再操作。判断某日期是否在预售期内、是否「未来」等，一律以**当前系统时间**为准（见下方），不要用模型内部知识中的年份或「今天」。
+
+若系统启用了记忆：回答「之前做过什么」等前可先 memory_search；任务结束后可用 memory_store 记录关键信息。需要获取某网页正文时可用 web_fetch(url)。若 skills 文档要求执行终端命令（如 gh、curl 等），使用 bash(command=..., workdir=..., timeout=...)。需交互式 CLI 时传 pty=true。若返回需审批，请用户审批后再用 bash(approval_token=\"<approval_id>\") 获取结果。"""
+    base = base.rstrip() + "\n\n" + get_system_time_context()
     skills = get_skills_summary()
     if skills:
         base = base.rstrip() + "\n\n" + skills
     return base
 
 
+def _normalize_tool_name(name: str, arguments: Dict[str, Any]) -> str:
+    """模型有时返回空名或带空格的名称，根据 name 与 arguments 推断正确工具名。"""
+    n = (name or "").strip().lower().replace(" ", "_")
+    if n in ("mouse_click", "mouse_move", "keyboard_type", "keyboard_key", "scroll", "skill_list", "skill_load", "done", "web_fetch", "memory_search", "memory_get", "memory_store", "bash"):
+        return n
+    if n in ("mouseclick", "click"):
+        return "mouse_click"
+    if n in ("mousemove", "move"):
+        return "mouse_move"
+    if n in ("keyboardtype", "type"):
+        return "keyboard_type"
+    if n in ("keyboardkey", "key", "press"):
+        return "keyboard_key"
+    # 部分视觉模型会返回空 tool name 但带 x,y 参数，按 mouse_click 处理
+    if not n and isinstance(arguments, dict):
+        try:
+            x, y = arguments.get("x"), arguments.get("y")
+            if x is not None and y is not None:
+                return "mouse_click"
+        except Exception:
+            pass
+    return n
+
+
 async def _run_computer_tool(name: str, arguments: Dict[str, Any]) -> str:
     """在线程池中执行桌面/技能工具，避免阻塞事件循环。"""
+    name = _normalize_tool_name(name, arguments or {})
+
     def _run() -> str:
         if name == "mouse_click":
             return mouse_click(
@@ -166,11 +211,17 @@ async def _run_computer_tool(name: str, arguments: Dict[str, Any]) -> str:
             return scroll(int(arguments.get("delta", 0)))
         if name == "skill_list":
             summary = get_skills_summary()
-            return summary if summary else "当前 .skill 下暂无技能。"
+            return summary if summary else "当前 skills 下暂无技能。"
         if name == "skill_load":
             return load_skill_documentation(str(arguments.get("skill_id", "")))
         if name == "done":
             return str(arguments.get("summary", ""))
+        if name == "web_fetch":
+            return run_web_fetch_tool(arguments)
+        if name in ("memory_search", "memory_get", "memory_store"):
+            return run_memory_tool(name, arguments)
+        if name == "bash":
+            return run_bash_tool(arguments)
         return f"未知工具: {name}"
 
     return await asyncio.to_thread(_run)
@@ -197,6 +248,7 @@ async def run_computer_steward(instruction: str) -> Tuple[bool, str, List[Dict[s
     steps: List[Dict[str, Any]] = []
     max_rounds = 35
     final_summary = ""
+    tools = get_computer_steward_tools()
 
     try:
         for round_index in range(max_rounds):
@@ -220,7 +272,7 @@ async def run_computer_steward(instruction: str) -> Tuple[bool, str, List[Dict[s
             # 2) 调用视觉模型
             content, tool_calls = await chat_completion_with_tools(
                 messages,
-                tools=COMPUTER_STEWARD_TOOLS,
+                tools=tools,
                 model=VISION_MODEL,
                 max_tokens=2048,
             )

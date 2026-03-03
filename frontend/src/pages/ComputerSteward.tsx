@@ -56,7 +56,7 @@ export default function ComputerSteward() {
             <span>电脑管家</span>
           </Space>
         }
-        extra="视觉识别 + AI 决策：看屏幕、移动鼠标、敲键盘，操作整机（任意软件/桌面）。需在有图形界面的环境运行，并结合 .skill 技能综合完成任务"
+        extra="视觉识别 + AI 决策：看屏幕、移动鼠标、敲键盘，操作整机（任意软件/桌面）。需在有图形界面的环境运行，并结合 skills 技能综合完成任务"
       >
         <TextArea
           value={instruction}

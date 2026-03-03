@@ -147,6 +147,13 @@ export interface SourceItem {
   knowledge_base_id?: number | null
 }
 
+/** 联网检索来源（标题、链接、摘要） */
+export interface WebSourceItem {
+  title: string
+  url: string
+  snippet: string
+}
+
 export interface MessageItem {
   id: number
   role: 'user' | 'assistant' | 'system'
@@ -159,6 +166,8 @@ export interface MessageItem {
   max_confidence_context?: string  // 最高置信度对应的单个上下文
   sources?: SourceItem[]  // 引用来源列表
   tools_used?: string[]  // 本回复调用的 MCP 工具名列表
+  web_retrieved_context?: string  // 联网检索得到的文本
+  web_sources?: WebSourceItem[]  // 联网检索来源列表
 }
 
 export interface ConversationItem {
@@ -188,6 +197,8 @@ export interface ChatCompletionResponse {
   max_confidence_context?: string  // 最高置信度对应的单个上下文
   sources?: SourceItem[]  // 引用来源列表
   tools_used?: string[]  // 本回复调用的 MCP 工具名列表
+  web_retrieved_context?: string  // 联网检索得到的文本
+  web_sources?: WebSourceItem[]  // 联网检索来源列表
 }
 
 /** 以文搜图 / 图搜图单条结果 */
