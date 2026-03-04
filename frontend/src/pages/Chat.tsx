@@ -449,8 +449,21 @@ export default function Chat() {
           <Button
             icon={<MessageOutlined />}
             onClick={() => setConversationDrawerVisible(true)}
+            style={{ width: 260, minWidth: 260, overflow: 'hidden', paddingLeft: 12, paddingRight: 12 }}
           >
-            {currentConversation ? currentConversation.title || '当前对话' : '选择对话'}
+            <span
+              style={{
+                display: 'inline-block',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                verticalAlign: 'bottom',
+              }}
+              title={currentConversation ? (currentConversation.title || '当前对话') : undefined}
+            >
+              {currentConversation ? currentConversation.title || '当前对话' : '选择对话'}
+            </span>
           </Button>
           <Select
             placeholder="选择知识库（可选）"
@@ -486,13 +499,36 @@ export default function Chat() {
         bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}
       >
         {currentConvId && currentConversation && (
-          <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--app-border-subtle)', flexShrink: 0 }}>
-            <Space>
-              <span style={{ fontWeight: 500, color: 'var(--app-text-primary)' }}>{currentConversation.title || '未命名对话'}</span>
-              <span style={{ color: 'var(--app-text-muted)', fontSize: 12 }}>
-                {new Date(currentConversation.updated_at).toLocaleString('zh-CN')}
-              </span>
-            </Space>
+          <div
+            style={{
+              marginBottom: 12,
+              paddingBottom: 12,
+              borderBottom: '1px solid var(--app-border-subtle)',
+              flexShrink: 0,
+              minHeight: 40,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              overflow: 'hidden',
+            }}
+          >
+            <span
+              style={{
+                fontWeight: 500,
+                color: 'var(--app-text-primary)',
+                flex: 1,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={currentConversation.title || '未命名对话'}
+            >
+              {currentConversation.title || '未命名对话'}
+            </span>
+            <span style={{ color: 'var(--app-text-muted)', fontSize: 12, flexShrink: 0 }}>
+              {new Date(currentConversation.updated_at).toLocaleString('zh-CN')}
+            </span>
           </div>
         )}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', marginBottom: 16, minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
@@ -908,6 +944,8 @@ export default function Chat() {
                 padding: '12px',
                 borderRadius: 4,
                 marginBottom: 8,
+                minHeight: 56,
+                overflow: 'hidden',
               }}
               onClick={() => handleSelectConversation(conv.id)}
               actions={[
@@ -927,9 +965,29 @@ export default function Chat() {
               ]}
             >
               <List.Item.Meta
-                title={<div style={{ fontWeight: currentConvId === conv.id ? 600 : 400 }}>{conv.title || '未命名对话'}</div>}
+                title={
+                  <div
+                    style={{
+                      fontWeight: currentConvId === conv.id ? 600 : 400,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={conv.title || '未命名对话'}
+                  >
+                    {conv.title || '未命名对话'}
+                  </div>
+                }
                 description={
-                  <div style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--app-text-muted)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {new Date(conv.updated_at).toLocaleString('zh-CN')}
                   </div>
                 }
