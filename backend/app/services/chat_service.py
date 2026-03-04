@@ -415,6 +415,130 @@ class ChatService:
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
         return (context, max_conf, max_conf_context, chunk_list)
 
+    async def _rag_context_kb_ids(
+        self, message: str, kb_ids: List[int], user_id: int, top_k: int = 10
+    ) -> tuple[str, float, Optional[str], List[Chunk]]:
+        """在指定的多个知识库中检索最相关上下文；逻辑同 _rag_context_all_kbs，仅 kb_ids 由调用方传入。"""
+        if not kb_ids:
+            return ("", 0.0, None, [])
+        import logging
+        queries = [message]
+        if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
+            try:
+                extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
+                queries.extend(extra)
+            except Exception:
+                pass
+        k = settings.RRF_K
+        chunk_rrf_scores: Dict[int, float] = {}
+        vector_chunk_map: Dict[int, Chunk] = {}
+        for q in queries:
+            try:
+                query_vec = await get_embedding(q)
+                vs = get_vector_client()
+                hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
+                vector_ids = []
+                vector_id_to_rank = {}
+                for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
+                    if not isinstance(h, dict):
+                        continue
+                    vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id") if isinstance(h.get("entity"), dict) else None
+                    if vid is not None:
+                        vid_str = str(vid)
+                        vector_ids.append(vid_str)
+                        vector_id_to_rank[vid_str] = rank
+                if vector_ids:
+                    result = await self.db.execute(
+                        select(Chunk).where(
+                            Chunk.vector_id.in_(vector_ids),
+                            Chunk.knowledge_base_id.in_(kb_ids),
+                        )
+                    )
+                    for c in result.scalars().all():
+                        vector_chunk_map[c.id] = c
+                        rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
+                        chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
+            except Exception as e:
+                logging.warning(f"向量检索失败: {e}")
+        for q in queries:
+            try:
+                import re
+                keywords = [w.strip() for w in re.split(r'[，。！？\s]+', q) if len(w.strip()) > 1]
+                if not keywords:
+                    keywords = [q]
+                conditions = [Chunk.content.like(f"%{kw}%") for kw in keywords[:8]]
+                if conditions:
+                    result = await self.db.execute(
+                        select(Chunk)
+                        .where(
+                            Chunk.knowledge_base_id.in_(kb_ids),
+                            Chunk.content != "",
+                            or_(*conditions)
+                        )
+                        .limit(top_k * 4)
+                    )
+                    chunks = result.scalars().all()
+                    if chunks:
+                        if settings.RAG_USE_BM25:
+                            chunk_content = [(c, c.content or "") for c in chunks]
+                            scored = bm25_score(q, chunk_content)
+                            scored = [(c, s) for c, s in scored if s > 0]
+                            local_ft = [(chunk, idx + 1) for idx, (chunk, _) in enumerate(scored[:top_k * 3])]
+                        else:
+                            chunk_scores = []
+                            for chunk in chunks:
+                                score = sum(1 for kw in keywords if kw.lower() in (chunk.content or "").lower())
+                                if score > 0:
+                                    chunk_scores.append((chunk, score))
+                            chunk_scores.sort(key=lambda x: x[1], reverse=True)
+                            local_ft = [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k * 3])]
+                    else:
+                        local_ft = []
+                    for chunk, rank in local_ft:
+                        vector_chunk_map[chunk.id] = chunk
+                        chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
+            except Exception as e:
+                logging.warning(f"全文匹配失败: {e}")
+        if not chunk_rrf_scores:
+            return ("", 0.0, None, [])
+        candidate_chunks = sorted(
+            [(vector_chunk_map[chunk_id], score) for chunk_id, score in chunk_rrf_scores.items()],
+            key=lambda x: x[1],
+            reverse=True
+        )[:top_k * 2]
+        if not candidate_chunks:
+            return ("", 0.0, None, [])
+        try:
+            documents = [chunk.content for chunk, _ in candidate_chunks]
+            reranked = await rerank(query=message, documents=documents, top_n=min(top_k, len(documents)))
+            final_chunks = []
+            for item in reranked:
+                idx = item["index"]
+                if idx < len(candidate_chunks):
+                    chunk, rrf_score = candidate_chunks[idx]
+                    relevance_score = item.get("relevance_score", 0.0)
+                    final_chunks.append((chunk, relevance_score, rrf_score))
+            if not final_chunks:
+                final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
+        except Exception as e:
+            logging.warning(f"Rerank 失败: {e}，使用 RRF 排序结果")
+            final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
+        selected_chunks = final_chunks[:top_k]
+        if not selected_chunks:
+            return ("", 0.0, None, [])
+        chunk_list = [c for c, _, _ in selected_chunks]
+        window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
+        chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
+        context = "\n\n".join(c.content for c in chunks_for_context if c.content)[:8000]
+        max_conf = max((rel_score for _, rel_score, _ in selected_chunks), default=0.0)
+        if max_conf == 0.0:
+            max_rrf = max((rrf_score for _, _, rrf_score in selected_chunks), default=0.0)
+            if max_rrf > 0:
+                max_conf = min(1.0, max_rrf * k)
+        max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
+        max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
+        return (context, max_conf, max_conf_context, chunk_list)
+
     async def _load_conversation_history(self, conversation_id: int, max_messages: int = None) -> List[Message]:
         """加载对话历史消息（最近 N 条）"""
         if max_messages is None:
@@ -601,6 +725,7 @@ class ChatService:
         try:
             return await self._chat_after_user_message(
                 conv, user_msg, message, knowledge_base_id,
+                knowledge_base_ids=knowledge_base_ids,
                 enable_mcp_tools=enable_mcp_tools,
                 enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,
@@ -760,6 +885,7 @@ class ChatService:
         user_msg: Message,
         message: str,
         knowledge_base_id: Optional[int],
+        knowledge_base_ids: Optional[List[int]] = None,
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
@@ -789,8 +915,35 @@ class ChatService:
             else:
                 tool_results, tools_used = "", []
 
-            # 2) RAG 上下文（知识库检索，可由前端关闭）
-            if enable_rag and knowledge_base_id:
+            # 2) RAG 上下文（知识库检索，可由前端关闭；支持多选 knowledge_base_ids）
+            if enable_rag and knowledge_base_ids:
+                try:
+                    rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_kb_ids(
+                        message, knowledge_base_ids, conv.user_id, top_k=10
+                    )
+                    retrieved_context_original = rag_context
+                    if not rag_context.strip():
+                        try:
+                            fallback = await self.db.execute(
+                                select(Chunk).where(
+                                    Chunk.knowledge_base_id.in_(knowledge_base_ids),
+                                    Chunk.content != "",
+                                ).order_by(Chunk.id).limit(20)
+                            )
+                            chunks = fallback.scalars().all()
+                            if chunks:
+                                rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
+                                retrieved_context_original = rag_context
+                                rag_confidence = 0.5
+                                selected_chunks = chunks
+                        except Exception:
+                            pass
+                    if not rag_context.strip():
+                        rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
+                except Exception as e:
+                    logging.warning(f"多知识库检索失败: {e}")
+                    rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+            elif enable_rag and knowledge_base_id:
                 kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
                 kb = kb_result.scalar_one_or_none()
                 use_rerank = getattr(kb, "enable_rerank", True) if kb else True
@@ -954,6 +1107,7 @@ class ChatService:
         message: str,
         conversation_id: Optional[int] = None,
         knowledge_base_id: Optional[int] = None,
+        knowledge_base_ids: Optional[List[int]] = None,
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
@@ -961,8 +1115,10 @@ class ChatService:
         attachments_meta: Optional[List[Dict[str, Any]]] = None,
         content_for_save: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）；工具分 MCP 与 Skills 两档开关。"""
+        """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）；支持多选知识库 knowledge_base_ids。"""
         import logging
+        # 多选时用第一个作为会话展示用
+        first_kb_id = (knowledge_base_ids[0] if knowledge_base_ids else None) or knowledge_base_id
         conv = None
         try:
             if conversation_id:
@@ -972,7 +1128,7 @@ class ChatService:
             else:
                 conv = Conversation(
                     user_id=user_id,
-                    knowledge_base_id=knowledge_base_id,
+                    knowledge_base_id=first_kb_id,
                     title=message[:50] if len(message) > 50 else message,
                 )
                 self.db.add(conv)
@@ -1014,7 +1170,32 @@ class ChatService:
         selected_chunks: List[Chunk] = []
         web_retrieved_context = ""
         web_sources_list: List[Dict[str, str]] = []
-        if enable_rag and knowledge_base_id:
+        if enable_rag and knowledge_base_ids:
+            try:
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_kb_ids(
+                    message, knowledge_base_ids, user_id, top_k=10
+                )
+                if not rag_context.strip():
+                    try:
+                        fallback = await self.db.execute(
+                            select(Chunk).where(
+                                Chunk.knowledge_base_id.in_(knowledge_base_ids),
+                                Chunk.content != "",
+                            ).order_by(Chunk.id).limit(20)
+                        )
+                        chunks = fallback.scalars().all()
+                        if chunks:
+                            rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
+                            rag_confidence = 0.5
+                            selected_chunks = chunks
+                    except Exception:
+                        pass
+                if not rag_context.strip():
+                    rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」。]"
+            except Exception as e:
+                logging.warning(f"多知识库检索失败: {e}")
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+        elif enable_rag and knowledge_base_id:
             kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
             kb = kb_result.scalar_one_or_none()
             use_rerank = getattr(kb, "enable_rerank", True) if kb else True

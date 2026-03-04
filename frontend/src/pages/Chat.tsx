@@ -91,7 +91,7 @@ export default function Chat() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
-  const [selectedKbId, setSelectedKbId] = useState<number | undefined>(undefined)
+  const [selectedKbIds, setSelectedKbIds] = useState<number[]>([])
   const [conversations, setConversations] = useState<ConversationItem[]>([])
   /** 豆包式：图片点击放大 */
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
@@ -172,9 +172,11 @@ export default function Chat() {
       } else {
         setMessages(res.messages || [])
       }
-      // 恢复该对话的知识库选择
-      if (res.knowledge_base_id) {
-        setSelectedKbId(res.knowledge_base_id)
+      // 恢复该对话的知识库选择（历史为单 id 则转为数组）
+      if (res.knowledge_base_id != null) {
+        setSelectedKbIds([res.knowledge_base_id])
+      } else {
+        setSelectedKbIds([])
       }
     } catch {
       message.error('加载对话记录失败')
@@ -187,7 +189,7 @@ export default function Chat() {
   const handleNewConversation = () => {
     setCurrentConvId(null)
     setMessages([])
-    setSelectedKbId(undefined)
+    setSelectedKbIds([])
   }
 
   const handleSelectConversation = (convId: number) => {
@@ -322,7 +324,7 @@ export default function Chat() {
         'chat/completions/stream',
         {
           content: messageContent,
-          knowledge_base_id: selectedKbId ?? null,
+          knowledge_base_ids: selectedKbIds.length ? selectedKbIds : null,
           conversation_id: currentConvId ?? null,
           enable_mcp_tools: enableMcpTools,
           enable_skills_tools: enableSkillsTools,
@@ -483,16 +485,14 @@ export default function Chat() {
             </span>
           </Button>
           <Select
-            placeholder="选择知识库（可选）"
+            mode="multiple"
+            placeholder="选择知识库（可多选，不选则检索全部）"
             allowClear
-            style={{ width: 200 }}
-            value={selectedKbId}
-            onChange={setSelectedKbId}
+            value={selectedKbIds}
+            onChange={(v: number[]) => setSelectedKbIds(v ?? [])}
             disabled={!!currentConvId}
-            options={[
-              { value: undefined, label: '不限定知识库' },
-              ...knowledgeBases.map((kb: KnowledgeBaseListResponse['knowledge_bases'][0]) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count || 0} 块）` })),
-            ]}
+            options={knowledgeBases.map((kb: KnowledgeBaseListResponse['knowledge_bases'][0]) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count || 0} 块）` }))}
+            style={{ minWidth: 200 }}
           />
           <Space split="|" style={{ color: 'var(--app-text-muted)', fontSize: 13 }}>
             <Space size={6}>

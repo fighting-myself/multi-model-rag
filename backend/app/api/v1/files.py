@@ -37,6 +37,8 @@ async def upload_file(
         knowledge_base_id=knowledge_base_id
     )
     await log_audit(db, current_user.id, "upload_file", "file", str(file_record.id), {"filename": file_record.original_filename}, get_client_ip(request), getattr(request.state, "request_id", None))
+    await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_file_list(current_user.id))
+    await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
     return file_record
 
 

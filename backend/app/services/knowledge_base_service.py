@@ -1261,11 +1261,12 @@ class KnowledgeBaseService:
         query: str,
         user_id: int,
         knowledge_base_id: Optional[int] = None,
+        knowledge_base_ids: Optional[List[int]] = None,
         top_k: int = 50,
         extra_keywords: Optional[List[str]] = None,
     ) -> List[tuple]:
         """全文检索仅限图片：Chunk.content 匹配查询词（含扩展同义/相关词），且 File 为 jpeg/jpg/png。
-        返回 List[(Chunk, File, rank)]，rank 从 1 开始。
+        返回 List[(Chunk, File, rank)]，rank 从 1 开始。支持多选知识库。
         """
         import re
         q = (query or "").strip()
@@ -1288,7 +1289,9 @@ class KnowledgeBaseService:
             )
             .limit(top_k * 3)
         )
-        if knowledge_base_id is not None:
+        if knowledge_base_ids:
+            stmt = stmt.where(Chunk.knowledge_base_id.in_(knowledge_base_ids))
+        elif knowledge_base_id is not None:
             stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
         result = await self.db.execute(stmt)
         rows = result.all()
@@ -1308,11 +1311,13 @@ class KnowledgeBaseService:
         query: str,
         user_id: int,
         knowledge_base_id: Optional[int] = None,
+        knowledge_base_ids: Optional[List[int]] = None,
         top_k: int = 20,
     ) -> List[Dict[str, Any]]:
-        """以文搜图：向量检索 + 全文检索 → RRF 混排 → Rerank → 返回图片文件列表。"""
+        """以文搜图：向量检索 + 全文检索 → RRF 混排 → Rerank → 返回图片文件列表。支持多选知识库。"""
         if not (query and query.strip()):
             return []
+        kb_ids = knowledge_base_ids if knowledge_base_ids else ([knowledge_base_id] if knowledge_base_id is not None else None)
         q = query.strip()
         k = RRF_K
         file_rrf: Dict[int, float] = {}
@@ -1322,7 +1327,10 @@ class KnowledgeBaseService:
         try:
             query_vec = await get_embedding(q)
             vs = get_vector_client()
-            filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+            if kb_ids:
+                filter_expr = f"knowledge_base_id in [{','.join(str(i) for i in kb_ids)}]" if len(kb_ids) > 1 else f"knowledge_base_id == {kb_ids[0]}"
+            else:
+                filter_expr = None
             hits = vs.search(
                 query_vector=query_vec,
                 top_k=min(500, top_k * 25),
@@ -1349,8 +1357,8 @@ class KnowledgeBaseService:
                     File.user_id == user_id,
                 )
             )
-            if knowledge_base_id is not None:
-                stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+            if kb_ids is not None:
+                stmt = stmt.where(Chunk.knowledge_base_id.in_(kb_ids))
             result = await self.db.execute(stmt)
             for chunk, file in result.all():
                 rank = vid_to_rank.get(str(chunk.vector_id or ""), 9999)
@@ -1367,7 +1375,8 @@ class KnowledgeBaseService:
                 logging.debug("以文搜图 expand_image_search_terms 跳过: %s", e)
         try:
             ft_tuples = await self._full_text_search_images(
-                q, user_id, knowledge_base_id, top_k=top_k * 2, extra_keywords=extra_keywords or None,
+                q, user_id, knowledge_base_id=knowledge_base_id if not kb_ids else None, knowledge_base_ids=kb_ids,
+                top_k=top_k * 2, extra_keywords=extra_keywords or None,
             )
             for chunk, file, rank in ft_tuples:
                 file_rrf[file.id] = file_rrf.get(file.id, 0.0) + _rrf_score(rank, k)
@@ -1421,10 +1430,11 @@ class KnowledgeBaseService:
         image_bytes: Optional[bytes] = None,
         user_id: int = None,
         knowledge_base_id: Optional[int] = None,
+        knowledge_base_ids: Optional[List[int]] = None,
         top_k: int = 30,
     ) -> List[Dict[str, Any]]:
         """多模态检索统一：以文或以图一次查询，同时返回文档与图片（同一向量空间）。
-        若提供 image_bytes 则用图向量，否则用 query 文本向量。
+        若提供 image_bytes 则用图向量，否则用 query 文本向量。支持多选知识库。
         """
         if image_bytes:
             query_vec = await get_embedding_for_image(
@@ -1435,8 +1445,12 @@ class KnowledgeBaseService:
             query_vec = await get_embedding(query.strip())
         else:
             return []
+        kb_ids = knowledge_base_ids if knowledge_base_ids else ([knowledge_base_id] if knowledge_base_id is not None else None)
         vs = get_vector_client()
-        filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+        if kb_ids:
+            filter_expr = f"knowledge_base_id in [{','.join(str(i) for i in kb_ids)}]" if len(kb_ids) > 1 else f"knowledge_base_id == {kb_ids[0]}"
+        else:
+            filter_expr = None
         hits = vs.search(query_vector=query_vec, top_k=min(80, top_k * 2), filter_expr=filter_expr) or []
         vector_ids = []
         id_to_score = {}
@@ -1463,8 +1477,8 @@ class KnowledgeBaseService:
                 File.user_id == user_id,
             )
         )
-        if knowledge_base_id is not None:
-            stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+        if kb_ids is not None:
+            stmt = stmt.where(Chunk.knowledge_base_id.in_(kb_ids))
         result = await self.db.execute(stmt)
         rows = result.all()
         vid_to_rank = {vid: i for i, vid in enumerate(vector_ids)}
@@ -1492,22 +1506,27 @@ class KnowledgeBaseService:
         image_bytes: bytes,
         user_id: int,
         knowledge_base_id: Optional[int] = None,
+        knowledge_base_ids: Optional[List[int]] = None,
         top_k: int = 20,
     ) -> List[Dict[str, Any]]:
         """图搜图：上传一张图，用多模态模型得到向量，在知识库中检索相似图片。
         返回所有命中向量且属于图片文件（file_type 为 jpeg/jpg/png）的记录；
         优先保留 embedding_source=image 的块（同一文件只取最佳排名的一条），
-        这样既有图像向量的新图能高排，仅有 OCR 文本向量的旧图也有机会被搜到。
+        这样既有图像向量的新图能高排，仅有 OCR 文本向量的旧图也有机会被搜到。支持多选知识库。
         """
         if not image_bytes or len(image_bytes) == 0:
             return []
+        kb_ids = knowledge_base_ids if knowledge_base_ids else ([knowledge_base_id] if knowledge_base_id is not None else None)
         try:
             query_vec = await get_embedding_for_image(image_bytes, "jpeg")
         except Exception as e:
             logging.warning(f"图搜图获取图片向量失败: {e}")
             return []
         vs = get_vector_client()
-        filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+        if kb_ids:
+            filter_expr = f"knowledge_base_id in [{','.join(str(i) for i in kb_ids)}]" if len(kb_ids) > 1 else f"knowledge_base_id == {kb_ids[0]}"
+        else:
+            filter_expr = None
         hits = vs.search(query_vector=query_vec, top_k=min(100, top_k * 4), filter_expr=filter_expr) or []
         vector_ids = []
         id_to_score = {}
@@ -1532,8 +1551,8 @@ class KnowledgeBaseService:
                 File.file_type.in_(("jpeg", "jpg", "png")),
             )
         )
-        if knowledge_base_id is not None:
-            stmt = stmt.where(Chunk.knowledge_base_id == knowledge_base_id)
+        if kb_ids is not None:
+            stmt = stmt.where(Chunk.knowledge_base_id.in_(kb_ids))
         result = await self.db.execute(stmt)
         rows = result.all()
         vid_order = {vid: i for i, vid in enumerate(vector_ids)}

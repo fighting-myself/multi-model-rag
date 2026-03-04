@@ -68,7 +68,7 @@ export default function ImageSearch() {
   const [tab, setTab] = useState<TabMode>('text')
   const [query, setQuery] = useState('')
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
-  const [selectedKbId, setSelectedKbId] = useState<number | undefined>(undefined)
+  const [selectedKbIds, setSelectedKbIds] = useState<number[]>([])
   const [loading, setLoading] = useState(false)
   const [initLoading, setInitLoading] = useState(true)
   const [imageFiles, setImageFiles] = useState<UploadFile[]>([])
@@ -96,7 +96,7 @@ export default function ImageSearch() {
     try {
       const res = await api.post<ImageSearchResponse>('/search/images', {
         query: q,
-        knowledge_base_id: selectedKbId ?? null,
+        knowledge_base_ids: selectedKbIds.length ? selectedKbIds : null,
         top_k: 24,
       })
       setResults(res.files || [])
@@ -157,7 +157,7 @@ export default function ImageSearch() {
         })
         const res = await api.post<UnifiedSearchResponse>('/search/unified', {
           image_base64: base64,
-          knowledge_base_id: selectedKbId ?? null,
+          knowledge_base_ids: selectedKbIds.length ? selectedKbIds : null,
           top_k: 30,
         })
         setUnifiedResults(res.items || [])
@@ -165,7 +165,7 @@ export default function ImageSearch() {
       } else {
         const res = await api.post<UnifiedSearchResponse>('/search/unified', {
           query: q,
-          knowledge_base_id: selectedKbId ?? null,
+          knowledge_base_ids: selectedKbIds.length ? selectedKbIds : null,
           top_k: 30,
         })
         setUnifiedResults(res.items || [])
@@ -236,11 +236,12 @@ export default function ImageSearch() {
             </Upload>
           )}
           <Select
-            placeholder="选择知识库（可选）"
+            mode="multiple"
+            placeholder="选择知识库（可多选，不选则检索全部）"
             allowClear
-            style={{ width: 220 }}
-            value={selectedKbId}
-            onChange={setSelectedKbId}
+            style={{ width: 280 }}
+            value={selectedKbIds}
+            onChange={setSelectedKbIds}
             options={kbOptions}
           />
           <Button

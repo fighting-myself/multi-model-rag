@@ -204,6 +204,19 @@ async def chat_completion_stream(
     content = body.get("content") or ""
     conv_id = conv_id or body.get("conversation_id")
     kb_id = kb_id or body.get("knowledge_base_id")
+    raw_kb_ids = body.get("knowledge_base_ids")
+    kb_ids: Optional[List[int]] = None
+    if raw_kb_ids and isinstance(raw_kb_ids, list):
+        kb_ids = []
+        for x in raw_kb_ids:
+            try:
+                v = int(x)
+                if v > 0 and v not in kb_ids:
+                    kb_ids.append(v)
+            except (TypeError, ValueError):
+                pass
+        if not kb_ids:
+            kb_ids = None
     enable_tools = body.get("enable_tools")
     enable_mcp_tools = body.get("enable_mcp_tools") if body.get("enable_mcp_tools") is not None else (enable_tools if enable_tools is not None else True)
     enable_skills_tools = body.get("enable_skills_tools") if body.get("enable_skills_tools") is not None else (enable_tools if enable_tools is not None else True)
@@ -276,6 +289,7 @@ async def chat_completion_stream(
                 message=content,
                 conversation_id=conv_id,
                 knowledge_base_id=kb_id,
+                knowledge_base_ids=kb_ids,
                 enable_mcp_tools=enable_mcp_tools,
                 enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,

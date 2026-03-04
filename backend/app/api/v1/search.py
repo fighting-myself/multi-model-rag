@@ -2,7 +2,7 @@
 以文搜图、图搜图、多模态统一检索 API
 """
 import base64
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -27,6 +27,7 @@ class ImageSearchRequest(BaseModel):
     """以文搜图请求"""
     query: str
     knowledge_base_id: Optional[int] = None
+    knowledge_base_ids: Optional[List[int]] = None
     top_k: int = 20
 
 
@@ -35,6 +36,7 @@ class UnifiedSearchRequest(BaseModel):
     query: Optional[str] = None
     image_base64: Optional[str] = None
     knowledge_base_id: Optional[int] = None
+    knowledge_base_ids: Optional[List[int]] = None
     top_k: int = 30
 
 
@@ -42,6 +44,7 @@ class ByImageSearchRequest(BaseModel):
     """图搜图请求（可传 base64，或用 /by-image/upload 传文件）"""
     image_base64: str
     knowledge_base_id: Optional[int] = None
+    knowledge_base_ids: Optional[List[int]] = None
     top_k: int = 20
 
 
@@ -97,16 +100,19 @@ async def search_unified(
             raise HTTPException(status_code=400, detail="image_base64 解析失败")
     if not body.query and not image_bytes:
         return UnifiedSearchResponse(items=[])
+    kb_ids = body.knowledge_base_ids if body.knowledge_base_ids else ([body.knowledge_base_id] if body.knowledge_base_id is not None else None)
     kb_service = KnowledgeBaseService(db)
-    if body.knowledge_base_id is not None:
-        kb = await kb_service.get_knowledge_base(body.knowledge_base_id, current_user.id)
-        if not kb:
-            raise HTTPException(status_code=404, detail="知识库不存在")
+    if kb_ids:
+        for kid in kb_ids:
+            kb = await kb_service.get_knowledge_base(kid, current_user.id)
+            if not kb:
+                raise HTTPException(status_code=404, detail=f"知识库 {kid} 不存在")
     rows = await kb_service.search_unified(
         query=body.query.strip() if body.query else None,
         image_bytes=image_bytes,
         user_id=current_user.id,
-        knowledge_base_id=body.knowledge_base_id,
+        knowledge_base_id=body.knowledge_base_id if not kb_ids else None,
+        knowledge_base_ids=kb_ids,
         top_k=min(body.top_k, 50),
     )
     return UnifiedSearchResponse(
@@ -131,7 +137,7 @@ async def search_by_image(
     current_user: UserResponse = Depends(require_search_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
-    """图搜图：上传图片的 base64，在知识库中检索相似图片。"""
+    """图搜图：上传图片的 base64，在知识库中检索相似图片。可多选知识库。"""
     try:
         raw = body.image_base64
         if "," in raw:
@@ -139,15 +145,18 @@ async def search_by_image(
         image_bytes = base64.b64decode(raw)
     except Exception:
         raise HTTPException(status_code=400, detail="image_base64 解析失败")
+    kb_ids = body.knowledge_base_ids if body.knowledge_base_ids else ([body.knowledge_base_id] if body.knowledge_base_id is not None else None)
     kb_service = KnowledgeBaseService(db)
-    if body.knowledge_base_id is not None:
-        kb = await kb_service.get_knowledge_base(body.knowledge_base_id, current_user.id)
-        if not kb:
-            raise HTTPException(status_code=404, detail="知识库不存在")
+    if kb_ids:
+        for kid in kb_ids:
+            kb = await kb_service.get_knowledge_base(kid, current_user.id)
+            if not kb:
+                raise HTTPException(status_code=404, detail=f"知识库 {kid} 不存在")
     rows = await kb_service.search_images_by_image(
         image_bytes=image_bytes,
         user_id=current_user.id,
-        knowledge_base_id=body.knowledge_base_id,
+        knowledge_base_id=body.knowledge_base_id if not kb_ids else None,
+        knowledge_base_ids=kb_ids,
         top_k=min(body.top_k, 50),
     )
     return ImageSearchResponse(
@@ -168,23 +177,27 @@ async def search_by_image(
 async def search_by_image_upload(
     file: UploadFile = File(...),
     knowledge_base_id: Optional[int] = None,
+    knowledge_base_ids: Optional[List[int]] = Query(None),
     top_k: int = 20,
     current_user: UserResponse = Depends(require_search_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
-    """图搜图：上传图片文件，在知识库中检索相似图片。"""
+    """图搜图：上传图片文件，在知识库中检索相似图片。可多选知识库（传 knowledge_base_ids=1&knowledge_base_ids=2）。"""
     content = await file.read()
     if not content or len(content) == 0:
         raise HTTPException(status_code=400, detail="请上传图片文件")
+    kb_ids = knowledge_base_ids if knowledge_base_ids else ([knowledge_base_id] if knowledge_base_id is not None else None)
     kb_service = KnowledgeBaseService(db)
-    if knowledge_base_id is not None:
-        kb = await kb_service.get_knowledge_base(knowledge_base_id, current_user.id)
-        if not kb:
-            raise HTTPException(status_code=404, detail="知识库不存在")
+    if kb_ids:
+        for kid in kb_ids:
+            kb = await kb_service.get_knowledge_base(kid, current_user.id)
+            if not kb:
+                raise HTTPException(status_code=404, detail=f"知识库 {kid} 不存在")
     rows = await kb_service.search_images_by_image(
         image_bytes=content,
         user_id=current_user.id,
-        knowledge_base_id=knowledge_base_id,
+        knowledge_base_id=knowledge_base_id if not kb_ids else None,
+        knowledge_base_ids=kb_ids,
         top_k=min(top_k, 50),
     )
     return ImageSearchResponse(
