@@ -120,6 +120,7 @@ async def search_unified(
             UnifiedSearchItem(
                 chunk_id=r["chunk_id"],
                 file_id=r["file_id"],
+                knowledge_base_id=r.get("knowledge_base_id"),
                 original_filename=r["original_filename"],
                 file_type=r["file_type"],
                 snippet=r["snippet"],

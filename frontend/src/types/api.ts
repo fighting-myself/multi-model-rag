@@ -229,6 +229,7 @@ export interface ImageSearchResponse {
 export interface UnifiedSearchItem {
   chunk_id: number
   file_id: number
+  knowledge_base_id?: number | null
   original_filename: string
   file_type: string
   snippet: string

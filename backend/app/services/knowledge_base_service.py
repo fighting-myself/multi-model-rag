@@ -1489,6 +1489,7 @@ class KnowledgeBaseService:
             items.append({
                 "chunk_id": chunk.id,
                 "file_id": file.id,
+                "knowledge_base_id": chunk.knowledge_base_id,
                 "original_filename": file.original_filename or file.filename,
                 "file_type": file.file_type or "",
                 "snippet": (chunk.content or "")[:300],

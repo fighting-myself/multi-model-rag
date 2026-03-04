@@ -129,6 +129,7 @@ class UnifiedSearchItem(BaseModel):
     """统一检索单条结果（文档+图片混合）"""
     chunk_id: int
     file_id: int
+    knowledge_base_id: Optional[int] = None  # 命中块所属知识库，用于原文查看拉取分块
     original_filename: str
     file_type: str
     snippet: str

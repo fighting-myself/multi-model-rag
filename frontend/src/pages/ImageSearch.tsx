@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Card, Input, Button, Select, Row, Col, message, Empty, Tabs, Upload } from 'antd'
-import { SearchOutlined, PictureOutlined, UploadOutlined, FileTextOutlined } from '@ant-design/icons'
+import { Card, Input, Button, Select, Row, Col, message, Empty, Tabs, Upload, Modal, Drawer, Spin } from 'antd'
+import { SearchOutlined, PictureOutlined, UploadOutlined, FileTextOutlined, EyeOutlined, DownloadOutlined, FileSearchOutlined } from '@ant-design/icons'
 import type { UploadFile } from 'antd/es/upload/interface'
 import api from '../services/api'
 import PageSkeleton from '../components/PageSkeleton'
@@ -10,7 +10,26 @@ import type {
   ImageSearchResponse,
   UnifiedSearchItem,
   UnifiedSearchResponse,
+  ChunkListResponse,
+  ChunkItem,
 } from '../types/api'
+
+/** 检索结果卡片统一尺寸 */
+const RESULT_CARD_COVER_HEIGHT = 140
+const RESULT_CARD_BODY_MIN_HEIGHT = 88
+
+/** 在原文内容中高亮片段（仅首处匹配） */
+function HighlightSnippet({ content, snippet }: { content: string; snippet: string }) {
+  if (!snippet || !content.includes(snippet)) return <>{content}</>
+  const idx = content.indexOf(snippet)
+  return (
+    <>
+      {content.slice(0, idx)}
+      <mark style={{ background: 'rgba(255, 235, 59, 0.6)', padding: '0 2px', borderRadius: 2 }}>{snippet}</mark>
+      {content.slice(idx + snippet.length)}
+    </>
+  )
+}
 
 /** 通过 api 实例加载图片（与后端同源、带鉴权），用 Object URL 展示 */
 function ImageThumb({ fileId, alt, style }: { fileId: number; alt: string; style?: React.CSSProperties }) {
@@ -74,6 +93,71 @@ export default function ImageSearch() {
   const [imageFiles, setImageFiles] = useState<UploadFile[]>([])
   const [results, setResults] = useState<ImageSearchItem[]>([])
   const [unifiedResults, setUnifiedResults] = useState<UnifiedSearchItem[]>([])
+  const [snippetModal, setSnippetModal] = useState<{ visible: boolean; title: string; snippet: string }>({ visible: false, title: '', snippet: '' })
+  const [sourceDrawer, setSourceDrawer] = useState<{
+    visible: boolean
+    title: string
+    fileId: number | null
+    kbId: number | null
+    chunkId: number | null
+    snippet: string
+    chunks: ChunkItem[]
+    loading: boolean
+  }>({ visible: false, title: '', fileId: null, kbId: null, chunkId: null, snippet: '', chunks: [], loading: false })
+
+  const openSourceDrawer = (item: UnifiedSearchItem) => {
+    const kbId = item.knowledge_base_id ?? null
+    if (kbId == null) {
+      message.warning('该结果无法定位知识库，请指定知识库后重新检索')
+      return
+    }
+    setSourceDrawer({
+      visible: true,
+      title: item.original_filename ?? '',
+      fileId: item.file_id,
+      kbId,
+      chunkId: item.chunk_id,
+      snippet: item.snippet || '',
+      chunks: [],
+      loading: true,
+    })
+    api
+      .get<ChunkListResponse>(`/knowledge-bases/${kbId}/files/${item.file_id}/chunks`)
+      .then((res) => {
+        setSourceDrawer((s) => ({ ...s, chunks: res.chunks || [], loading: false }))
+      })
+      .catch(() => {
+        message.error('获取原文分块失败')
+        setSourceDrawer((s) => ({ ...s, loading: false }))
+      })
+  }
+
+  const handleDownloadFile = async (fileId: number, filename: string) => {
+    try {
+      const blob = (await api.get(`/files/${fileId}/download`, { responseType: 'blob' })) as Blob
+      if (blob.type.startsWith('application/json') || blob.size === 0) {
+        message.error('文件不存在或无法下载')
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename || `file-${fileId}`
+      a.click()
+      URL.revokeObjectURL(url)
+      message.success('下载已开始')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: Blob; status?: number } }
+      const data = err.response?.data
+      const msg =
+        data instanceof Blob && data.type?.includes('json')
+          ? '文件不存在或无权访问'
+          : err.response?.status === 404
+            ? '文件不存在'
+            : '下载失败'
+      message.error(msg)
+    }
+  }
 
   useEffect(() => {
     setInitLoading(true)
@@ -280,59 +364,54 @@ export default function ImageSearch() {
                   <Col xs={24} sm={12} md={8} lg={6} key={item.file_id}>
                     <Card
                       size="small"
+                      style={{ height: '100%', minHeight: RESULT_CARD_COVER_HEIGHT + RESULT_CARD_BODY_MIN_HEIGHT }}
+                      bodyStyle={{ minHeight: RESULT_CARD_BODY_MIN_HEIGHT }}
                       cover={
-                        <ImageThumb
-                          fileId={item.file_id}
-                          alt={item.original_filename}
-                          style={{ borderRadius: '4px 4px 0 0' }}
-                        />
+                        <div style={{ height: RESULT_CARD_COVER_HEIGHT, overflow: 'hidden', background: 'var(--app-bg-muted)', borderRadius: '4px 4px 0 0' }}>
+                          <ImageThumb
+                            fileId={item.file_id}
+                            alt={item.original_filename}
+                            style={{ borderRadius: '4px 4px 0 0', height: RESULT_CARD_COVER_HEIGHT, width: '100%', objectFit: 'cover' }}
+                          />
+                        </div>
                       }
                       actions={[
+                        ...(item.snippet
+                          ? [
+                              <Button
+                                key="snippet"
+                                type="link"
+                                size="small"
+                                icon={<EyeOutlined />}
+                                onClick={() => setSnippetModal({ visible: true, title: item.original_filename, snippet: item.snippet })}
+                              >
+                                查看片段
+                              </Button>,
+                            ]
+                          : []),
                         <Button
                           key="download"
                           type="link"
                           size="small"
-                          onClick={async () => {
-                            try {
-                              const blob = (await api.get(`/files/${item.file_id}/download`, {
-                                responseType: 'blob',
-                              })) as Blob
-                              if (blob.type.startsWith('application/json') || blob.size === 0) {
-                                message.error('文件不存在或无法下载')
-                                return
-                              }
-                              const url = URL.createObjectURL(blob)
-                              const a = document.createElement('a')
-                              a.href = url
-                              a.download = item.original_filename || `file-${item.file_id}`
-                              a.click()
-                              URL.revokeObjectURL(url)
-                              message.success('下载已开始')
-                            } catch (e: unknown) {
-                              const err = e as { response?: { data?: Blob; status?: number } }
-                              const data = err.response?.data
-                              const msg =
-                                data instanceof Blob && data.type?.includes('json')
-                                  ? '文件不存在或无权访问'
-                                  : err.response?.status === 404
-                                    ? '文件不存在'
-                                    : '下载失败'
-                              message.error(msg)
-                            }
-                          }}
+                          icon={<DownloadOutlined />}
+                          onClick={() => handleDownloadFile(item.file_id, item.original_filename || `file-${item.file_id}`)}
                         >
-                          下载
+                          下载原文
                         </Button>,
                       ]}
                     >
                       <Card.Meta
-                        title={item.original_filename}
+                        title={<span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.original_filename}>{item.original_filename}</span>}
                         description={
-                          item.snippet ? (
-                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>{item.snippet}</span>
-                          ) : item.score != null ? (
-                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>相似度: {(item.score * 100).toFixed(0)}%</span>
-                          ) : undefined
+                          <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
+                            {item.snippet ? (
+                              <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.snippet}</span>
+                            ) : item.score != null ? (
+                              `相似度 ${(item.score * 100).toFixed(0)}%`
+                            ) : (
+                              '—'
+                            )}
+                          </span>
                         }
                       />
                     </Card>
@@ -357,32 +436,82 @@ export default function ImageSearch() {
                   <Col xs={24} sm={12} md={8} lg={6} key={`${item.chunk_id}-${item.file_id}`}>
                     <Card
                       size="small"
+                      style={{ height: '100%', minHeight: RESULT_CARD_COVER_HEIGHT + RESULT_CARD_BODY_MIN_HEIGHT }}
+                      bodyStyle={{ minHeight: RESULT_CARD_BODY_MIN_HEIGHT }}
                       cover={
-                        item.is_image ? (
-                          <ImageThumb
-                            fileId={Number(item.file_id)}
-                            alt={item.original_filename ?? ''}
-                            style={{ borderRadius: '4px 4px 0 0' }}
-                          />
-                        ) : (
-                          <div
-                            style={{
-                              padding: 12,
-                              minHeight: 80,
-                              background: '#fafafa',
-                              borderRadius: '4px 4px 0 0',
-                              display: 'flex',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <FileTextOutlined style={{ marginRight: 8, color: 'var(--app-text-muted)' }} />
-                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)', flex: 1 }}>{item.snippet || '无摘要'}</span>
-                          </div>
-                        )
+                        <div style={{ height: RESULT_CARD_COVER_HEIGHT, overflow: 'hidden', background: 'var(--app-bg-muted)', borderRadius: '4px 4px 0 0' }}>
+                          {item.is_image ? (
+                            <ImageThumb
+                              fileId={Number(item.file_id)}
+                              alt={item.original_filename ?? ''}
+                              style={{ borderRadius: '4px 4px 0 0', height: RESULT_CARD_COVER_HEIGHT, width: '100%', objectFit: 'cover' }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                padding: 12,
+                                height: RESULT_CARD_COVER_HEIGHT,
+                                background: '#fafafa',
+                                borderRadius: '4px 4px 0 0',
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <FileTextOutlined style={{ marginRight: 8, marginTop: 2, color: 'var(--app-text-muted)', flexShrink: 0 }} />
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  color: 'var(--app-text-muted)',
+                                  flex: 1,
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 5,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                {item.snippet || '无摘要'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       }
+                      actions={[
+                        <Button
+                          key="snippet"
+                          type="link"
+                          size="small"
+                          icon={<EyeOutlined />}
+                          onClick={() => setSnippetModal({ visible: true, title: item.original_filename ?? '', snippet: item.snippet || '无摘要' })}
+                        >
+                          查看片段
+                        </Button>,
+                        ...(item.knowledge_base_id != null
+                          ? [
+                              <Button
+                                key="source"
+                                type="link"
+                                size="small"
+                                icon={<FileSearchOutlined />}
+                                onClick={() => openSourceDrawer(item)}
+                              >
+                                原文查看
+                              </Button>,
+                            ]
+                          : []),
+                        <Button
+                          key="download"
+                          type="link"
+                          size="small"
+                          icon={<DownloadOutlined />}
+                          onClick={() => handleDownloadFile(Number(item.file_id), item.original_filename || '')}
+                        >
+                          下载原文
+                        </Button>,
+                      ]}
                     >
                       <Card.Meta
-                        title={item.original_filename}
+                        title={<span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.original_filename}>{item.original_filename}</span>}
                         description={
                           <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
                             {item.is_image ? '图片' : '文档'} · 相关度 {(item.score * 100).toFixed(0)}%
@@ -397,6 +526,63 @@ export default function ImageSearch() {
           </>
         )}
       </Card>
+      <Drawer
+        title={sourceDrawer.title ? `原文 · ${sourceDrawer.title}` : '原文查看'}
+        open={sourceDrawer.visible}
+        onClose={() => setSourceDrawer((s) => ({ ...s, visible: false }))}
+        width={480}
+        destroyOnClose
+        styles={{ body: { paddingTop: 16 } }}
+      >
+        {sourceDrawer.loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+            <Spin tip="加载原文分块…" />
+          </div>
+        ) : sourceDrawer.chunks.length === 0 ? (
+          <Empty description="暂无分块内容" style={{ marginTop: 48 }} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {sourceDrawer.chunks.map((c) => {
+              const isHighlightChunk = c.id === sourceDrawer.chunkId
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    background: isHighlightChunk ? 'rgba(255, 235, 59, 0.15)' : 'var(--app-bg-muted)',
+                    border: isHighlightChunk ? '1px solid rgba(255, 193, 7, 0.6)' : '1px solid transparent',
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: 'var(--app-text-muted)', marginBottom: 6 }}>
+                    第 {c.chunk_index + 1} 段
+                    {isHighlightChunk && <span style={{ marginLeft: 8, color: 'var(--app-accent)' }}>· 命中片段</span>}
+                  </div>
+                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13, lineHeight: 1.6 }}>
+                    <HighlightSnippet content={c.content || ''} snippet={sourceDrawer.snippet} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Drawer>
+      <Modal
+        title={snippetModal.title ? `片段 · ${snippetModal.title}` : '查看片段'}
+        open={snippetModal.visible}
+        onCancel={() => setSnippetModal((s) => ({ ...s, visible: false }))}
+        footer={
+          <Button type="primary" onClick={() => setSnippetModal((s) => ({ ...s, visible: false }))}>
+            关闭
+          </Button>
+        }
+        width={560}
+        destroyOnClose
+      >
+        <div style={{ maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', padding: '8px 0', color: 'var(--app-text)' }}>
+          {snippetModal.snippet || '无内容'}
+        </div>
+      </Modal>
     </div>
   )
 }
