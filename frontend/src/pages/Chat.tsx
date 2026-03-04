@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
-import { SendOutlined, StopOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
+import { Input, Button, Card, List, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
+import { StopOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import api, { streamPost, uploadChatFile } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -81,6 +81,9 @@ export interface ChatAttachmentConfig {
   file_extensions: string[]
 }
 
+/** 对话内容与输入框统一的横向最大宽度（与 AI/用户气泡左右对齐） */
+const CHAT_CONTENT_MAX_WIDTH = 1024
+
 export default function Chat() {
   const [messages, setMessages] = useState<MessageItem[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -88,6 +91,7 @@ export default function Chat() {
   const [attachmentList, setAttachmentList] = useState<Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; fileName: string; uploadId?: string }>>([])
   const [loading, setLoading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const dragCounterRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
@@ -215,6 +219,16 @@ export default function Chat() {
   const isAllowedFileExt = (name: string) => {
     const ext = name.split('.').pop()?.toLowerCase()
     return ext && (attachmentConfig?.file_extensions ?? ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md']).includes(ext)
+  }
+
+  /** 豆包式：拖拽时显示的附件限制提示文案 */
+  const getAttachmentDragHint = () => {
+    const cfg = attachmentConfig
+    const maxCount = cfg?.max_count ?? 10
+    const imageTypes = cfg?.image_types ?? ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+    const exts = cfg?.file_extensions ?? ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md']
+    const typeStr = [...imageTypes.map((t: string) => t.replace('image/', '')), ...exts].join('、')
+    return { maxCount, typeStr }
   }
 
   const addAttachmentFiles = async (files: FileList | File[]) => {
@@ -454,72 +468,101 @@ export default function Chat() {
   if (pageLoading) return <PageSkeleton rows={5} />
 
   return (
-    <div className="app-perspective" style={{ height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div className="app-animate-in" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h1 className="app-page-title" style={{ margin: 0, marginRight: 8 }}>智能问答</h1>
-        <Space>
-          <Button
-            type={currentConvId ? 'default' : 'primary'}
-            icon={<PlusOutlined />}
-            onClick={handleNewConversation}
+    <>
+    {/* 顶部栏：与主内容区左右边界一致（侧栏宽度 + 48px 留白），侧栏展开/收起都对齐 */}
+    <div
+      className="chat-top-bar app-animate-in"
+      style={{
+        position: 'fixed',
+        top: 48,
+        left: 'calc(var(--app-sider-width, 220px) + 48px)',
+        right: 48,
+        zIndex: 10,
+        paddingTop: 16,
+        paddingBottom: 16,
+        paddingLeft: 0,
+        paddingRight: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap',
+        borderBottom: '1px solid var(--app-border-subtle)',
+        boxShadow: '0 4px 12px var(--app-border-subtle)',
+      }}
+    >
+      <h1 className="app-page-title" style={{ margin: 0, marginRight: 8 }}>智能问答</h1>
+      <Space>
+        <Button
+          type={currentConvId ? 'default' : 'primary'}
+          icon={<PlusOutlined />}
+          onClick={handleNewConversation}
+        >
+          新对话
+        </Button>
+        <Button
+          icon={<MessageOutlined />}
+          onClick={() => setConversationDrawerVisible(true)}
+          style={{ width: 260, minWidth: 260, overflow: 'hidden', paddingLeft: 12, paddingRight: 12 }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              verticalAlign: 'bottom',
+            }}
+            title={currentConversation ? (currentConversation.title || '当前对话') : undefined}
           >
-            新对话
-          </Button>
-          <Button
-            icon={<MessageOutlined />}
-            onClick={() => setConversationDrawerVisible(true)}
-            style={{ width: 260, minWidth: 260, overflow: 'hidden', paddingLeft: 12, paddingRight: 12 }}
-          >
-            <span
-              style={{
-                display: 'inline-block',
-                maxWidth: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                verticalAlign: 'bottom',
-              }}
-              title={currentConversation ? (currentConversation.title || '当前对话') : undefined}
-            >
-              {currentConversation ? currentConversation.title || '当前对话' : '选择对话'}
-            </span>
-          </Button>
-          <Select
-            mode="multiple"
-            placeholder="选择知识库（可多选，不选则检索全部）"
-            allowClear
-            value={selectedKbIds}
-            onChange={(v: number[]) => setSelectedKbIds(v ?? [])}
-            disabled={!!currentConvId}
-            options={knowledgeBases.map((kb: KnowledgeBaseListResponse['knowledge_bases'][0]) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count || 0} 块）` }))}
-            style={{ minWidth: 200 }}
-          />
-          <Space split="|" style={{ color: 'var(--app-text-muted)', fontSize: 13 }}>
-            <Space size={6}>
-              <span>MCP 工具</span>
-              <Switch size="small" checked={enableMcpTools} onChange={setEnableMcpTools} />
-            </Space>
-            <Space size={6}>
-              <span>Skills 技能</span>
-              <Switch size="small" checked={enableSkillsTools} onChange={setEnableSkillsTools} />
-            </Space>
-            <Space size={6}>
-              <span>RAG 增强</span>
-              <Switch size="small" checked={enableRag} onChange={setEnableRag} />
-            </Space>
+            {currentConversation ? currentConversation.title || '当前对话' : '选择对话'}
+          </span>
+        </Button>
+        <Select
+          mode="multiple"
+          placeholder="选择知识库（可多选，不选则检索全部）"
+          allowClear
+          value={selectedKbIds}
+          onChange={(v: number[]) => setSelectedKbIds(v ?? [])}
+          disabled={!!currentConvId}
+          options={knowledgeBases.map((kb: KnowledgeBaseListResponse['knowledge_bases'][0]) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count || 0} 块）` }))}
+          style={{ minWidth: 200 }}
+        />
+        <Space split="|" style={{ color: 'var(--app-text-muted)', fontSize: 13 }}>
+          <Space size={6}>
+            <span>MCP 工具</span>
+            <Switch size="small" checked={enableMcpTools} onChange={setEnableMcpTools} />
+          </Space>
+          <Space size={6}>
+            <span>Skills 技能</span>
+            <Switch size="small" checked={enableSkillsTools} onChange={setEnableSkillsTools} />
+          </Space>
+          <Space size={6}>
+            <span>RAG 增强</span>
+            <Switch size="small" checked={enableRag} onChange={setEnableRag} />
           </Space>
         </Space>
-      </div>
-      <Card 
-        className="app-card-3d app-animate-in app-animate-in-delay-1"
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-        bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}
+      </Space>
+    </div>
+
+    <div
+      className="chat-page app-perspective"
+      style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', paddingTop: 100 }}
+      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current++; setDragOver(true) }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current--; if (dragCounterRef.current <= 0) { dragCounterRef.current = 0; setDragOver(false) } }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current = 0; setDragOver(false); if (e.dataTransfer.files.length) addAttachmentFiles(e.dataTransfer.files) }}
+    >
+      {/* 对话区：仅此区域参与滚动，顶部留白避免被固定栏挡住；与输入框同为拖拽上传区域 */}
+      <div
+        className="chat-dialogue-area app-animate-in app-animate-in-delay-1"
+        style={{ display: 'flex', flexDirection: 'column', flex: 1 }}
       >
         {currentConvId && currentConversation && (
           <div
             style={{
-              marginBottom: 12,
-              paddingBottom: 12,
+              marginBottom: 20,
+              paddingBottom: 16,
               borderBottom: '1px solid var(--app-border-subtle)',
               flexShrink: 0,
               minHeight: 40,
@@ -548,47 +591,32 @@ export default function Chat() {
             </span>
           </div>
         )}
-        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', marginBottom: 16, minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ marginBottom: 24, padding: `0 24px 220px 24px` }}>
           {messages.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--app-text-muted)' }}>
+            <div style={{ textAlign: 'center', padding: '60px 24px', color: 'var(--app-text-muted)', fontSize: 15 }}>
               暂无消息，开始对话吧
             </div>
           ) : (
+            <div style={{ maxWidth: CHAT_CONTENT_MAX_WIDTH, margin: '0 auto', paddingLeft: 24, boxSizing: 'border-box' }}>
             <List
               dataSource={messages}
               renderItem={(item: MessageItem) => (
-                <List.Item style={{ border: 'none', padding: '8px 0' }}>
-                  <List.Item.Meta
-                    avatar={
-                      <Avatar
-                        icon={item.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
-                        style={{
-                          backgroundColor: item.role === 'user' ? '#1890ff' : '#52c41a',
-                        }}
-                      />
-                    }
-                    title={
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span>{item.role === 'user' ? '我' : 'AI助手'}</span>
-                        {item.confidence !== undefined && item.confidence !== null && (
-                          <span style={{ 
-                            fontSize: 12, 
-                            backgroundColor: item.confidence < 0.6 ? 'var(--app-error-bg)' : 'var(--app-success-bg)',
-                            padding: '2px 8px',
-                            borderRadius: 4,
-                            border: item.confidence < 0.6 ? '1px solid rgba(255,77,79,0.4)' : '1px solid rgba(82,196,26,0.4)',
-                            color: 'var(--app-text-primary)',
-                          }}>
-                            置信度: {(item.confidence * 100).toFixed(1)}% {item.confidence < 0.6 ? '(低)' : ''}
-                          </span>
-                        )}
-                      </div>
-                    }
-                    description={
-                      <div>
-                        {/* 用户消息：豆包式先展示附件（图片/文件名），再展示消息内容 */}
-                        {item.role === 'user' && item.attachments && item.attachments.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+                <List.Item style={{ border: 'none', padding: '20px 0', display: 'block' }}>
+                  <div style={{ display: 'flex', justifyContent: item.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                    <div
+                      className={item.role === 'user' ? 'chat-msg-user' : undefined}
+                      style={{
+                        maxWidth: '85%',
+                        padding: item.role === 'user' ? '12px 16px' : 0,
+                        borderRadius: item.role === 'user' ? 12 : 0,
+                        background: item.role === 'user' ? 'var(--app-bg-subtle)' : 'transparent',
+                        border: item.role === 'user' ? '1px solid var(--app-border-subtle)' : 'none',
+                      }}
+                    >
+                      {/* 用户消息：气泡框；AI 回复：无气泡 */}
+                      {/* 用户消息：豆包式先展示附件（图片/文件名），再展示消息内容 */}
+                      {item.role === 'user' && item.attachments && item.attachments.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 8, justifyContent: 'flex-end' }}>
                             {item.attachments.map((att, idx) =>
                               att.type === 'image' && att.dataUrl ? (
                                 <div
@@ -665,7 +693,7 @@ export default function Chat() {
                         <div style={{ marginBottom: (item.max_confidence_context || item.retrieved_context) ? 12 : 0 }}>
                           {parseContentWithCharts(item.content).map((part, idx) =>
                             part.type === 'text' ? (
-                              <div key={idx} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-primary)' }}>
+                              <div key={idx} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-primary)', lineHeight: 1.7, fontSize: 15 }}>
                                 {part.content as string}
                               </div>
                             ) : (
@@ -840,58 +868,110 @@ export default function Chat() {
                             ]}
                           />
                         ) : null}
-                      </div>
-                    }
-                  />
+                      {/* AI 消息底部显示置信度（不显示头像和「AI助手」时保留） */}
+                      {item.role === 'assistant' && item.confidence !== undefined && item.confidence !== null && (
+                        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--app-text-muted)' }}>
+                          置信度: {(item.confidence * 100).toFixed(1)}% {item.confidence < 0.6 ? '(低)' : ''}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </List.Item>
               )}
             />
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
-        <div className="tech-input-wrap" style={{ flexShrink: 0, marginTop: 'auto' }}>
-          {attachmentList.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-              {attachmentList.map((a) => (
-                <div key={a.id} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', borderRadius: 6, border: '1px solid var(--app-border-subtle)', overflow: 'hidden', background: 'var(--app-bg-subtle)' }}>
-                  {a.isImage && a.dataUrl ? (
-                    <img src={a.dataUrl} alt="" style={{ width: 40, height: 40, objectFit: 'cover' }} />
-                  ) : (
-                    <span style={{ padding: '6px 8px', fontSize: 12, color: 'var(--app-text-secondary)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.fileName}</span>
-                  )}
-                  <Button type="text" size="small" icon={<CloseOutlined />} style={{ minWidth: 24, height: 24, padding: 0, color: 'var(--app-text-muted)' }} onClick={() => removeAttachment(a.id)} />
-                </div>
-              ))}
-            </div>
-          )}
-          <div
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
-            onDragLeave={(e) => { e.preventDefault(); setDragOver(false) }}
-            onDrop={(e) => {
-              e.preventDefault()
-              setDragOver(false)
-              if (e.dataTransfer.files.length) addAttachmentFiles(e.dataTransfer.files)
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              borderRadius: 12,
-              border: `1px solid ${dragOver ? 'var(--app-primary)' : 'var(--app-border-subtle)'}`,
-              background: dragOver ? 'var(--app-bg-subtle)' : 'var(--app-bg)',
-              padding: '8px 12px',
-              transition: 'border-color .15s, background .15s',
-            }}
-          >
-            <Input
-              value={inputValue}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
-              onPressEnter={handleSend}
-              placeholder="输入消息..."
-              variant="borderless"
-              style={{ flex: 1, fontSize: 14 }}
+      </div>
+    </div>
+
+    {/* 豆包式：拖拽时背景模糊，中间提示清晰可见（未松开鼠标前） */}
+    {dragOver && (
+      <div
+        className="chat-drag-overlay"
+        style={{
+          position: 'fixed',
+          top: 140,
+          left: 'calc(var(--app-sider-width, 220px) + 48px)',
+          right: 48,
+          bottom: 0,
+          zIndex: 15,
+          background: 'rgba(255,255,255,0.15)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          border: '2px dashed var(--app-border-info)',
+          borderRadius: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          pointerEvents: 'none',
+        }}
+      >
+        <span style={{ fontSize: 16, color: 'var(--app-text-primary)', fontWeight: 600 }}>在此处拖放文件</span>
+        <span style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
+          文件数量：最多 {getAttachmentDragHint().maxCount} 个
+        </span>
+        <span style={{ fontSize: 13, color: 'var(--app-text-muted)' }}>
+          文件类型：{getAttachmentDragHint().typeStr}
+        </span>
+      </div>
+    )}
+
+    {/* 输入框：与主内容区左右边界一致（AI 消息左边框、用户消息/发送按钮右边框对齐），侧栏展开/收起都保持 */}
+    <div
+      className="chat-input-bar tech-input-wrap"
+      style={{
+        position: 'fixed',
+        bottom: 24,
+        left: 'calc(var(--app-sider-width, 220px) + 48px)',
+        right: 48,
+        paddingTop: 24,
+        paddingBottom: 24,
+        paddingLeft: 0,
+        paddingRight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+      }}
+    >
+      <div style={{ width: '100%', maxWidth: CHAT_CONTENT_MAX_WIDTH, margin: '0 auto', boxSizing: 'border-box' }}>
+        <div
+          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current++; setDragOver(true) }}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current--; if (dragCounterRef.current <= 0) { dragCounterRef.current = 0; setDragOver(false) } }}
+          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current = 0; setDragOver(false); if (e.dataTransfer.files.length) addAttachmentFiles(e.dataTransfer.files) }}
+          className="chat-input-inner"
+          style={{
+            ...(dragOver && { background: 'var(--app-bg-subtle)' }),
+            transition: 'background .15s',
+            overflow: 'hidden',
+          }}
+        >
+          {/* 豆包式：上方仅输入框，回车发送 */}
+          <Input
+            value={inputValue}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
+            onPressEnter={(e) => { e.preventDefault(); handleSend() }}
+            placeholder="发消息或输入 / 选择技能"
+            variant="borderless"
+            size="large"
+            style={{ fontSize: 16, minHeight: 112, padding: '32px 20px', border: 'none', borderBottom: 'none', background: 'transparent' }}
+            disabled={loading}
+          />
+          {/* 下部：附件列表 + 附件上传按钮，无发送按钮（回车发送） */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+            <Button
+              type="text"
+              size="small"
+              icon={<PaperClipOutlined />}
+              onClick={() => fileInputRef.current?.click()}
               disabled={loading}
+              style={{ color: 'var(--app-text-secondary)' }}
+              title="上传附件"
             />
-            <Button type="text" icon={<PaperClipOutlined />} onClick={() => fileInputRef.current?.click()} disabled={loading} style={{ color: 'var(--app-text-secondary)' }} />
             <input
               ref={fileInputRef}
               type="file"
@@ -903,30 +983,29 @@ export default function Chat() {
               style={{ display: 'none' }}
               onChange={(e) => { const f = e.target.files; if (f?.length) addAttachmentFiles(f); e.target.value = '' }}
             />
-            {loading ? (
-              <Button
-                type="default"
-                danger
-                icon={<StopOutlined />}
-                onClick={handleStop}
-                style={{ borderRadius: 8 }}
-              >
+            {attachmentList.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                {attachmentList.map((a) => (
+                  <div key={a.id} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', borderRadius: 6, border: '1px solid var(--app-border-subtle)', overflow: 'hidden', background: 'var(--app-bg-subtle)' }}>
+                    {a.isImage && a.dataUrl ? (
+                      <img src={a.dataUrl} alt="" style={{ width: 32, height: 32, objectFit: 'cover' }} />
+                    ) : (
+                      <span style={{ padding: '4px 8px', fontSize: 12, color: 'var(--app-text-secondary)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.fileName}</span>
+                    )}
+                    <Button type="text" size="small" icon={<CloseOutlined />} style={{ minWidth: 22, height: 22, padding: 0, color: 'var(--app-text-muted)' }} onClick={() => removeAttachment(a.id)} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {loading && (
+              <Button type="link" danger size="small" icon={<StopOutlined />} onClick={handleStop} style={{ marginLeft: 'auto' }}>
                 停止
-              </Button>
-            ) : (
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={handleSend}
-                disabled={!inputValue.trim() && attachmentList.length === 0}
-                style={{ borderRadius: 8 }}
-              >
-                发送
               </Button>
             )}
           </div>
         </div>
-      </Card>
+      </div>
+    </div>
 
       <Modal
         title={sourcePreview ? `${sourcePreview.original_filename} · 第 ${(sourcePreview.chunk_index ?? 0) + 1} 段` : '引用来源'}
@@ -1050,6 +1129,6 @@ export default function Chat() {
           {fileDrawerContent}
         </div>
       </Drawer>
-    </div>
+    </>
   )
 }

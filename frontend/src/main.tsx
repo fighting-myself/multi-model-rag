@@ -55,11 +55,11 @@ const themeLight = {
 const themeDark = {
   token: {
     ...tokenBase,
-    colorBgContainer: 'rgba(13, 18, 32, 0.85)',
-    colorBgLayout: '#050810',
-    colorBgElevated: '#1e293b',
-    colorText: '#e2e8f0',
-    colorTextSecondary: '#94a3b8',
+    colorBgContainer: 'rgba(12, 18, 30, 0.9)',
+    colorBgLayout: '#060a12',
+    colorBgElevated: '#0e1422',
+    colorText: '#e8eef6',
+    colorTextSecondary: '#9ca8b8',
   },
   components: themeLight.components,
 }

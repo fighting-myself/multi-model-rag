@@ -1,46 +1,46 @@
-/* ========== 科技风设计系统：深色基底 · 霓虹高光 · 玻璃拟态 ========== */
+/* ========== 暗黑主题：现代 AI 炫酷 · 青紫霓虹 · 有层次非纯黑 ========== */
 
 :root {
-  /* 基底 */
-  --app-bg: #050810;
-  --app-bg-elevated: #0a0e1a;
-  --app-bg-panel: #0d1220;
-  --app-sidebar-bg: rgba(5, 8, 16, 0.92);
-  --app-header-bg: rgba(10, 14, 26, 0.85);
-  /* 霓虹主色 */
+  /* 基底：深蓝紫调，不是纯黑，有科技感 */
+  --app-bg: #060a12;
+  --app-bg-elevated: #0b101a;
+  --app-bg-panel: #0e1422;
+  --app-sidebar-bg: rgba(6, 10, 18, 0.94);
+  --app-header-bg: rgba(11, 16, 26, 0.9);
+  /* 霓虹主色：青 + 紫双主色 */
   --app-accent: #00f5ff;
-  --app-accent-dim: rgba(0, 245, 255, 0.6);
+  --app-accent-dim: rgba(0, 245, 255, 0.65);
   --app-accent-hover: #5effff;
-  --app-glow: rgba(0, 245, 255, 0.4);
-  --app-glow-strong: rgba(0, 245, 255, 0.6);
-  /* 辅色 */
+  --app-glow: rgba(0, 245, 255, 0.5);
+  --app-glow-strong: rgba(0, 245, 255, 0.7);
+  /* 辅色：紫色增强，与青形成 AI 感 */
   --app-purple: #a855f7;
-  --app-purple-dim: rgba(168, 85, 247, 0.5);
+  --app-purple-dim: rgba(168, 85, 247, 0.55);
   --app-green: #22c55e;
   --app-red: #ef4444;
   --app-amber: #f59e0b;
-  /* 文字 */
-  --app-text-primary: #e2e8f0;
-  --app-text-secondary: #94a3b8;
-  --app-text-muted: #64748b;
-  /* 玻璃与边框 */
-  --app-glass: rgba(15, 23, 42, 0.6);
-  --app-glass-border: rgba(0, 245, 255, 0.15);
-  --app-border-subtle: rgba(255, 255, 255, 0.06);
-  --app-border-info: rgba(0, 245, 255, 0.35);
-  /* 语义 */
-  --app-card-bg: rgba(13, 18, 32, 0.8);
-  --app-bg-muted: rgba(30, 41, 59, 0.5);
-  --app-bg-subtle: rgba(15, 23, 42, 0.4);
-  --app-info-bg: rgba(0, 245, 255, 0.08);
+  /* 文字：略亮一点，更清晰 */
+  --app-text-primary: #e8eef6;
+  --app-text-secondary: #9ca8b8;
+  --app-text-muted: #6b7a8f;
+  /* 玻璃与边框：霓虹更可见 */
+  --app-glass: rgba(14, 20, 36, 0.7);
+  --app-glass-border: rgba(0, 245, 255, 0.22);
+  --app-border-subtle: rgba(255, 255, 255, 0.08);
+  --app-border-info: rgba(0, 245, 255, 0.45);
+  /* 语义：带一点青/紫 tint */
+  --app-card-bg: rgba(12, 18, 30, 0.85);
+  --app-bg-muted: rgba(20, 30, 50, 0.55);
+  --app-bg-subtle: rgba(14, 22, 38, 0.5);
+  --app-info-bg: rgba(0, 245, 255, 0.1);
   --app-success-bg: rgba(34, 197, 94, 0.1);
   --app-error-bg: rgba(239, 68, 68, 0.1);
-  --app-list-hover: rgba(0, 245, 255, 0.08);
-  --app-list-active: rgba(0, 245, 255, 0.18);
-  --app-sidebar-hover: rgba(0, 245, 255, 0.08);
-  --app-sidebar-selected: rgba(0, 245, 255, 0.18);
+  --app-list-hover: rgba(0, 245, 255, 0.1);
+  --app-list-active: rgba(0, 245, 255, 0.2);
+  --app-sidebar-hover: rgba(0, 245, 255, 0.1);
+  --app-sidebar-selected: rgba(0, 245, 255, 0.22);
   --app-warning-text: #fbbf24;
-  --app-icon-muted: #475569;
+  --app-icon-muted: #5a6780;
 }
 
 /* ========== 亮色主题：日间清爽 · 无霓虹 · 柔和阴影 ========== */
@@ -116,27 +116,28 @@ body {
   background: var(--app-bg) !important;
 }
 
-/* 网格 + 光晕背景 */
+/* 暗黑：网格 + 青紫光晕背景，有氛围不纯黑 */
 .app-bg-canvas {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
   background:
-    linear-gradient(180deg, transparent 0%, var(--app-bg) 100%),
-    radial-gradient(ellipse 100% 80% at 50% -20%, rgba(0, 245, 255, 0.12) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 50% at 100% 50%, rgba(168, 85, 247, 0.08) 0%, transparent 45%);
+    linear-gradient(180deg, #080d18 0%, var(--app-bg) 35%, #050810 100%),
+    radial-gradient(ellipse 120% 90% at 50% -15%, rgba(0, 245, 255, 0.18) 0%, transparent 45%),
+    radial-gradient(ellipse 70% 60% at 100% 40%, rgba(168, 85, 247, 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 50% at 0% 80%, rgba(0, 245, 255, 0.06) 0%, transparent 45%);
 }
 .app-bg-canvas::before {
   content: '';
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(0, 245, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 245, 255, 0.03) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 20%, transparent 70%);
-  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 20%, transparent 70%);
+    linear-gradient(rgba(0, 245, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 245, 255, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse 85% 85% at 50% 50%, black 15%, transparent 65%);
+  -webkit-mask-image: radial-gradient(ellipse 85% 85% at 50% 50%, black 15%, transparent 65%);
 }
 
 /* 亮色主题：背景为柔和渐变 + 点阵，无霓虹光 */
@@ -160,7 +161,12 @@ body {
   position: relative;
   z-index: 1;
   background: transparent !important;
-  min-height: calc(100vh - 64px);
+  min-height: calc(100vh - 48px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .app-content-area-padding {
@@ -169,6 +175,10 @@ body {
   border-radius: 16px;
   position: relative;
   z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (max-width: 768px) {
@@ -337,6 +347,10 @@ body {
   border-right: 1px solid var(--app-glass-border);
   box-shadow: 4px 0 32px rgba(0, 0, 0, 0.3);
 }
+/* 暗黑：侧栏右边缘霓虹线，增强科技感 */
+[data-theme="dark"] .ant-layout-sider.tech-sider {
+  box-shadow: 4px 0 40px rgba(0, 0, 0, 0.35), 2px 0 0 0 rgba(0, 245, 255, 0.08);
+}
 
 .ant-layout-sider .ant-menu-dark {
   background: transparent !important;
@@ -364,6 +378,11 @@ body {
   border-left-color: var(--app-accent);
   box-shadow: inset 0 0 24px -8px var(--app-glow);
 }
+/* 暗黑：当前选中项更炫，青+紫微光 */
+[data-theme="dark"] .ant-layout-sider .ant-menu-dark .ant-menu-item-selected {
+  box-shadow: inset 0 0 28px -6px var(--app-glow), inset -2px 0 0 0 var(--app-accent);
+  border-left-width: 4px;
+}
 
 /* 亮色主题：侧栏浅色 + 菜单深色文字 */
 [data-theme="light"] .ant-layout-sider.tech-sider {
@@ -382,6 +401,28 @@ body {
   border-left-color: var(--app-accent);
 }
 
+.tech-sider-footer .ant-btn {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+[data-theme="light"] .tech-sider-footer .ant-btn {
+  color: var(--app-text-primary) !important;
+}
+[data-theme="light"] .tech-sider-footer {
+  border-top-color: rgba(13, 148, 136, 0.15);
+}
+
+/* 固定在视口左下角的入口区：与侧栏同风格、不随菜单滚动 */
+.tech-sider-footer-fixed {
+  background: var(--app-sidebar-bg) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 4px 0 32px rgba(0, 0, 0, 0.3);
+}
+[data-theme="light"] .tech-sider-footer-fixed {
+  background: var(--app-sidebar-bg) !important;
+  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.06);
+}
+
 /* ---------- 顶栏：玻璃 ---------- */
 .ant-layout-header.tech-header {
   background: var(--app-header-bg) !important;
@@ -389,6 +430,10 @@ body {
   -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--app-glass-border);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+}
+/* 暗黑：顶栏底边霓虹线 */
+[data-theme="dark"] .ant-layout-header.tech-header {
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.25), 0 1px 0 0 rgba(0, 245, 255, 0.1);
 }
 
 .ant-layout-header .ant-btn:hover {
@@ -416,6 +461,29 @@ body {
 .app-perspective {
   perspective: 1200px;
   transform-style: preserve-3d;
+}
+
+/* 智能问答页关闭 3D，保证顶部栏能正确压住滚动内容 */
+.chat-page.app-perspective {
+  perspective: none;
+  transform-style: flat;
+}
+/* 暗黑模式：对话区中央轻微径向高光，增强层次与主色氛围 */
+[data-theme="dark"] .chat-page.app-perspective {
+  position: relative;
+}
+[data-theme="dark"] .chat-page.app-perspective::before {
+  content: '';
+  position: fixed;
+  top: 140px;
+  left: calc(var(--app-sider-width, 220px) + 48px);
+  right: 48px;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 40%, rgba(0, 245, 255, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 50% at 80% 60%, rgba(168, 85, 247, 0.04) 0%, transparent 50%);
 }
 
 .app-card-3d {
@@ -802,13 +870,120 @@ body {
   color: #e2e8f0 !important;
 }
 
-/* 智能问答输入区：霓虹光晕 */
+/* 暗黑：主按钮 青→紫 渐变 + 霓虹光，突出现代 AI */
+[data-theme="dark"] .ant-btn-primary {
+  background: linear-gradient(135deg, #00f5ff 0%, #0891b2 50%, rgba(168, 85, 247, 0.9) 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 0 20px -4px var(--app-glow), 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+}
+[data-theme="dark"] .ant-btn-primary:hover {
+  background: linear-gradient(135deg, #5effff 0%, #0e7490 50%, #a855f7 100%) !important;
+  box-shadow: 0 0 28px -4px var(--app-glow), 0 0 0 1px rgba(255, 255, 255, 0.15) !important;
+}
+
+/* 智能问答对话区：无里层框，与页面融为一体，仅最右侧一条滚动条 */
+.chat-dialogue-area {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  position: relative;
+  z-index: 1;
+}
+
+/* 智能问答输入区：霓虹光晕（其他页用） */
 .tech-input-wrap {
   border-radius: 12px;
   padding: 3px;
   background: rgba(0, 245, 255, 0.06);
   border: 1px solid var(--app-glass-border);
   box-shadow: 0 0 32px -8px var(--app-glow), inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+/* 智能问答页顶部栏：不透明背景，完全遮挡向上滚动的文字（与底部栏一致） */
+.chat-top-bar {
+  background: var(--app-bg) !important;
+  border-bottom: 1px solid var(--app-border-subtle) !important;
+}
+/* 暗黑模式：智能问答标题 青→紫 渐变，突出现代 AI */
+[data-theme="dark"] .chat-top-bar .app-page-title {
+  background: linear-gradient(135deg, #00f5ff 0%, #a855f7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: none;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+/* 暗黑模式：顶部栏玻璃 + 霓虹底边光晕，层次更炫酷 */
+[data-theme="dark"] .chat-top-bar {
+  background: linear-gradient(180deg, var(--app-bg-elevated) 0%, var(--app-bg) 100%) !important;
+  border-bottom: 1px solid var(--app-glass-border) !important;
+  box-shadow: 0 6px 32px -8px var(--app-glow), 0 0 40px -16px rgba(168, 85, 247, 0.15), 0 1px 0 rgba(0, 245, 255, 0.08);
+}
+[data-theme="light"] .chat-top-bar {
+  background: #f0f4f8 !important; /* 亮色不透明 */
+  border-bottom: 1px solid var(--app-border-subtle) !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+/* 智能问答页底部输入条：只去掉“外框”，不画背景/边框/阴影，与背景融为一体；输入消息框样式不动 */
+.chat-input-bar.tech-input-wrap {
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  position: relative;
+  z-index: 10;
+}
+/* 亮色：同样无外框，不出现单独一块 */
+[data-theme="light"] .chat-input-bar.tech-input-wrap {
+  background: transparent !important;
+  border-top: none !important;
+  box-shadow: none !important;
+}
+/* 暗黑：也去掉底条外框，只保留输入框本身 */
+[data-theme="dark"] .chat-input-bar.tech-input-wrap {
+  background: transparent !important;
+  border-top: none !important;
+  box-shadow: none !important;
+}
+
+/* 输入区内层：无外框，但保留衬底背景，保证输入框下方附件/文字能显示（拖拽时由 JS 覆盖） */
+.chat-input-inner {
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: var(--app-bg);
+}
+.chat-input-inner:focus-within {
+  box-shadow: none !important;
+}
+/* 暗黑模式：用户消息气泡霓虹描边 + 微光，与主色搭配 */
+[data-theme="dark"] .chat-msg-user {
+  border-color: rgba(0, 245, 255, 0.28) !important;
+  background: linear-gradient(135deg, rgba(14, 28, 48, 0.85) 0%, rgba(20, 30, 50, 0.75) 100%) !important;
+  box-shadow: 0 0 24px -8px var(--app-glow), 0 0 0 1px rgba(0, 245, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+/* 暗黑模式：拖拽上传遮罩深色毛玻璃，提示文字更清晰 */
+[data-theme="dark"] .chat-drag-overlay {
+  background: rgba(6, 10, 18, 0.88) !important;
+  border-color: var(--app-accent) !important;
+  border-width: 2px !important;
+  box-shadow: 0 0 56px -12px var(--app-glow), 0 0 0 1px rgba(168, 85, 247, 0.2), inset 0 0 0 1px rgba(0, 245, 255, 0.2) !important;
+}
+[data-theme="dark"] .chat-drag-overlay span:first-child {
+  color: var(--app-accent) !important;
+  text-shadow: 0 0 24px var(--app-glow), 0 0 48px rgba(0, 245, 255, 0.4);
+}
+
+/* 豆包式：输入框与下方附件栏之间无分隔线，整体一块 */
+.chat-input-bar .ant-input,
+.chat-input-bar .ant-input:hover,
+.chat-input-bar .ant-input:focus {
+  border: none !important;
+  border-bottom: none !important;
+  box-shadow: none !important;
 }
 .tech-input-wrap .ant-input-group {
   border-radius: 10px;

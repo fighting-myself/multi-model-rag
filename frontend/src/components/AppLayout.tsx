@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layout, Menu, Avatar, Dropdown, Button, Space } from 'antd'
+import { Layout, Menu, Avatar, Dropdown, Button } from 'antd'
 import {
   HomeOutlined,
   FileOutlined,
@@ -47,13 +47,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/', icon: <HomeOutlined />, label: '首页' },
     { key: '/files', icon: <FileOutlined />, label: '文件管理' },
     { key: '/knowledge-bases', icon: <DatabaseOutlined />, label: '知识库' },
-    { key: '/image-search', icon: <PictureOutlined />, label: '多模态检索' },
     { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
-    { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
-    { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
+    { key: '/image-search', icon: <PictureOutlined />, label: '多模态检索' },
     { key: '/mcp-servers', icon: <ApiOutlined />, label: 'MCP 工具' },
     { key: '/steward', icon: <RobotOutlined />, label: '浏览器助手' },
     { key: '/computer-steward', icon: <DesktopOutlined />, label: '电脑管家' },
+    { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
+    { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
   ]
 
   const userMenuItems = [
@@ -73,7 +73,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh', background: 'transparent', position: 'relative' }}>
+    <Layout style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden', background: 'transparent', position: 'relative', display: 'flex' }}>
       <div className="app-bg-canvas" aria-hidden />
       <Sider
         width={220}
@@ -83,7 +83,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         collapsible
         trigger={null}
         className="tech-sider"
-        style={{ position: 'relative', zIndex: 2 }}
+        style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column' }}
       >
         <div
           style={{
@@ -117,70 +117,98 @@ export default function AppLayout({ children }: AppLayoutProps) {
             title={siderCollapsed ? '展开侧边栏' : '收起侧边栏'}
           />
         </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          items={menuItems}
-          onClick={handleMenuClick}
-          style={{
-            marginTop: 16,
-            background: 'transparent',
-            border: 'none',
-          }}
-          theme="dark"
-          inlineCollapsed={siderCollapsed}
-          className="tech-sider-menu"
-        />
+        <div style={{ flex: 1, overflow: 'auto', paddingBottom: 56 }}>
+          <Menu
+            mode="inline"
+            selectedKeys={[location.pathname]}
+            items={menuItems}
+            onClick={handleMenuClick}
+            style={{
+              marginTop: 16,
+              background: 'transparent',
+              border: 'none',
+            }}
+            theme="dark"
+            inlineCollapsed={siderCollapsed}
+            className="tech-sider-menu"
+          />
+        </div>
       </Sider>
-      <Layout style={{ position: 'relative', zIndex: 1 }}>
+      {/* 固定在视口左下角，不随侧栏菜单滚动 */}
+      <div
+        className="tech-sider-footer tech-sider-footer-fixed"
+        style={{
+          position: 'fixed',
+          left: 0,
+          bottom: 0,
+          width: siderCollapsed ? 64 : 220,
+          borderTop: '1px solid var(--app-glass-border)',
+          padding: siderCollapsed ? '12px 8px' : '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexDirection: siderCollapsed ? 'column' : 'row',
+          zIndex: 3,
+          transition: 'width 0.2s',
+        }}
+      >
+        <Button
+          type="text"
+          size="small"
+          icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
+          onClick={toggleTheme}
+          style={{ color: 'rgba(255,255,255,0.85)' }}
+          title={theme === 'dark' ? '切换为亮色' : '切换为暗色'}
+        />
+          <Dropdown
+            menu={{ items: userMenuItems, onClick: handleMenuClick }}
+            placement="topLeft"
+            overlayStyle={{ minWidth: 140 }}
+          >
+          <Button
+            type="text"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: siderCollapsed ? 0 : 8,
+              color: 'rgba(255,255,255,0.85)',
+              padding: siderCollapsed ? '4px' : '4px 8px',
+              width: siderCollapsed ? '100%' : 'auto',
+              justifyContent: siderCollapsed ? 'center' : 'flex-start',
+            }}
+          >
+            <Avatar
+              size="small"
+              className="tech-avatar"
+              style={{
+                background: 'linear-gradient(135deg, #00f5ff, #a855f7)',
+                boxShadow: '0 0 12px rgba(0, 245, 255, 0.5)',
+              }}
+              icon={<UserOutlined />}
+            />
+            {!siderCollapsed && <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.username || '用户'}</span>}
+          </Button>
+        </Dropdown>
+      </div>
+      <Layout
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          ['--app-sider-width' as string]: siderCollapsed ? '64px' : '220px',
+        }}
+      >
         <Header
           className="tech-header"
           style={{
             padding: '0 24px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            height: 64,
+            minHeight: 48,
+            height: 48,
           }}
-        >
-          <div />
-          <Space size="middle">
-            <Button
-              type="text"
-              icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
-              onClick={toggleTheme}
-              style={{ color: 'var(--app-text-primary)' }}
-              title={theme === 'dark' ? '切换为亮色' : '切换为暗色'}
-            />
-            <Dropdown
-              menu={{ items: userMenuItems, onClick: handleMenuClick }}
-              placement="bottomRight"
-              overlayStyle={{ minWidth: 140 }}
-            >
-              <Button
-                type="text"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  color: 'var(--app-text-primary)',
-                  height: 40,
-                }}
-              >
-                <Avatar
-                  size="small"
-                  className="tech-avatar"
-                  style={{
-                    background: 'linear-gradient(135deg, #00f5ff, #a855f7)',
-                    boxShadow: '0 0 12px rgba(0, 245, 255, 0.5)',
-                  }}
-                  icon={<UserOutlined />}
-                />
-                <span style={{ fontWeight: 500 }}>{user?.username || '用户'}</span>
-              </Button>
-            </Dropdown>
-          </Space>
-        </Header>
+        />
         <Content className="app-content-area app-content-area-padding">
           {children}
         </Content>
