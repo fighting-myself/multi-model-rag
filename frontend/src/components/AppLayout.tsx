@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Layout, Menu, Avatar, Dropdown, Button, Space } from 'antd'
 import {
   HomeOutlined,
@@ -14,6 +15,8 @@ import {
   BulbFilled,
   RobotOutlined,
   DesktopOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -34,6 +37,7 @@ const logoStyle: React.CSSProperties = {
 }
 
 export default function AppLayout({ children }: AppLayoutProps) {
+  const [siderCollapsed, setSiderCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuthStore()
@@ -71,11 +75,47 @@ export default function AppLayout({ children }: AppLayoutProps) {
   return (
     <Layout style={{ minHeight: '100vh', background: 'transparent', position: 'relative' }}>
       <div className="app-bg-canvas" aria-hidden />
-      <Sider width={220} className="tech-sider" style={{ position: 'relative', zIndex: 2 }}>
-        <div style={logoStyle} className="tech-logo-wrap">
-          <span className="tech-logo-text">
+      <Sider
+        width={220}
+        collapsedWidth={64}
+        collapsed={siderCollapsed}
+        onCollapse={setSiderCollapsed}
+        collapsible
+        trigger={null}
+        className="tech-sider"
+        style={{ position: 'relative', zIndex: 2 }}
+      >
+        <div
+          style={{
+            ...logoStyle,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: siderCollapsed ? 'center' : 'space-between',
+            paddingLeft: siderCollapsed ? 0 : 16,
+            paddingRight: siderCollapsed ? 0 : 8,
+          }}
+          className="tech-logo-wrap"
+        >
+          <span className="tech-logo-text" style={{ opacity: siderCollapsed ? 0 : 1, overflow: 'hidden', whiteSpace: 'nowrap', transition: 'opacity 0.2s', flexShrink: 0 }}>
             RAG 助手
           </span>
+          <Button
+            type="text"
+            size="small"
+            icon={siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setSiderCollapsed(!siderCollapsed)}
+            style={{
+              flexShrink: 0,
+              color: 'var(--app-text-secondary)',
+              width: 32,
+              height: 32,
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            title={siderCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          />
         </div>
         <Menu
           mode="inline"
@@ -86,9 +126,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
             marginTop: 16,
             background: 'transparent',
             border: 'none',
-            color: 'rgba(255,255,255,0.75)',
           }}
           theme="dark"
+          inlineCollapsed={siderCollapsed}
+          className="tech-sider-menu"
         />
       </Sider>
       <Layout style={{ position: 'relative', zIndex: 1 }}>
@@ -108,7 +149,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               type="text"
               icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
               onClick={toggleTheme}
-              style={{ color: 'rgba(255,255,255,0.9)' }}
+              style={{ color: 'var(--app-text-primary)' }}
               title={theme === 'dark' ? '切换为亮色' : '切换为暗色'}
             />
             <Dropdown
@@ -122,7 +163,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 10,
-                  color: 'rgba(255,255,255,0.9)',
+                  color: 'var(--app-text-primary)',
                   height: 40,
                 }}
               >

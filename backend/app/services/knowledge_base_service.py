@@ -255,7 +255,7 @@ class KnowledgeBaseService:
             except Exception as e:
                 logging.warning(f"docx 文本提取失败: {e}")
                 return ""
-        if ft == "pptx":
+        if ft in ("ppt", "pptx"):
             try:
                 from pptx import Presentation
                 prs = Presentation(io.BytesIO(content))

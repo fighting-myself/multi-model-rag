@@ -87,6 +87,12 @@
   box-sizing: border-box;
 }
 
+/* 选中文字：随主题变化，保证与背景对比 */
+::selection {
+  background: var(--app-accent-dim);
+  color: var(--app-text-primary);
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -612,6 +618,42 @@ body {
 
 .app-content-area .ant-collapse-content-box {
   color: var(--app-text-primary);
+}
+
+/* ---------- 亮色主题：下拉/浮层 深色文字保证可读 ---------- */
+[data-theme="light"] .ant-select-dropdown,
+[data-theme="light"] .ant-select-item,
+[data-theme="light"] .ant-select-item-option-content {
+  color: var(--app-text-primary) !important;
+}
+[data-theme="light"] .ant-select-dropdown {
+  background: var(--app-bg-elevated) !important;
+  border-color: var(--app-border-subtle);
+}
+[data-theme="light"] .ant-dropdown .ant-dropdown-menu,
+[data-theme="light"] .ant-dropdown .ant-dropdown-menu-item {
+  background: var(--app-bg-elevated) !important;
+  color: var(--app-text-primary) !important;
+}
+[data-theme="light"] .ant-pagination-item a,
+[data-theme="light"] .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+[data-theme="light"] .ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  color: var(--app-text-primary) !important;
+}
+[data-theme="light"] .ant-picker-dropdown,
+[data-theme="light"] .ant-picker-content th,
+[data-theme="light"] .ant-picker-content td,
+[data-theme="light"] .ant-picker-header button {
+  background: var(--app-bg-elevated) !important;
+  color: var(--app-text-primary) !important;
+}
+[data-theme="light"] .ant-popover .ant-popover-inner,
+[data-theme="light"] .ant-popconfirm .ant-popover-inner,
+[data-theme="light"] .ant-tooltip .ant-tooltip-inner,
+[data-theme="light"] .ant-message .ant-message-notice-content,
+[data-theme="light"] .ant-notification .ant-notification-notice {
+  background: var(--app-bg-elevated) !important;
+  color: var(--app-text-primary) !important;
 }
 
 /* ---------- 暗色主题：下拉/浮层 背景与文字对比度（挂载在 body 的 overlay） ----------

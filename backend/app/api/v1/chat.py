@@ -136,6 +136,8 @@ async def chat_upload_file(
         ext = "docx"
     if ext == "xls":
         ext = "xlsx"
+    if ext == "ppt":
+        ext = "pptx"
 
     is_image = _is_image_extension(ext)
     if is_image:
@@ -162,7 +164,7 @@ async def chat_upload_file(
     ok = cache_service.set(
         cache_service.key_chat_upload(upload_id),
         {"file_name": filename, "type": attach_type, "extracted_text": extracted},
-        ttl=cache_service.CHAT_UPLOAD_TTL,
+        ttl=cache_service.get_chat_upload_ttl(),
     )
     if not ok:
         logging.warning("智能问答上传缓存写入失败（Redis 可能未就绪），upload_id=%s", upload_id)
@@ -231,16 +233,43 @@ async def chat_completion_stream(
                 "content_base64": a.get("content_base64"),
             }
             attachments_list.append(item)
+    # 发给 LLM 的 content 含上传文件解析内容；存库的只保留用户输入的原文，会话内不再展示「【用户上传的文件内容】」块
+    content_for_save = content
     if file_content_parts:
         content = (content + "\n\n【用户上传的文件内容】\n\n" + "\n\n---\n\n".join(file_content_parts)).strip()
         logging.info("智能问答流式 已注入用户上传文件内容 共 %s 段 总字符约 %s", len(file_content_parts), len(content))
     if not attachments_list:
         attachments_list = None
 
+    # 会话历史持久展示附件（豆包式）：存 type、file_name、format；图片存 data_url 以便切换会话后仍能显示，文件存 extracted_text 供侧栏查看
+    attachments_meta: Optional[List[dict]] = None
+    if raw_attachments and isinstance(raw_attachments, list):
+        attachments_meta = []
+        for a in raw_attachments:
+            if not isinstance(a, dict):
+                continue
+            atype = a.get("type") or "file"
+            fn = a.get("file_name") or "附件"
+            ext = (fn.rsplit(".", 1)[-1].upper() if "." in fn else "") or None
+            meta: dict = {"type": atype, "file_name": fn, "format": ext}
+            # 图片：前端传入的 dataUrl 写入 meta，切换会话后仍能显示
+            if a.get("data_url"):
+                meta["dataUrl"] = a.get("data_url")
+            elif a.get("dataUrl"):
+                meta["dataUrl"] = a.get("dataUrl")
+            # 文件：从上传缓存取解析文本，供侧栏可滚动查看
+            uid = a.get("upload_id")
+            if uid:
+                got = await asyncio.to_thread(cache_service.get, cache_service.key_chat_upload(uid))
+                if isinstance(got, dict) and got.get("extracted_text"):
+                    meta["extracted_text"] = got["extracted_text"]
+            attachments_meta.append(meta)
+
     chat_service = ChatService(db)
 
     async def generate():
         import logging
+        last_conv_id: Optional[int] = None
         try:
             async for event in chat_service.chat_stream(
                 user_id=current_user.id,
@@ -251,12 +280,18 @@ async def chat_completion_stream(
                 enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,
                 attachments=attachments_list,
+                attachments_meta=attachments_meta,
+                content_for_save=content_for_save,
             ):
                 if await request.is_disconnected():
                     break
+                if isinstance(event, dict) and event.get("type") == "done" and event.get("conversation_id") is not None:
+                    last_conv_id = event["conversation_id"]
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             if not await request.is_disconnected():
                 yield "data: [DONE]\n\n"
+            if last_conv_id is not None:
+                await asyncio.to_thread(cache_service.delete, cache_service.key_conv_detail(last_conv_id))
         except Exception as e:
             logging.exception("智能问答流式生成异常")
             err_msg = str(e).strip() or "生成中断"

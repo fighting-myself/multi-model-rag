@@ -958,6 +958,8 @@ class ChatService:
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
         attachments: Optional[List[Dict[str, Any]]] = None,
+        attachments_meta: Optional[List[Dict[str, Any]]] = None,
+        content_for_save: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）；工具分 MCP 与 Skills 两档开关。"""
         import logging
@@ -981,7 +983,14 @@ class ChatService:
             yield {"type": "error", "message": str(e)}
             return
 
-        user_msg = Message(conversation_id=conv.id, role="user", content=message)
+        # 存库用 content_for_save（仅用户原文），会话内不展示「【用户上传的文件内容】」；LLM 仍用 message（含注入内容）
+        save_content = (content_for_save if content_for_save is not None else message)
+        user_msg = Message(
+            conversation_id=conv.id,
+            role="user",
+            content=save_content,
+            attachments_meta=_json.dumps(attachments_meta, ensure_ascii=False) if attachments_meta else None,
+        )
         self.db.add(user_msg)
         await self.db.flush()
 

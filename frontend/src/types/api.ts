@@ -158,8 +158,9 @@ export interface WebSourceItem {
 export interface MessageAttachmentDisplay {
   type: 'image' | 'file'
   file_name: string
-  dataUrl?: string  // 仅图片：用于在气泡内展示
-  format?: string   // 仅文件：如 PDF、DOCX
+  dataUrl?: string       // 仅图片：用于在气泡内展示，持久化后切换会话仍能显示
+  format?: string        // 仅文件：如 PDF、DOCX
+  extracted_text?: string // 仅文件：解析后的文本，供侧栏可滚动查看
 }
 
 export interface MessageItem {

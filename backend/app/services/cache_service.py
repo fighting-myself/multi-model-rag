@@ -60,11 +60,12 @@ def set(key: str, value: Any, ttl: Optional[int] = None) -> bool:
     if ttl is None:
         ttl = getattr(settings, "CACHE_TTL_LIST", 60)
     try:
-        r.setex(
-            _key(key),
-            ttl,
-            json.dumps(value, ensure_ascii=False, default=str),
-        )
+        payload = json.dumps(value, ensure_ascii=False, default=str)
+        k = _key(key)
+        if ttl is not None and ttl <= 0:
+            r.set(k, payload)  # 不设过期（慎用）
+        else:
+            r.setex(k, ttl, payload)
         return True
     except Exception as e:
         logger.debug("缓存 set 失败 %s: %s", key, e)
@@ -134,8 +135,15 @@ def key_file_list(user_id: int, page: int, page_size: int) -> str:
     return f"file:list:user:{user_id}:p:{page}:ps:{page_size}"
 
 
-# 智能问答「先上传、再发消息」：临时存上传文件的提取结果，key_chat_upload(upload_id)，TTL 10 分钟
-CHAT_UPLOAD_TTL = 600
+# 智能问答「先上传、再发消息」：临时存上传文件的提取结果，key_chat_upload(upload_id)。TTL 从配置读取，默认 7 天；会话内点开查看的内容在发消息时写入消息表，仅随会话删除而清理
+def _chat_upload_ttl() -> int:
+    from app.core.config import settings
+    return getattr(settings, "CHAT_ATTACHMENT_UPLOAD_TTL", 604800)
+
+
+def get_chat_upload_ttl() -> int:
+    """上传缓存 TTL（秒），用于 set(key, value, ttl)。0 表示不设过期。"""
+    return _chat_upload_ttl()
 
 
 def key_chat_upload(upload_id: str) -> str:

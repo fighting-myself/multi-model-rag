@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
-import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
+import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import api, { streamPost, uploadChatFile } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -92,6 +92,12 @@ export default function Chat() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
   const [selectedKbId, setSelectedKbId] = useState<number | undefined>(undefined)
   const [conversations, setConversations] = useState<ConversationItem[]>([])
+  /** 豆包式：图片点击放大 */
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
+  /** 豆包式：文件点击在侧边栏查看（历史会话无文件内容，仅展示说明） */
+  const [fileDrawerVisible, setFileDrawerVisible] = useState(false)
+  const [fileDrawerTitle, setFileDrawerTitle] = useState('')
+  const [fileDrawerContent, setFileDrawerContent] = useState<string>('')
   // 当前会话 ID：同窗口内多次发送均为同一会话；仅「新对话」时置空以开启新会话
   const [currentConvId, setCurrentConvId] = useState<number | null>(null)
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
@@ -264,7 +270,7 @@ export default function Chat() {
   const handleSend = async () => {
     if (!inputValue.trim() && attachmentList.length === 0) return
 
-    const displayContent = [inputValue.trim(), attachmentList.length ? `[${attachmentList.length} 个附件]` : ''].filter(Boolean).join(' ') || '(附件)'
+    const displayContent = inputValue.trim() || (attachmentList.length ? '(附件)' : '')
     const attachmentsDisplay: MessageAttachmentDisplay[] = attachmentList.map((a) => {
       const ext = (a.fileName.split('.').pop() || '').toUpperCase()
       const formatMap: Record<string, string> = { PDF: 'PDF', DOC: 'DOC', DOCX: 'DOCX', TXT: 'TXT', XLS: 'XLS', XLSX: 'XLSX', PPT: 'PPT', PPTX: 'PPTX', MD: 'MD' }
@@ -307,6 +313,7 @@ export default function Chat() {
         type: (a.isImage ? 'image' : 'file') as 'image' | 'file',
         upload_id: a.uploadId,
         file_name: a.fileName,
+        ...(a.isImage && a.dataUrl ? { dataUrl: a.dataUrl } : {}),
       }))
       const out = await streamPost('chat/completions/stream', {
         content: messageContent,
@@ -400,12 +407,15 @@ export default function Chat() {
           }
         }
       justSentMessageRef.current = true
+      const finalConvId = currentConvId ?? newConvId
       if (!currentConvId && newConvId) {
         setCurrentConvId(newConvId)
       }
       try {
-        if (currentConvId || newConvId) {
-          await loadConversations(true)
+        await loadConversations(true)
+        // 重新拉取当前会话消息，使刚发送的那条带上服务端返回的 extracted_text，点文件可侧栏查看
+        if (finalConvId) {
+          await loadConversationMessages(finalConvId, false)
         }
       } catch {
         // ignore
@@ -523,6 +533,82 @@ export default function Chat() {
                     }
                     description={
                       <div>
+                        {/* 用户消息：豆包式先展示附件（图片/文件名），再展示消息内容 */}
+                        {item.role === 'user' && item.attachments && item.attachments.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+                            {item.attachments.map((att, idx) =>
+                              att.type === 'image' && att.dataUrl ? (
+                                <div
+                                  key={idx}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setImagePreviewUrl(att.dataUrl!)}
+                                  onKeyDown={(e) => e.key === 'Enter' && setImagePreviewUrl(att.dataUrl!)}
+                                  style={{
+                                    cursor: 'pointer',
+                                    borderRadius: 8,
+                                    overflow: 'hidden',
+                                    border: '1px solid var(--app-border)',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <img
+                                    src={att.dataUrl}
+                                    alt={att.file_name}
+                                    style={{ width: 72, height: 72, objectFit: 'cover', display: 'block' }}
+                                  />
+                                </div>
+                              ) : att.type === 'image' ? (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    padding: '8px 12px',
+                                    backgroundColor: 'var(--app-bg-subtle)',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--app-border)',
+                                  }}
+                                >
+                                  <PictureOutlined style={{ fontSize: 20, color: 'var(--app-text-secondary)' }} />
+                                  <span style={{ fontSize: 12, color: 'var(--app-text-primary)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={att.file_name}>{att.file_name}</span>
+                                </div>
+                              ) : (
+                                <div
+                                  key={idx}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => {
+                                    setFileDrawerTitle(att.file_name)
+                                    setFileDrawerContent(att.extracted_text || '历史会话中的附件仅保留文件名与类型，无法在此查看文件内容。')
+                                    setFileDrawerVisible(true)
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return
+                                    setFileDrawerTitle(att.file_name)
+                                    setFileDrawerContent(att.extracted_text || '历史会话中的附件仅保留文件名与类型，无法在此查看文件内容。')
+                                    setFileDrawerVisible(true)
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    padding: '8px 12px',
+                                    backgroundColor: 'var(--app-bg-subtle)',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--app-border)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <FileTextOutlined style={{ fontSize: 20, color: 'var(--app-text-secondary)' }} />
+                                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--app-text-primary)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={att.file_name}>{att.file_name}</span>
+                                  {att.format && <span style={{ fontSize: 11, color: 'var(--app-text-muted)' }}>{att.format}</span>}
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
                         <div style={{ marginBottom: (item.max_confidence_context || item.retrieved_context) ? 12 : 0 }}>
                           {parseContentWithCharts(item.content).map((part, idx) =>
                             part.type === 'text' ? (
@@ -536,63 +622,6 @@ export default function Chat() {
                             )
                           )}
                         </div>
-                        {/* 用户消息附件：豆包式展示 - 图片用缩略图，文件用文件名+格式 */}
-                        {item.role === 'user' && item.attachments && item.attachments.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
-                            {item.attachments.map((att, idx) =>
-                              att.type === 'image' && att.dataUrl ? (
-                                <div
-                                  key={idx}
-                                  style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    padding: 8,
-                                    backgroundColor: 'var(--app-bg-subtle)',
-                                    borderRadius: 8,
-                                    border: '1px solid var(--app-border)',
-                                  }}
-                                >
-                                  <img
-                                    src={att.dataUrl}
-                                    alt={att.file_name}
-                                    style={{
-                                      width: 72,
-                                      height: 72,
-                                      objectFit: 'cover',
-                                      borderRadius: '50%',
-                                      display: 'block',
-                                    }}
-                                  />
-                                  <span style={{ fontSize: 12, color: 'var(--app-text-muted)', marginTop: 6 }}>里面有什么</span>
-                                </div>
-                              ) : (
-                                <div
-                                  key={idx}
-                                  style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    padding: '12px 16px',
-                                    backgroundColor: 'var(--app-bg-subtle)',
-                                    borderRadius: 8,
-                                    border: '1px solid var(--app-border)',
-                                    minWidth: 100,
-                                  }}
-                                >
-                                  <FileTextOutlined style={{ fontSize: 28, color: 'var(--app-text-secondary)', marginBottom: 6 }} />
-                                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--app-text-primary)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={att.file_name}>
-                                    {att.file_name}
-                                  </span>
-                                  {att.format && (
-                                    <span style={{ fontSize: 11, color: 'var(--app-text-muted)', marginTop: 2 }}>{att.format}</span>
-                                  )}
-                                </div>
-                              )
-                            )}
-                          </div>
-                        )}
                         {/* 本回复调用的 MCP 工具 */}
                         {item.role === 'assistant' && item.tools_used && item.tools_used.length > 0 && (
                           <div style={{ marginTop: 8, marginBottom: 4, fontSize: 12, color: 'var(--app-text-muted)' }}>
@@ -908,6 +937,32 @@ export default function Chat() {
             </List.Item>
           )}
         />
+      </Drawer>
+      {/* 豆包式：图片点击放大 */}
+      <Modal
+        open={!!imagePreviewUrl}
+        footer={null}
+        closable
+        onCancel={() => setImagePreviewUrl(null)}
+        width="80%"
+        style={{ maxWidth: 800 }}
+        styles={{ body: { padding: 0, textAlign: 'center' } }}
+      >
+        {imagePreviewUrl && (
+          <img src={imagePreviewUrl} alt="" style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain' }} />
+        )}
+      </Modal>
+      {/* 豆包式：文件点击侧边栏查看（可滚动） */}
+      <Drawer
+        title={fileDrawerTitle}
+        placement="right"
+        width={400}
+        open={fileDrawerVisible}
+        onClose={() => setFileDrawerVisible(false)}
+      >
+        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-secondary)', fontSize: 13, overflowY: 'auto', maxHeight: '100%' }}>
+          {fileDrawerContent}
+        </div>
       </Drawer>
     </div>
   )

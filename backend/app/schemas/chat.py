@@ -2,9 +2,9 @@
 问答相关Schema
 """
 import json as _json
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator, Field
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 
 class ChatMessageAttachment(BaseModel):
@@ -74,6 +74,20 @@ class MessageResponse(BaseModel):
     tools_used: Optional[List[str]] = None  # 本回复调用的 MCP 工具名列表
     web_retrieved_context: Optional[str] = None  # 联网检索得到的文本
     web_sources: Optional[List[WebSourceItem]] = None  # 联网检索来源列表
+    # 用户消息附件展示（豆包式），由 attachments_meta 解析得到，序列化时排除 attachments_meta
+    attachments_meta: Optional[str] = Field(None, exclude=True)
+    attachments: Optional[List[Dict[str, Any]]] = None
+
+    @model_validator(mode="after")
+    def parse_attachments_meta(self):
+        if self.attachments_meta and self.attachments is None:
+            try:
+                self.attachments = _json.loads(self.attachments_meta)
+                if not isinstance(self.attachments, list):
+                    self.attachments = None
+            except Exception:
+                self.attachments = None
+        return self
 
     @field_validator("tools_used", mode="before")
     @classmethod

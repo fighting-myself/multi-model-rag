@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     CHAT_ATTACHMENT_MAX_SIZE_BYTES: int = 20 * 1024 * 1024  # 单个附件最大体积（默认 20MB）
     CHAT_ATTACHMENT_IMAGE_TYPES: str = "image/jpeg,image/png,image/gif,image/webp"  # 图片 MIME
     CHAT_ATTACHMENT_FILE_EXTENSIONS: str = "pdf,doc,docx,txt,xlsx,xls,pptx,ppt,md"  # 允许的文件扩展名（非图片）
+    # 上传临时缓存 TTL（秒）。会话内「点开查看」的内容存于消息表，仅随会话删除而清理；本项只影响「上传后未发消息」的缓存，设长一些以便稍后发消息时仍能写入消息（豆包式长期保留）
+    CHAT_ATTACHMENT_UPLOAD_TTL: int = 604800  # 7 天（0 表示不设过期，慎用）
 
     @property
     def chat_attachment_image_types_list(self) -> List[str]:

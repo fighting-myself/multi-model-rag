@@ -40,6 +40,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.core.database import engine, Base
+from sqlalchemy import text
 from app.api.v1 import api_router
 from app.core.logging import setup_logging
 from app.core.health import check_db, check_redis, check_vector, check_minio
@@ -78,6 +79,20 @@ async def lifespan(app: FastAPI):
     # 创建数据库表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # 为已有数据库添加 messages.attachments_meta（豆包式会话附件展示）
+        def _add_attachments_meta(sync_conn):
+            try:
+                sync_conn.execute(text("ALTER TABLE messages ADD COLUMN attachments_meta TEXT NULL"))
+            except Exception as e:
+                err = str(e).lower()
+                # MySQL 1060 = Duplicate column name；部分驱动/方言的报错文案
+                if "1060" in err or "duplicate column" in err or "already exists" in err:
+                    return
+                raise
+        try:
+            await conn.run_sync(_add_attachments_meta)
+        except Exception as e:
+            logging.getLogger(__name__).debug("attachments_meta 列已存在或无法添加: %s", e)
     
     yield
     
