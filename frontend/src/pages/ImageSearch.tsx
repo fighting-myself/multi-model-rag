@@ -271,10 +271,12 @@ export default function ImageSearch() {
   if (initLoading) return <PageSkeleton rows={4} />
 
   return (
-    <div>
-      <h1 className="app-page-title">多模态检索</h1>
-      <p className="app-page-desc">以文搜图、图搜图或统一检索文档与图片</p>
-      <Card style={{ marginBottom: 24 }}>
+    <div className="app-page">
+      <div className="app-page-header">
+        <h1 className="app-page-title">多模态检索</h1>
+        <p className="app-page-desc">以文搜图、图搜图或统一检索文档与图片</p>
+      </div>
+      <Card className="app-page-section">
         <Tabs
           activeKey={tab}
           onChange={(k) => setTab(k as TabMode)}
@@ -344,7 +346,7 @@ export default function ImageSearch() {
           </Button>
         </div>
       </Card>
-      <Card>
+      <Card className="app-page-section">
         {/* 以文搜图 / 图搜图：图片网格 */}
         {(tab === 'text' || tab === 'image') && (
           <>

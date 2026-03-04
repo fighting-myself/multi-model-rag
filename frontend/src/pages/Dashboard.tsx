@@ -29,10 +29,12 @@ export default function Dashboard() {
   }, [])
 
   return (
-    <div className="app-perspective">
-      <h1 className="app-page-title app-animate-in">仪表盘</h1>
-      <p className="app-page-desc app-animate-in app-animate-in-delay-1">概览您的文件、知识库与对话用量</p>
-      <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
+    <div className="app-page app-perspective">
+      <div className="app-page-header">
+        <h1 className="app-page-title app-animate-in">仪表盘</h1>
+        <p className="app-page-desc app-animate-in app-animate-in-delay-1">概览您的文件、知识库与对话用量</p>
+      </div>
+      <Row gutter={[24, 24]} className="app-stat-row">
         <Col xs={24} sm={24} md={8} className="app-animate-in app-animate-in-delay-1">
           <Card
             loading={loading}
@@ -89,7 +91,7 @@ export default function Dashboard() {
         <Card
           title={<span style={{ color: 'var(--app-accent)', fontFamily: "'Orbitron', sans-serif", fontWeight: 600 }}>当日用量与限流</span>}
           loading={loading}
-          className="app-card-3d app-animate-in app-animate-in-delay-4"
+          className="app-card-3d app-animate-in app-animate-in-delay-4 app-page-section"
           style={{ borderTop: '1px solid var(--app-glass-border)' }}
         >
           <Typography.Text style={{ color: 'var(--app-text-secondary)' }}>

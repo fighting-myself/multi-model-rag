@@ -35,12 +35,14 @@ export default function Billing() {
   }
 
   return (
-    <div>
-      <h1 className="app-page-title">计费中心</h1>
-      <p className="app-page-desc">用量统计与套餐订阅</p>
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col span={8}>
-          <Card loading={loading}>
+    <div className="app-page">
+      <div className="app-page-header">
+        <h1 className="app-page-title">计费中心</h1>
+        <p className="app-page-desc">用量统计与套餐订阅</p>
+      </div>
+      <Row gutter={[24, 24]} className="app-stat-row">
+        <Col xs={24} sm={24} md={8}>
+          <Card loading={loading} className="app-card-3d-subtle">
             <Statistic
               title="本月上传次数"
               value={usage?.file_uploads ?? 0}
@@ -49,8 +51,8 @@ export default function Billing() {
             />
           </Card>
         </Col>
-        <Col span={8}>
-          <Card loading={loading}>
+        <Col xs={24} sm={24} md={8}>
+          <Card loading={loading} className="app-card-3d-subtle">
             <Statistic
               title="存储空间"
               value={usage?.storage_mb ?? 0}
@@ -59,8 +61,8 @@ export default function Billing() {
             />
           </Card>
         </Col>
-        <Col span={8}>
-          <Card loading={loading}>
+        <Col xs={24} sm={24} md={8}>
+          <Card loading={loading} className="app-card-3d-subtle">
             <Statistic
               title="本月费用"
               value={usage?.cost ?? 0}
@@ -72,7 +74,7 @@ export default function Billing() {
       </Row>
 
       {usageLimits && (
-        <Card title="用量与限流" style={{ marginBottom: 24 }}>
+        <Card title="用量与限流" className="app-page-section">
           <Row gutter={24}>
             <Col span={8}>
               <div style={{ marginBottom: 8, color: 'var(--app-text-primary)' }}>

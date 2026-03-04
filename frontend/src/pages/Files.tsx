@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Table, Button, Upload, message, Space, Popconfirm } from 'antd'
+import { Table, Button, Upload, message, Space, Popconfirm, Card } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
 import api, { fetchWithAuth } from '../services/api'
@@ -128,29 +128,29 @@ export default function Files() {
   ]
 
   return (
-    <div>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <h1 className="app-page-title" style={{ marginBottom: 4 }}>文件管理</h1>
-            <p className="app-page-desc" style={{ marginBottom: 0 }}>
-              支持 PDF、Word、Excel、PPT、TXT、Markdown、图片等；单文件 ≤100MB；禁止可执行与脚本文件。
-            </p>
-          </div>
-          <Upload {...uploadProps}>
-            <Button type="primary" icon={<UploadOutlined />} size="large">
-              上传文件
-            </Button>
-          </Upload>
+    <div className="app-page">
+      <div className="app-page-header-row">
+        <div>
+          <h1 className="app-page-title">文件管理</h1>
+          <p className="app-page-desc">
+            支持 PDF、Word、Excel、PPT、TXT、Markdown、图片等；单文件 ≤100MB；禁止可执行与脚本文件。
+          </p>
         </div>
+        <Upload {...uploadProps}>
+          <Button type="primary" icon={<UploadOutlined />} size="large">
+            上传文件
+          </Button>
+        </Upload>
       </div>
-      <Table
-        columns={columns}
-        dataSource={files}
-        loading={loading}
-        rowKey="id"
-        scroll={{ x: 'max-content' }}
-      />
+      <Card className="app-page-section">
+        <Table
+          columns={columns}
+          dataSource={files}
+          loading={loading}
+          rowKey="id"
+          scroll={{ x: 'max-content' }}
+        />
+      </Card>
     </div>
   )
 }

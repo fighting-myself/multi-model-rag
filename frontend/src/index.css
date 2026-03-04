@@ -178,6 +178,58 @@ body {
   }
 }
 
+/* ---------- 页面版式统一（最大宽度、标题区、区块间距） ---------- */
+.app-page {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.app-page-header {
+  margin-bottom: 24px;
+}
+
+.app-page-header .app-page-title {
+  margin-bottom: 4px;
+}
+
+.app-page-header .app-page-desc {
+  margin-bottom: 0;
+  color: var(--app-text-secondary);
+  font-size: 14px;
+}
+
+.app-page-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.app-page-header-row .app-page-title {
+  margin-bottom: 4px;
+}
+
+.app-page-header-row .app-page-desc {
+  margin-bottom: 0;
+  color: var(--app-text-secondary);
+  font-size: 14px;
+}
+
+.app-page-section {
+  margin-bottom: 24px;
+}
+
+.app-page-section:last-child {
+  margin-bottom: 0;
+}
+
+.app-stat-row {
+  margin-bottom: 24px;
+}
+
 /* ---------- 玻璃卡片（默认） ---------- */
 .app-content-area .ant-card {
   background: var(--app-card-bg) !important;

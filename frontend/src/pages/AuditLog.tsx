@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Table, Select, message } from 'antd'
+import { Table, Select, message, Card } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import api from '../services/api'
 import type { AuditLogItem, AuditLogListResponse } from '../types/api'
@@ -107,11 +107,11 @@ export default function AuditLog() {
   ]
 
   return (
-    <div>
-      <div style={{ marginBottom: 20, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+    <div className="app-page">
+      <div className="app-page-header-row">
         <div>
-          <h1 className="app-page-title" style={{ marginBottom: 4 }}>操作审计</h1>
-          <p className="app-page-desc" style={{ marginBottom: 0 }}>关键操作记录，便于排查与合规</p>
+          <h1 className="app-page-title">操作审计</h1>
+          <p className="app-page-desc">关键操作记录，便于排查与合规</p>
         </div>
         <Select
           placeholder="操作类型"
@@ -144,7 +144,8 @@ export default function AuditLog() {
           style={{ width: 110 }}
         />
       </div>
-      <Table<AuditLogItem>
+      <Card className="app-page-section">
+        <Table<AuditLogItem>
         rowKey="id"
         columns={columns}
         dataSource={data}
@@ -161,6 +162,7 @@ export default function AuditLog() {
           },
         }}
       />
+      </Card>
     </div>
   )
 }

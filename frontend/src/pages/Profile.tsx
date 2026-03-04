@@ -56,11 +56,13 @@ export default function Profile() {
   }
 
   return (
-    <div>
-      <h1 className="app-page-title">个人中心</h1>
-      <p className="app-page-desc">账户信息与密码修改</p>
+    <div className="app-page">
+      <div className="app-page-header">
+        <h1 className="app-page-title">个人中心</h1>
+        <p className="app-page-desc">账户信息与密码修改</p>
+      </div>
 
-      <Card title="注册信息" loading={loading} style={{ marginBottom: 24 }}>
+      <Card title="注册信息" loading={loading} className="app-page-section">
         {displayUser && (
           <Descriptions column={1} bordered>
             <Descriptions.Item label="用户名">{displayUser.username}</Descriptions.Item>
@@ -82,7 +84,7 @@ export default function Profile() {
         )}
       </Card>
 
-      <Card title="修改密码">
+      <Card title="修改密码" className="app-page-section">
         <Form
           form={form}
           name="password"

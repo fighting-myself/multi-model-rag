@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Table, Button, Modal, Form, Input, message, Select, Popconfirm, Drawer, Space, List, Collapse, Checkbox, Dropdown } from 'antd'
+import { Table, Button, Modal, Form, Input, message, Select, Popconfirm, Drawer, Space, List, Collapse, Checkbox, Dropdown, Card } from 'antd'
 import { PlusOutlined, FileAddOutlined, FolderOpenOutlined, DeleteOutlined, ReloadOutlined, EyeOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined, EditOutlined, ExportOutlined, CloudUploadOutlined } from '@ant-design/icons'
 import api, { fetchWithAuth, streamPost } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -518,23 +518,25 @@ export default function KnowledgeBases() {
   if (loading && knowledgeBases.length === 0) return <PageSkeleton rows={6} />
 
   return (
-    <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+    <div className="app-page">
+      <div className="app-page-header-row">
         <div>
-          <h1 className="app-page-title" style={{ marginBottom: 4 }}>知识库管理</h1>
-          <p className="app-page-desc" style={{ marginBottom: 0 }}>创建知识库并添加文件，供检索与智能问答使用</p>
+          <h1 className="app-page-title">知识库管理</h1>
+          <p className="app-page-desc">创建知识库并添加文件，供检索与智能问答使用</p>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalVisible(true) }} size="large">
           创建知识库
         </Button>
       </div>
-      <Table
-        columns={columns}
-        dataSource={knowledgeBases}
-        loading={loading}
-        rowKey="id"
-        scroll={{ x: 'max-content' }}
-      />
+      <Card className="app-page-section">
+        <Table
+          columns={columns}
+          dataSource={knowledgeBases}
+          loading={loading}
+          rowKey="id"
+          scroll={{ x: 'max-content' }}
+        />
+      </Card>
       {(taskId || reindexAllTaskId || reindexFileTaskId) && taskStatus && (
         <div style={{ marginBottom: 16, padding: 12, background: taskStatus.status === 'SUCCESS' ? 'var(--app-success-bg)' : taskStatus.status === 'FAILURE' ? 'var(--app-error-bg)' : 'var(--app-info-bg)', border: '1px solid var(--app-border-info)', borderRadius: 8, color: 'var(--app-text-primary)' }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
