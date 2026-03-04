@@ -69,16 +69,18 @@ export async function fetchWithAuth(
   return res
 }
 
-/** 封装流式 POST（JSON body），返回 response 与 body 的 reader；调用方需自行解析 SSE。 */
+/** 封装流式 POST（JSON body），返回 response 与 body 的 reader；调用方需自行解析 SSE。支持 signal 用于停止对话。 */
 export async function streamPost(
   path: string,
-  body: unknown
+  body: unknown,
+  options?: { signal?: AbortSignal }
 ): Promise<{ response: Response; reader: ReadableStreamDefaultReader<Uint8Array> }> {
   const url = path.startsWith('/') ? path : `${BASE_URL}/${path}`
   const res = await fetchWithAuth(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: options?.signal,
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

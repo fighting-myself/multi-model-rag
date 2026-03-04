@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card, List, Avatar, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
-import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
+import { SendOutlined, StopOutlined, UserOutlined, RobotOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import api, { streamPost, uploadChatFile } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -89,6 +89,7 @@ export default function Chat() {
   const [loading, setLoading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
   const [selectedKbId, setSelectedKbId] = useState<number | undefined>(undefined)
   const [conversations, setConversations] = useState<ConversationItem[]>([])
@@ -308,6 +309,8 @@ export default function Chat() {
       } as MessageItem,
     ])
 
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     try {
       const attachmentsToSend = listToSend.map((a) => ({
         type: (a.isImage ? 'image' : 'file') as 'image' | 'file',
@@ -315,15 +318,19 @@ export default function Chat() {
         file_name: a.fileName,
         ...(a.isImage && a.dataUrl ? { dataUrl: a.dataUrl } : {}),
       }))
-      const out = await streamPost('chat/completions/stream', {
-        content: messageContent,
-        knowledge_base_id: selectedKbId ?? null,
-        conversation_id: currentConvId ?? null,
-        enable_mcp_tools: enableMcpTools,
-        enable_skills_tools: enableSkillsTools,
-        enable_rag: enableRag,
-        ...(attachmentsToSend.length ? { attachments: attachmentsToSend } : {}),
-      })
+      const out = await streamPost(
+        'chat/completions/stream',
+        {
+          content: messageContent,
+          knowledge_base_id: selectedKbId ?? null,
+          conversation_id: currentConvId ?? null,
+          enable_mcp_tools: enableMcpTools,
+          enable_skills_tools: enableSkillsTools,
+          enable_rag: enableRag,
+          ...(attachmentsToSend.length ? { attachments: attachmentsToSend } : {}),
+        },
+        { signal: controller.signal }
+      )
       const reader = out.reader
       const decoder = new TextDecoder()
       let buffer = ''
@@ -421,13 +428,23 @@ export default function Chat() {
         // ignore
       }
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        message.info('已停止生成')
+        loadConversations(true).catch(() => {})
+        return
+      }
       console.error('发送消息失败:', err)
       const msg = err instanceof Error ? err.message : '发送消息失败'
       message.error(msg)
       setMessages((prev) => prev.filter((m) => m.id !== tempAssistantId))
     } finally {
       setLoading(false)
+      abortControllerRef.current = null
     }
+  }
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort()
   }
 
   const currentConversation = conversations.find((c) => c.id === currentConvId)
@@ -886,16 +903,27 @@ export default function Chat() {
               style={{ display: 'none' }}
               onChange={(e) => { const f = e.target.files; if (f?.length) addAttachmentFiles(f); e.target.value = '' }}
             />
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSend}
-              loading={loading}
-              disabled={loading || (!inputValue.trim() && attachmentList.length === 0)}
-              style={{ borderRadius: 8 }}
-            >
-              发送
-            </Button>
+            {loading ? (
+              <Button
+                type="default"
+                danger
+                icon={<StopOutlined />}
+                onClick={handleStop}
+                style={{ borderRadius: 8 }}
+              >
+                停止
+              </Button>
+            ) : (
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={handleSend}
+                disabled={!inputValue.trim() && attachmentList.length === 0}
+                style={{ borderRadius: 8 }}
+              >
+                发送
+              </Button>
+            )}
           </div>
         </div>
       </Card>
