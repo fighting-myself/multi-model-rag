@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card, List, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
-import { StopOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
+import { StopOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, VideoCameraOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import api, { streamPost, uploadChatFile } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -88,7 +88,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<MessageItem[]>([])
   const [inputValue, setInputValue] = useState('')
   const [attachmentConfig, setAttachmentConfig] = useState<ChatAttachmentConfig | null>(null)
-  const [attachmentList, setAttachmentList] = useState<Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; fileName: string; uploadId?: string }>>([])
+  const [attachmentList, setAttachmentList] = useState<Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; isVideo: boolean; fileName: string; uploadId?: string }>>([])
   const [loading, setLoading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const dragCounterRef = useRef(0)
@@ -220,6 +220,10 @@ export default function Chat() {
     const ext = name.split('.').pop()?.toLowerCase()
     return ext && (attachmentConfig?.file_extensions ?? ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md']).includes(ext)
   }
+  const isVideoExt = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase()
+    return ext && (attachmentConfig?.video_extensions ?? ['mp4', 'webm', 'mov']).includes(ext)
+  }
 
   /** 豆包式：拖拽时显示的附件限制提示文案 */
   const getAttachmentDragHint = () => {
@@ -227,7 +231,8 @@ export default function Chat() {
     const maxCount = cfg?.max_count ?? 10
     const imageTypes = cfg?.image_types ?? ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
     const exts = cfg?.file_extensions ?? ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md']
-    const typeStr = [...imageTypes.map((t: string) => t.replace('image/', '')), ...exts].join('、')
+    const videoExts = cfg?.video_extensions ?? ['mp4', 'webm', 'mov']
+    const typeStr = [...imageTypes.map((t: string) => t.replace('image/', '')), ...exts, ...videoExts].join('、')
     return { maxCount, typeStr }
   }
 
@@ -236,7 +241,7 @@ export default function Chat() {
     const maxCount = cfg?.max_count ?? 10
     const maxSize = cfg?.max_size_bytes ?? 20 * 1024 * 1024
     const arr = Array.from(files)
-    const next: Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; fileName: string; uploadId?: string }> = []
+    const next: Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; isVideo: boolean; fileName: string; uploadId?: string }> = []
     for (const file of arr) {
       if (attachmentList.length + next.length >= maxCount) {
         message.warning('附件数量已达上限')
@@ -247,16 +252,18 @@ export default function Chat() {
         continue
       }
       const isImage = isImageType(file.type)
-      const isFile = !isImage && isAllowedFileExt(file.name)
-      if (!isImage && !isFile) {
+      const isVideo = !isImage && isVideoExt(file.name)
+      const isFile = !isImage && !isVideo && isAllowedFileExt(file.name)
+      if (!isImage && !isFile && !isVideo) {
         message.warning(`跳过 ${file.name}：类型不允许`)
         continue
       }
-      const item: { id: string; file: File; dataUrl?: string; isImage: boolean; fileName: string; uploadId?: string } = {
+      const item: { id: string; file: File; dataUrl?: string; isImage: boolean; isVideo: boolean; fileName: string; uploadId?: string } = {
         id: `${Date.now()}-${Math.random()}`,
         file,
         fileName: file.name,
         isImage,
+        isVideo: !!isVideo,
         dataUrl: undefined,
         uploadId: undefined,
       }
@@ -290,9 +297,9 @@ export default function Chat() {
     const displayContent = inputValue.trim() || (attachmentList.length ? '(附件)' : '')
     const attachmentsDisplay: MessageAttachmentDisplay[] = attachmentList.map((a) => {
       const ext = (a.fileName.split('.').pop() || '').toUpperCase()
-      const formatMap: Record<string, string> = { PDF: 'PDF', DOC: 'DOC', DOCX: 'DOCX', TXT: 'TXT', XLS: 'XLS', XLSX: 'XLSX', PPT: 'PPT', PPTX: 'PPTX', MD: 'MD' }
+      const formatMap: Record<string, string> = { PDF: 'PDF', DOC: 'DOC', DOCX: 'DOCX', TXT: 'TXT', XLS: 'XLS', XLSX: 'XLSX', PPT: 'PPT', PPTX: 'PPTX', MD: 'MD', MP4: 'MP4', WEBM: 'WEBM', MOV: 'MOV' }
       return {
-        type: a.isImage ? 'image' : 'file',
+        type: (a.isVideo ? 'video' : a.isImage ? 'image' : 'file') as 'image' | 'file' | 'video',
         file_name: a.fileName,
         ...(a.isImage && a.dataUrl ? { dataUrl: a.dataUrl } : {}),
         ...(!a.isImage && ext ? { format: formatMap[ext] || ext } : {}),
@@ -329,7 +336,7 @@ export default function Chat() {
     abortControllerRef.current = controller
     try {
       const attachmentsToSend = listToSend.map((a) => ({
-        type: (a.isImage ? 'image' : 'file') as 'image' | 'file',
+        type: (a.isVideo ? 'video' : a.isImage ? 'image' : 'file') as 'image' | 'file' | 'video',
         upload_id: a.uploadId,
         file_name: a.fileName,
         ...(a.isImage && a.dataUrl ? { dataUrl: a.dataUrl } : {}),
@@ -652,6 +659,37 @@ export default function Chat() {
                                 >
                                   <PictureOutlined style={{ fontSize: 20, color: 'var(--app-text-secondary)' }} />
                                   <span style={{ fontSize: 12, color: 'var(--app-text-primary)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={att.file_name}>{att.file_name}</span>
+                                </div>
+                              ) : att.type === 'video' ? (
+                                <div
+                                  key={idx}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => {
+                                    setFileDrawerTitle(att.file_name)
+                                    setFileDrawerContent(att.extracted_text || '历史会话中的视频仅保留文件名与描述，无法在此播放。')
+                                    setFileDrawerVisible(true)
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return
+                                    setFileDrawerTitle(att.file_name)
+                                    setFileDrawerContent(att.extracted_text || '历史会话中的视频仅保留文件名与描述，无法在此播放。')
+                                    setFileDrawerVisible(true)
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    padding: '8px 12px',
+                                    backgroundColor: 'var(--app-bg-subtle)',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--app-border)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <VideoCameraOutlined style={{ fontSize: 20, color: 'var(--app-text-secondary)' }} />
+                                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--app-text-primary)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={att.file_name}>{att.file_name}</span>
+                                  {att.format && <span style={{ fontSize: 11, color: 'var(--app-text-muted)' }}>{att.format}</span>}
                                 </div>
                               ) : (
                                 <div
@@ -976,6 +1014,7 @@ export default function Chat() {
               accept={[
                 ...(attachmentConfig?.image_types ?? ['image/jpeg', 'image/png', 'image/gif', 'image/webp']),
                 ...(attachmentConfig?.file_extensions ?? ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md']).map(e => `.${e}`),
+                ...(attachmentConfig?.video_extensions ?? ['mp4', 'webm', 'mov']).map(e => `.${e}`),
               ].join(',')}
               multiple
               style={{ display: 'none' }}
@@ -987,7 +1026,10 @@ export default function Chat() {
                   <div key={a.id} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', borderRadius: 6, border: '1px solid var(--app-border-subtle)', overflow: 'hidden', background: 'var(--app-bg-subtle)' }}>
                     {a.isImage && a.dataUrl ? (
                       <img src={a.dataUrl} alt="" style={{ width: 32, height: 32, objectFit: 'cover' }} />
-                    ) : (
+                    ) : a.isVideo ? (
+                      <VideoCameraOutlined style={{ fontSize: 18, color: 'var(--app-text-secondary)', marginLeft: 6 }} />
+                    ) : null}
+                    {(!a.isImage || !a.dataUrl) && (
                       <span style={{ padding: '4px 8px', fontSize: 12, color: 'var(--app-text-secondary)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.fileName}</span>
                     )}
                     <Button type="text" size="small" icon={<CloseOutlined />} style={{ minWidth: 22, height: 22, padding: 0, color: 'var(--app-text-muted)' }} onClick={() => removeAttachment(a.id)} />

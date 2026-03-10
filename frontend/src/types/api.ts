@@ -154,13 +154,13 @@ export interface WebSourceItem {
   snippet: string
 }
 
-/** 用户消息中附件的展示信息（豆包式：图片展示缩略图，文件展示文件名+格式） */
+/** 用户消息中附件的展示信息（豆包式：图片展示缩略图，文件/视频展示文件名+格式） */
 export interface MessageAttachmentDisplay {
-  type: 'image' | 'file'
+  type: 'image' | 'file' | 'video'
   file_name: string
   dataUrl?: string       // 仅图片：用于在气泡内展示，持久化后切换会话仍能显示
-  format?: string        // 仅文件：如 PDF、DOCX
-  extracted_text?: string // 仅文件：解析后的文本，供侧栏可滚动查看
+  format?: string        // 文件/视频：如 PDF、MP4
+  extracted_text?: string // 文件/视频：解析后的文本或视频描述，供侧栏可滚动查看
 }
 
 export interface MessageItem {

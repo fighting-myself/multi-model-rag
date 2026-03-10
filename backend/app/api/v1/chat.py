@@ -20,6 +20,7 @@ from app.services.chat_service import ChatService
 from app.services import cache_service
 from app.services.knowledge_base_service import KnowledgeBaseService
 from app.services.ocr_service import extract_text_from_image
+from app.services.video_extract_service import extract_text_from_video
 
 router = APIRouter()
 
@@ -34,6 +35,7 @@ async def get_chat_attachment_settings(
         "max_size_bytes": getattr(settings, "CHAT_ATTACHMENT_MAX_SIZE_BYTES", 20 * 1024 * 1024),
         "image_types": getattr(settings, "chat_attachment_image_types_list", ["image/jpeg", "image/png", "image/gif", "image/webp"]),
         "file_extensions": getattr(settings, "chat_attachment_file_extensions_list", ["pdf", "doc", "docx", "txt", "xlsx", "xls", "pptx", "ppt", "md"]),
+        "video_extensions": getattr(settings, "chat_attachment_video_extensions_list", ["mp4", "webm", "mov"]),
     }
 
 
@@ -102,6 +104,10 @@ def _is_image_extension(ext: str) -> bool:
     return (ext or "").lower() in ("jpg", "jpeg", "png", "gif", "webp")
 
 
+def _is_video_extension(ext: str) -> bool:
+    return (ext or "").lower() in getattr(settings, "chat_attachment_video_extensions_list", ["mp4", "webm", "mov"])
+
+
 @router.post("/attachments/upload")
 async def chat_upload_file(
     request: Request,
@@ -140,6 +146,7 @@ async def chat_upload_file(
         ext = "pptx"
 
     is_image = _is_image_extension(ext)
+    is_video = _is_video_extension(ext)
     if is_image:
         try:
             extracted = await extract_text_from_image(raw, ext)
@@ -148,6 +155,14 @@ async def chat_upload_file(
             extracted = ""
         if not extracted or not extracted.strip():
             extracted = "图片内容描述：解析未返回文字，请结合上下文理解。"
+    elif is_video:
+        try:
+            extracted = await extract_text_from_video(raw, ext)
+        except Exception as e:
+            logging.warning("智能问答上传视频抽帧描述失败 %s: %s", filename, e)
+            extracted = ""
+        if not extracted or not extracted.strip():
+            extracted = "视频内容描述：解析未返回文字，请结合用户问题理解。"
     else:
         try:
             extracted = KnowledgeBaseService._extract_text(raw, ext)
@@ -155,12 +170,12 @@ async def chat_upload_file(
             logging.warning("智能问答上传提取文本失败 %s: %s", filename, e)
             extracted = ""
         if not extracted or not extracted.strip():
-            raise HTTPException(status_code=400, detail="未能从文件中提取到文本，请换用支持格式（如 PDF、Word、TXT）")
+            raise HTTPException(status_code=400, detail="未能从文件中提取到文本，请换用支持格式（如 PDF、Word、TXT、MP4）")
 
     if len(extracted) > _STREAM_FILE_CONTENT_MAX_CHARS:
         extracted = extracted[:_STREAM_FILE_CONTENT_MAX_CHARS] + "\n\n…（已截断）"
     upload_id = uuid.uuid4().hex
-    attach_type = "image" if is_image else "file"
+    attach_type = "image" if is_image else ("video" if is_video else "file")
     ok = cache_service.set(
         cache_service.key_chat_upload(upload_id),
         {"file_name": filename, "type": attach_type, "extracted_text": extracted},

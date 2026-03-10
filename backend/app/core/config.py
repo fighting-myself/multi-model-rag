@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     CHAT_ATTACHMENT_MAX_SIZE_BYTES: int = 20 * 1024 * 1024  # 单个附件最大体积（默认 20MB）
     CHAT_ATTACHMENT_IMAGE_TYPES: str = "image/jpeg,image/png,image/gif,image/webp"  # 图片 MIME
     CHAT_ATTACHMENT_FILE_EXTENSIONS: str = "pdf,doc,docx,txt,xlsx,xls,pptx,ppt,md"  # 允许的文件扩展名（非图片）
+    CHAT_ATTACHMENT_VIDEO_EXTENSIONS: str = "mp4,webm,mov"  # 视频扩展名，上传后抽帧用视觉模型描述
     # 上传临时缓存 TTL（秒）。会话内「点开查看」的内容存于消息表，仅随会话删除而清理；本项只影响「上传后未发消息」的缓存，设长一些以便稍后发消息时仍能写入消息（豆包式长期保留）
     CHAT_ATTACHMENT_UPLOAD_TTL: int = 604800  # 7 天（0 表示不设过期，慎用）
 
@@ -127,6 +128,10 @@ class Settings(BaseSettings):
     @property
     def chat_attachment_file_extensions_list(self) -> List[str]:
         return [x.strip().lower() for x in self.CHAT_ATTACHMENT_FILE_EXTENSIONS.split(",") if x.strip()]
+
+    @property
+    def chat_attachment_video_extensions_list(self) -> List[str]:
+        return [x.strip().lower() for x in self.CHAT_ATTACHMENT_VIDEO_EXTENSIONS.split(",") if x.strip()]
 
     # 对话历史配置（均为会话级别：一个 conversation_id = 一次会话，其下多条消息为对话历史）
     CHAT_HISTORY_MAX_COUNT: int = 100   # 最多保留的会话数量，超出时删除最旧的会话
