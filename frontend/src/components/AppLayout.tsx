@@ -29,7 +29,7 @@ interface AppLayoutProps {
 }
 
 const logoStyle: React.CSSProperties = {
-  height: 64,
+  height: 48,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -124,7 +124,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             items={menuItems}
             onClick={handleMenuClick}
             style={{
-              marginTop: 16,
+              marginTop: 0,
               background: 'transparent',
               border: 'none',
             }}

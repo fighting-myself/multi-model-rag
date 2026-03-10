@@ -1,28 +1,40 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Form, Input, Button, Card, message } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import Lottie from 'lottie-react'
 import api from '../services/api'
 import { useAuthStore } from '../stores/authStore'
+
+// Lottie 动画 JSON（与 airbnb/lottie 同源格式，Web 端用 lottie-react 渲染）
+const LOTTIE_ANIMATION_URL = 'https://assets10.lottiefiles.com/packages/lf20_ktwnwv5m.json'
 
 export default function Login() {
   const navigate = useNavigate()
   const { setToken, setUser } = useAuthStore()
   const [loading, setLoading] = useState(false)
+  const [animationData, setAnimationData] = useState<object | null>(null)
 
-  const onFinish = async (values: any) => {
+  useEffect(() => {
+    fetch(LOTTIE_ANIMATION_URL)
+      .then((res) => res.json())
+      .then(setAnimationData)
+      .catch(() => setAnimationData(null))
+  }, [])
+
+  const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true)
     try {
       const formData = new FormData()
       formData.append('username', values.username)
       formData.append('password', values.password)
-      
+
       const response = await api.post('/auth/login', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       })
-      
+
       setToken(response.access_token)
       const userResponse = await api.get('/auth/me')
       setUser(userResponse)
@@ -45,52 +57,71 @@ export default function Login() {
 
   return (
     <div className="app-fullpage-tech">
-      <Card style={{ width: 400 }}>
-        <h1 className="login-title">AI多模态智能问答助手</h1>
-        <Form
-          name="login"
-          onFinish={onFinish}
-          autoComplete="off"
-        >
-          <Form.Item
-            name="username"
-            rules={[{ required: true, message: '请输入用户名' }]}
-          >
-            <Input 
-              prefix={<UserOutlined />} 
-              placeholder="用户名" 
-              size="large"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="password"
-            rules={[{ required: true, message: '请输入密码' }]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="密码"
-              size="large"
-            />
-          </Form.Item>
-
-          <Form.Item>
-            <Button 
-              type="primary" 
-              htmlType="submit" 
-              block 
-              size="large"
-              loading={loading}
+      <div className="login-page-wrap">
+        <Card className="login-card">
+          <div className="login-card-inner">
+            {animationData && (
+              <div className="login-lottie-wrap">
+                <Lottie
+                  animationData={animationData}
+                  loop
+                  style={{ width: 140, height: 140 }}
+                />
+              </div>
+            )}
+            <h1 className="login-title">AI多模态智能问答助手</h1>
+            <p className="login-subtitle">登录以继续使用</p>
+            <Form
+              name="login"
+              onFinish={onFinish}
+              autoComplete="off"
+              layout="vertical"
+              requiredMark={false}
             >
-              登录
-            </Button>
-          </Form.Item>
+              <Form.Item
+                name="username"
+                rules={[{ required: true, message: '请输入用户名' }]}
+              >
+                <Input
+                  prefix={<UserOutlined className="login-input-icon" />}
+                  placeholder="用户名"
+                  size="large"
+                  className="login-input"
+                />
+              </Form.Item>
 
-          <div style={{ textAlign: 'center' }}>
-            <a href="/register">还没有账号？立即注册</a>
+              <Form.Item
+                name="password"
+                rules={[{ required: true, message: '请输入密码' }]}
+              >
+                <Input.Password
+                  prefix={<LockOutlined className="login-input-icon" />}
+                  placeholder="密码"
+                  size="large"
+                  className="login-input"
+                />
+              </Form.Item>
+
+              <Form.Item className="login-submit-item">
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  block
+                  size="large"
+                  loading={loading}
+                  className="login-btn"
+                >
+                  登录
+                </Button>
+              </Form.Item>
+
+              <div className="login-footer">
+                <a href="/register">还没有账号？立即注册</a>
+              </div>
+            </Form>
           </div>
-        </Form>
-      </Card>
+        </Card>
+      </div>
     </div>
   )
 }

@@ -6,6 +6,12 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
+# MySQL 下 attachments_meta 用 LONGTEXT，容纳含 base64 图片的 JSON（TEXT 仅 64KB 会超长）
+try:
+    from sqlalchemy.dialects.mysql import LONGTEXT
+except ImportError:
+    LONGTEXT = Text  # 非 MySQL 时退化为 Text
+
 
 class Conversation(Base):
     """对话表"""
@@ -45,9 +51,9 @@ class Message(Base):
     # 实时联网检索（豆包式）
     web_retrieved_context = Column(Text, nullable=True)  # 联网检索得到的文本摘要
     web_sources = Column(Text, nullable=True)  # 联网来源 JSON：[{"title", "url", "snippet"}]
-    # 用户消息附件展示用（豆包式）：JSON 数组 [{"type":"image"|"file","file_name":"x.png","format":"PNG"}]
-    # 若已有数据库未自动建列，可执行: ALTER TABLE messages ADD COLUMN attachments_meta TEXT NULL;
-    attachments_meta = Column(Text, nullable=True)
+    # 用户消息附件展示用（豆包式）：JSON 数组，图片含 dataUrl 以便历史会话中展示
+    # MySQL 使用 LONGTEXT 以容纳含 base64 的 JSON；若已有库列为 TEXT，需执行: ALTER TABLE messages MODIFY COLUMN attachments_meta LONGTEXT NULL;
+    attachments_meta = Column(LONGTEXT, nullable=True)
 
     # 关系
     conversation = relationship("Conversation", back_populates="messages")

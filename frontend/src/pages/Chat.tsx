@@ -486,8 +486,6 @@ export default function Chat() {
         alignItems: 'center',
         gap: 12,
         flexWrap: 'wrap',
-        borderBottom: '1px solid var(--app-border-subtle)',
-        boxShadow: '0 4px 12px var(--app-border-subtle)',
       }}
     >
       <h1 className="app-page-title" style={{ margin: 0, marginRight: 8 }}>智能问答</h1>

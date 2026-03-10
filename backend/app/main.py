@@ -79,18 +79,22 @@ async def lifespan(app: FastAPI):
     # 创建数据库表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # 为已有数据库添加 messages.attachments_meta（豆包式会话附件展示）
-        def _add_attachments_meta(sync_conn):
+        # 为已有数据库添加或扩列 messages.attachments_meta（豆包式会话附件展示，含 base64 图片需 LONGTEXT）
+        def _ensure_attachments_meta(sync_conn):
             try:
-                sync_conn.execute(text("ALTER TABLE messages ADD COLUMN attachments_meta TEXT NULL"))
+                sync_conn.execute(text("ALTER TABLE messages ADD COLUMN attachments_meta LONGTEXT NULL"))
             except Exception as e:
                 err = str(e).lower()
-                # MySQL 1060 = Duplicate column name；部分驱动/方言的报错文案
                 if "1060" in err or "duplicate column" in err or "already exists" in err:
+                    # 列已存在，尝试从 TEXT 改为 LONGTEXT（MySQL）以容纳大 JSON
+                    try:
+                        sync_conn.execute(text("ALTER TABLE messages MODIFY COLUMN attachments_meta LONGTEXT NULL"))
+                    except Exception as e2:
+                        logging.getLogger(__name__).debug("attachments_meta 改为 LONGTEXT 失败（可手动执行）: %s", e2)
                     return
                 raise
         try:
-            await conn.run_sync(_add_attachments_meta)
+            await conn.run_sync(_ensure_attachments_meta)
         except Exception as e:
             logging.getLogger(__name__).debug("attachments_meta 列已存在或无法添加: %s", e)
     

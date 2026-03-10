@@ -254,7 +254,8 @@ async def chat_completion_stream(
     if not attachments_list:
         attachments_list = None
 
-    # 会话历史持久展示附件（豆包式）：存 type、file_name、format；图片存 data_url 以便切换会话后仍能显示，文件存 extracted_text 供侧栏查看
+    # 会话历史持久展示附件（豆包式）：存 type、file_name、format；图片存 dataUrl 以便切换会话后仍能显示，文件存 extracted_text 供侧栏查看
+    # attachments_meta 列为 LONGTEXT，可容纳含 base64 的 JSON
     attachments_meta: Optional[List[dict]] = None
     if raw_attachments and isinstance(raw_attachments, list):
         attachments_meta = []

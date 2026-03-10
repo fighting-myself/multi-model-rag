@@ -23,11 +23,12 @@
   --app-text-primary: #e8eef6;
   --app-text-secondary: #9ca8b8;
   --app-text-muted: #6b7a8f;
-  /* 玻璃与边框：霓虹更可见 */
+  /* 玻璃与边框：柔和青紫，不刺眼 */
   --app-glass: rgba(14, 20, 36, 0.7);
-  --app-glass-border: rgba(0, 245, 255, 0.22);
-  --app-border-subtle: rgba(255, 255, 255, 0.08);
-  --app-border-info: rgba(0, 245, 255, 0.45);
+  --app-glass-border: rgba(0, 245, 255, 0.14);
+  --app-border-subtle: rgba(255, 255, 255, 0.06);
+  --app-border: rgba(255, 255, 255, 0.1);
+  --app-border-info: rgba(0, 245, 255, 0.38);
   /* 语义：带一点青/紫 tint */
   --app-card-bg: rgba(12, 18, 30, 0.85);
   --app-bg-muted: rgba(20, 30, 50, 0.55);
@@ -62,15 +63,16 @@
   --app-text-primary: #0f172a;
   --app-text-secondary: #475569;
   --app-text-muted: #64748b;
-  /* 边框与玻璃：浅色系 */
+  /* 边框与玻璃：浅色系，消息框可见 */
   --app-glass: rgba(255, 255, 255, 0.8);
-  --app-glass-border: rgba(13, 148, 136, 0.2);
-  --app-border-subtle: rgba(15, 23, 42, 0.08);
+  --app-glass-border: rgba(13, 148, 136, 0.22);
+  --app-border-subtle: rgba(15, 23, 42, 0.12);
+  --app-border: rgba(15, 23, 42, 0.16);
   --app-border-info: rgba(13, 148, 136, 0.4);
   /* 卡片与背景 */
   --app-card-bg: rgba(255, 255, 255, 0.95);
-  --app-bg-muted: rgba(241, 245, 249, 0.9);
-  --app-bg-subtle: rgba(226, 232, 240, 0.6);
+  --app-bg-muted: rgba(241, 245, 249, 0.95);
+  --app-bg-subtle: rgba(226, 232, 240, 0.9);
   --app-info-bg: rgba(13, 148, 136, 0.08);
   --app-success-bg: rgba(34, 197, 94, 0.08);
   --app-error-bg: rgba(239, 68, 68, 0.08);
@@ -891,19 +893,20 @@ body {
   z-index: 1;
 }
 
-/* 智能问答输入区：霓虹光晕（其他页用） */
+/* 智能问答输入区：柔和边框（其他页用） */
 .tech-input-wrap {
   border-radius: 12px;
   padding: 3px;
-  background: rgba(0, 245, 255, 0.06);
-  border: 1px solid var(--app-glass-border);
-  box-shadow: 0 0 32px -8px var(--app-glow), inset 0 1px 0 rgba(255,255,255,0.03);
+  background: rgba(0, 245, 255, 0.04);
+  border: 1px solid var(--app-border-subtle);
+  box-shadow: 0 2px 16px -4px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255,255,255,0.02);
 }
 
-/* 智能问答页顶部栏：不透明背景，完全遮挡向上滚动的文字（与底部栏一致） */
+/* 智能问答页顶部栏：不透明背景，完全挡住下方滚动内容，不透视；无框（无阴影） */
 .chat-top-bar {
   background: var(--app-bg) !important;
   border-bottom: 1px solid var(--app-border-subtle) !important;
+  box-shadow: none !important;
 }
 /* 暗黑模式：智能问答标题 青→紫 渐变，突出现代 AI */
 [data-theme="dark"] .chat-top-bar .app-page-title {
@@ -915,16 +918,15 @@ body {
   font-weight: 700;
   letter-spacing: 0.02em;
 }
-/* 暗黑模式：顶部栏玻璃 + 霓虹底边光晕，层次更炫酷 */
 [data-theme="dark"] .chat-top-bar {
-  background: linear-gradient(180deg, var(--app-bg-elevated) 0%, var(--app-bg) 100%) !important;
-  border-bottom: 1px solid var(--app-glass-border) !important;
-  box-shadow: 0 6px 32px -8px var(--app-glow), 0 0 40px -16px rgba(168, 85, 247, 0.15), 0 1px 0 rgba(0, 245, 255, 0.08);
+  background: var(--app-bg) !important;
+  border-bottom: 1px solid var(--app-border-subtle) !important;
+  box-shadow: none !important;
 }
 [data-theme="light"] .chat-top-bar {
-  background: #f0f4f8 !important; /* 亮色不透明 */
+  background: var(--app-bg) !important;
   border-bottom: 1px solid var(--app-border-subtle) !important;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  box-shadow: none !important;
 }
 /* 智能问答页底部输入条：只去掉“外框”，不画背景/边框/阴影，与背景融为一体；输入消息框样式不动 */
 .chat-input-bar.tech-input-wrap {
@@ -949,41 +951,59 @@ body {
   box-shadow: none !important;
 }
 
-/* 输入区内层：无外框，但保留衬底背景，保证输入框下方附件/文字能显示（拖拽时由 JS 覆盖） */
+/* 输入区内层：保留可见边框，hover/focus 时不消失 */
 .chat-input-inner {
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
+  border: 1px solid var(--app-border-subtle) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
   background: var(--app-bg);
 }
+.chat-input-inner:hover {
+  border-color: var(--app-border-info) !important;
+}
 .chat-input-inner:focus-within {
-  box-shadow: none !important;
+  border-color: var(--app-accent) !important;
+  box-shadow: 0 0 0 2px var(--app-glow) !important;
 }
-/* 暗黑模式：用户消息气泡霓虹描边 + 微光，与主色搭配 */
+/* 暗黑模式：用户消息气泡柔和描边，与背景协调 */
 [data-theme="dark"] .chat-msg-user {
-  border-color: rgba(0, 245, 255, 0.28) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
   background: linear-gradient(135deg, rgba(14, 28, 48, 0.85) 0%, rgba(20, 30, 50, 0.75) 100%) !important;
-  box-shadow: 0 0 24px -8px var(--app-glow), 0 0 0 1px rgba(0, 245, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 4px 20px -6px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
 }
-/* 暗黑模式：拖拽上传遮罩深色毛玻璃，提示文字更清晰 */
+/* 暗黑模式：拖拽上传遮罩深色毛玻璃，边框柔和 */
 [data-theme="dark"] .chat-drag-overlay {
   background: rgba(6, 10, 18, 0.88) !important;
-  border-color: var(--app-accent) !important;
-  border-width: 2px !important;
-  box-shadow: 0 0 56px -12px var(--app-glow), 0 0 0 1px rgba(168, 85, 247, 0.2), inset 0 0 0 1px rgba(0, 245, 255, 0.2) !important;
+  border-color: var(--app-border-info) !important;
+  border-width: 1px !important;
+  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--app-border-subtle) !important;
 }
 [data-theme="dark"] .chat-drag-overlay span:first-child {
   color: var(--app-accent) !important;
   text-shadow: 0 0 24px var(--app-glow), 0 0 48px rgba(0, 245, 255, 0.4);
 }
 
-/* 豆包式：输入框与下方附件栏之间无分隔线，整体一块 */
+/* 豆包式：输入框保留边框，hover/focus 时只改色不取消 */
+.chat-input-bar .ant-input-group {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--app-bg-muted);
+}
+.chat-input-bar .ant-input-group:hover {
+  border-color: var(--app-border-info);
+}
+.chat-input-bar .ant-input-group:focus-within {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 2px var(--app-glow);
+}
 .chat-input-bar .ant-input,
 .chat-input-bar .ant-input:hover,
 .chat-input-bar .ant-input:focus {
   border: none !important;
   border-bottom: none !important;
   box-shadow: none !important;
+  background: transparent !important;
 }
 .tech-input-wrap .ant-input-group {
   border-radius: 10px;
@@ -992,6 +1012,9 @@ body {
 .tech-input-wrap .ant-input {
   background: var(--app-bg-muted) !important;
   border: 1px solid var(--app-border-subtle) !important;
+}
+.tech-input-wrap .ant-input:hover {
+  border-color: var(--app-border-info) !important;
 }
 .tech-input-wrap .ant-input:focus {
   border-color: var(--app-accent) !important;
@@ -1004,9 +1027,36 @@ body {
 }
 
 [data-theme="light"] .tech-input-wrap {
-  background: rgba(13, 148, 136, 0.04);
-  border-color: rgba(13, 148, 136, 0.2);
-  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+  background: rgba(13, 148, 136, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
+}
+/* 白天模式：用户消息气泡框更明显 */
+[data-theme="light"] .chat-msg-user {
+  background: rgba(241, 245, 249, 0.95) !important;
+  border: 1px solid rgba(15, 23, 42, 0.14) !important;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06) !important;
+}
+[data-theme="light"] .chat-input-inner {
+  border-color: rgba(15, 23, 42, 0.14) !important;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06) !important;
+}
+[data-theme="light"] .chat-input-inner:hover {
+  border-color: rgba(13, 148, 136, 0.35) !important;
+}
+[data-theme="light"] .chat-input-inner:focus-within {
+  border-color: var(--app-accent) !important;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.2) !important;
+}
+[data-theme="light"] .chat-input-bar .ant-input-group {
+  border-color: rgba(15, 23, 42, 0.14);
+}
+[data-theme="light"] .chat-input-bar .ant-input-group:hover {
+  border-color: rgba(13, 148, 136, 0.35);
+}
+[data-theme="light"] .chat-input-bar .ant-input-group:focus-within {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.2);
 }
 [data-theme="light"] .tech-input-wrap .ant-input:focus {
   box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.2) !important;
@@ -1086,16 +1136,66 @@ body {
   border: none;
   box-shadow: 0 0 20px -4px var(--app-glow);
 }
+/* 登录页布局：卡片居中 + Lottie 区域 */
+.login-page-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: 24px;
+}
+.app-fullpage-tech .login-card {
+  width: 100%;
+  max-width: 420px;
+}
+.login-card-inner {
+  padding: 8px 0;
+}
+.login-lottie-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+.login-lottie-wrap svg {
+  max-width: 100%;
+  height: auto;
+}
 .app-fullpage-tech .login-title {
   font-family: 'Orbitron', sans-serif;
   font-weight: 700;
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 8px;
   background: linear-gradient(135deg, #00f5ff 0%, #a855f7 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  font-size: 1.25rem;
+  font-size: 1.35rem;
+}
+.login-subtitle {
+  text-align: center;
+  color: var(--app-text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 28px;
+}
+.app-fullpage-tech .login-input.ant-input,
+.app-fullpage-tech .login-input.ant-input-password input {
+  border-radius: 10px;
+}
+.app-fullpage-tech .login-input-icon {
+  color: var(--app-text-tertiary);
+}
+.app-fullpage-tech .login-submit-item {
+  margin-bottom: 16px;
+}
+.app-fullpage-tech .login-btn {
+  border-radius: 10px;
+  font-weight: 600;
+}
+.login-footer {
+  text-align: center;
+}
+.app-fullpage-tech .login-footer a {
+  font-size: 0.9rem;
 }
 
 /* 亮色主题：登录/注册页 */
