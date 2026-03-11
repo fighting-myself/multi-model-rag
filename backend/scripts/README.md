@@ -13,6 +13,7 @@
 | `add_user_last_login_at.sql` | users 表 last_login_at |
 | `add_users_password_hash.sql` | users 表密码哈希相关 |
 | `add_web_search_columns.sql` | messages 表联网检索字段（web_retrieved_context、web_sources） |
+| `add_benchmark_datasets.sql` | 召回率评测 benchmark_datasets 表（可选，应用 create_all 会自动建表） |
 | `sync_users_table.sql` | 用户表结构同步 |
 
 执行前请根据实际数据库类型（PostgreSQL / MySQL / SQLite）选用或注释脚本内对应段落，并按脚本头部说明执行。

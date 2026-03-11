@@ -134,6 +134,92 @@ class ChatService:
         chunk_scores.sort(key=lambda x: x[1], reverse=True)
         return [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k])]
     
+    async def retrieve_ordered_chunk_ids(
+        self,
+        query: str,
+        knowledge_base_id: int,
+        top_k: int = 50,
+        retrieval_mode: str = "hybrid",
+        use_rerank: bool = True,
+        use_query_expand: bool = False,
+    ) -> List[int]:
+        """供召回率评测使用：按指定检索方式返回有序的 chunk id 列表。
+        
+        retrieval_mode: "vector" 仅向量 | "fulltext" 仅全文(BM25) | "hybrid" 向量+全文 RRF 融合
+        """
+        import logging
+        queries = [query]
+        if use_query_expand and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
+            try:
+                extra = await query_expand(query, settings.RAG_QUERY_EXPAND_COUNT)
+                queries.extend(extra)
+            except Exception:
+                pass
+        k = settings.RRF_K
+        chunk_rrf_scores: Dict[int, float] = {}
+        vector_chunk_map: Dict[int, Chunk] = {}
+        do_vector = retrieval_mode in ("vector", "hybrid")
+        do_fulltext = retrieval_mode in ("fulltext", "hybrid")
+        # 1. 向量检索
+        if do_vector:
+            for q in queries:
+                try:
+                    query_vec = await get_embedding(q)
+                    vs = get_vector_client()
+                    hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
+                    vector_ids = []
+                    vector_id_to_rank = {}
+                    for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
+                        if not isinstance(h, dict):
+                            continue
+                        vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id") if isinstance(h.get("entity"), dict) else None
+                        if vid is not None:
+                            vid_str = str(vid)
+                            vector_ids.append(vid_str)
+                            vector_id_to_rank[vid_str] = rank
+                    if vector_ids:
+                        result = await self.db.execute(
+                            select(Chunk).where(
+                                Chunk.vector_id.in_(vector_ids),
+                                Chunk.knowledge_base_id == knowledge_base_id,
+                            )
+                        )
+                        for c in result.scalars().all():
+                            vector_chunk_map[c.id] = c
+                            rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
+                            chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
+                except Exception as e:
+                    logging.warning("召回评测向量检索失败: %s", e)
+        # 2. 全文检索
+        if do_fulltext:
+            for q in queries:
+                try:
+                    fulltext_results = await self._full_text_search(q, knowledge_base_id, top_k=top_k * 3)
+                    for chunk, rank in fulltext_results:
+                        vector_chunk_map[chunk.id] = chunk
+                        chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
+                except Exception as e:
+                    logging.warning("召回评测全文检索失败: %s", e)
+        if not chunk_rrf_scores:
+            return []
+        candidate_chunks = sorted(
+            [(vector_chunk_map[chunk_id], score) for chunk_id, score in chunk_rrf_scores.items()],
+            key=lambda x: x[1],
+            reverse=True,
+        )[: top_k * 2]
+        if use_rerank and candidate_chunks:
+            try:
+                documents = [chunk.content for chunk, _ in candidate_chunks]
+                reranked = await rerank(query=query, documents=documents, top_n=min(top_k, len(documents)))
+                order = [item["index"] for item in reranked if item["index"] < len(candidate_chunks)]
+                chunk_list = [candidate_chunks[i][0] for i in order]
+            except Exception as e:
+                logging.warning("召回评测 Rerank 失败: %s，使用 RRF 排序", e)
+                chunk_list = [chunk for chunk, _ in candidate_chunks[:top_k]]
+        else:
+            chunk_list = [chunk for chunk, _ in candidate_chunks[:top_k]]
+        return [c.id for c in chunk_list]
+    
     async def _rag_context(
         self,
         message: str,

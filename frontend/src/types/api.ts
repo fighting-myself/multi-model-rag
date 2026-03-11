@@ -281,3 +281,69 @@ export interface McpToolsListResponse {
   server_name: string
   tools: McpToolItem[]
 }
+
+/** 召回率评测：单条 benchmark 样本 */
+export interface BenchmarkItem {
+  query: string
+  relevant_chunk_ids: number[]
+}
+
+/** 检索方式配置 */
+export interface RetrievalConfig {
+  retrieval_mode: 'vector' | 'fulltext' | 'hybrid'
+  use_rerank: boolean
+  use_query_expand: boolean
+}
+
+/** 发起召回率评测请求 */
+export interface RecallRunRequest {
+  knowledge_base_id: number
+  retrieval_config: RetrievalConfig
+  benchmark: { items: BenchmarkItem[] }
+  top_k_list?: number[]
+}
+
+/** 召回率评测结果 */
+export interface RecallRunResponse {
+  config_snapshot: Record<string, unknown>
+  metrics: {
+    recall_at_1?: number
+    recall_at_5?: number
+    recall_at_10?: number
+    recall_at_20?: number
+    hit_at_1?: number
+    hit_at_5?: number
+    hit_at_10?: number
+    hit_at_20?: number
+    mrr: number
+    num_queries: number
+    num_items_with_relevant: number
+  }
+  details: Array<{
+    query: string
+    retrieved_ids: number[]
+    relevant_ids: number[]
+    recall_at_k: Record<number, number>
+    hit_at_k: Record<number, number>
+    mrr: number
+  }>
+}
+
+/** 评测数据集（保存/加载） */
+export interface BenchmarkDatasetItem {
+  id: number
+  user_id: number
+  knowledge_base_id: number | null
+  name: string
+  description: string | null
+  items: BenchmarkItem[]
+  created_at?: string
+  updated_at?: string
+}
+
+export interface BenchmarkDatasetListResponse {
+  datasets: BenchmarkDatasetItem[]
+  total: number
+  page: number
+  page_size: number
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "query": "李墨白小时候的家庭背景和成长环境是怎样的？",
+    "relevant_chunk_ids": [5845]
+  },
+  {
+    "query": "听雨轩和祖父对李墨白有什么影响？",
+    "relevant_chunk_ids": [5845]
+  },
+  {
+    "query": "李墨白八岁时祖父送的宋代陶砚有什么意义？",
+    "relevant_chunk_ids": [5845]
+  },
+  {
+    "query": "李墨白为什么选择文物鉴定与修复专业？大学期间学了什么？",
+    "relevant_chunk_ids": [5845]
+  },
+  {
+    "query": "李墨白如何理解“修旧如旧”？什么时候顿悟的？",
+    "relevant_chunk_ids": [5845]
+  },
+  {
+    "query": "李墨白毕业后在哪里工作？负责什么？",
+    "relevant_chunk_ids": [5846]
+  },
+  {
+    "query": "李墨白鉴定南宋官窑青瓷盘的故事",
+    "relevant_chunk_ids": [5846]
+  },
+  {
+    "query": "李墨白如何看待科技手段和传统眼学在鉴定中的关系？",
+    "relevant_chunk_ids": [5846]
+  },
+  {
+    "query": "“器物的故事”讲座是谁主持的？讲什么内容？",
+    "relevant_chunk_ids": [5846]
+  },
+  {
+    "query": "李墨白的性格和审美趣味有什么特点？",
+    "relevant_chunk_ids": [5846]
+  },
+  {
+    "query": "李墨白的工作坊和传承之责",
+    "relevant_chunk_ids": [5846]
+  },
+  {
+    "query": "李墨白最大的心愿和民间遗珍修复工作室",
+    "relevant_chunk_ids": [5846]
+  },
+  {
+    "query": "李墨白的人物介绍：从童年到职业生涯的完整经历",
+    "relevant_chunk_ids": [5845, 5846]
+  },
+  {
+    "query": "李墨白与祖父、父亲、藏书、古砚相关的经历",
+    "relevant_chunk_ids": [5845]
+  },
+  {
+    "query": "省博物院科技保护部、X射线荧光、显微摄影在文物鉴定中的应用",
+    "relevant_chunk_ids": [5846]
+  }
+]

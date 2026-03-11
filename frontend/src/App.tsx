@@ -13,6 +13,7 @@ import AuditLog from './pages/AuditLog'
 import McpServers from './pages/McpServers'
 import Steward from './pages/Steward'
 import ComputerSteward from './pages/ComputerSteward'
+import RecallEvaluation from './pages/RecallEvaluation'
 import AppLayout from './components/AppLayout'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import PageTitle from './components/PageTitle'
@@ -42,6 +43,7 @@ function App() {
                   <Route path="/billing" element={<Billing />} />
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/image-search" element={<ErrorBoundary><ImageSearch /></ErrorBoundary>} />
+                  <Route path="/recall-evaluation" element={<ErrorBoundary><RecallEvaluation /></ErrorBoundary>} />
                   <Route path="/audit-log" element={<AuditLog />} />
                   <Route path="/mcp-servers" element={<McpServers />} />
                   <Route path="/steward" element={<ErrorBoundary><Steward /></ErrorBoundary>} />

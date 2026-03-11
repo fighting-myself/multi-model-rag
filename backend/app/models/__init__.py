@@ -11,6 +11,7 @@ from app.models.order import Order
 from app.models.invoice import Invoice
 from app.models.audit_log import AuditLog
 from app.models.mcp_server import McpServer
+from app.models.benchmark_dataset import BenchmarkDataset
 
 __all__ = [
     "User",
@@ -27,4 +28,5 @@ __all__ = [
     "Invoice",
     "AuditLog",
     "McpServer",
+    "BenchmarkDataset",
 ]

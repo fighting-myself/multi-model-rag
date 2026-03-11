@@ -17,6 +17,7 @@ import {
   DesktopOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -49,6 +50,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/knowledge-bases', icon: <DatabaseOutlined />, label: '知识库' },
     { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
     { key: '/image-search', icon: <PictureOutlined />, label: '多模态检索' },
+    { key: '/recall-evaluation', icon: <LineChartOutlined />, label: '召回率评测' },
     { key: '/mcp-servers', icon: <ApiOutlined />, label: 'MCP 工具' },
     { key: '/steward', icon: <RobotOutlined />, label: '浏览器助手' },
     { key: '/computer-steward', icon: <DesktopOutlined />, label: '电脑管家' },
