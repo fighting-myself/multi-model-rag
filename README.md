@@ -1,195 +1,148 @@
-# AI 多模态智能问答助手
+## AI 多模态智能问答与 RAG 指标平台
 
-企业级 AI 多模态智能问答与自动化系统，支持多格式文档 RAG 问答、多模态检索、浏览器自动化与**电脑管家**（Computer Use），并可结合 **skills** 技能（OpenClaw 方式）与 MCP 工具综合完成任务。
+企业级 AI 多模态智能问答系统，支持多格式文档 RAG 问答、多模态检索与「RAG 六大指标」评测，集成浏览器助手、电脑管家、skills 技能与 MCP 工具，可在一个平台内完成知识问答、业务自动化与效果评估。
 
-## 功能特性
+---
 
-### 核心能力
+## 功能总览
 
-- **多格式文档与 RAG**：支持 PDF、PPT、TXT、XLSX、DOCX、HTML、Markdown、ZIP、JPEG 等上传与解析，基于 RAG 的智能问答
-- **多模态检索**：文本 + 图片混合检索，以文搜图、以图搜图
-- **用户与计费**：用户认证、权限管理、计费中心、使用统计与仪表盘
-- **审计与安全**：操作审计日志、敏感信息脱敏、文件安全校验
+### 知识库与问答
 
-### 智能助手与技能
+- **多格式文档入库与分块**：支持 PDF / PPT / TXT / XLSX / DOCX / HTML / Markdown / ZIP / 图片 等文件上传、解析与分块。
+- **RAG 智能问答**：
+  - 单库 / 多库选择，支持开启/关闭 RAG。
+  - 向量 + 全文（BM25）**混合检索**，RRF 融合 + Rerank。
+  - 支持 LlamaIndex 查询变换（Advanced RAG，多查询改写）。
+  - 流式输出，对话历史自动拼接，返回命中片段作为溯源。
 
-- **浏览器助手**：多 Agent + Playwright，根据指令在浏览器中执行操作（打开网页、登录、获取 Cookie、填表、总结页面等）
-- **电脑管家**：视觉识别 + AI 决策 + 键鼠操作，像人一样看屏幕、移动鼠标、敲键盘，操作整机（任意软件、Windows 桌面等）；结合 **skills** 技能综合解决问题
-- **skills 技能**：项目根目录 `skills/<name>/SKILL.md`（OpenClaw 方式），每个技能为子目录 + 必选 SKILL.md（支持 YAML frontmatter：name, description），浏览器助手与电脑管家按需扫描并加载，按文档调用对应工具（如保存到 data 目录）
+### 检索与多模态
 
-### 扩展与部署
+- **文本检索**：基于向量库与 BM25 的混合检索。
+- **多模态检索**：ImageSearch 页面支持以文搜图、以图搜图。
 
-- **MCP 工具**：接入外部 MCP 服务，扩展 Agent 能力
-- **向量库**：支持 Zilliz、Qdrant
-- **对象存储**：MinIO
-- **任务队列**：Celery + Redis
-- **Docker / Kubernetes**：容器化与 K8s 部署支持
+### RAG 评测与观测
+
+- **召回率评测（Recall Evaluation）**：
+  - 支持配置 benchmark（query + 相关 chunk / 关键词）。
+  - 计算 Recall@k、Hit@k、MRR，并输出逐题详情。
+  - 检索端支持 vector / fulltext / hybrid，多种 top_k 组合。
+- **RAG 六大指标页面（Advanced RAG Metrics）**：
+  - **答案准确率（Accuracy）**：批量一次 LLM 调用 + 统一判分。
+  - **召回率（Recall）**：按默认 benchmark + 当前知识库计算 Recall@1/3/5/10。
+  - **检索精准度（Precision）**：基于召回详情计算 Precision@k。
+  - **延迟（Latency）**：多次流式请求统计 TTFT 与端到端耗时。
+  - **幻觉率（Hallucination）**：批量问题一次 LLM 调用 + 本地规则判是否幻觉。
+  - **QPS / 并发能力**：多协程并发 chat_stream，统计平均延迟与失败率。
+  - 支持**一键评测**与单项评测，前端对每一项设置了合理的超时时间。
+
+### 助手与自动化
+
+- **浏览器助手**：基于 Playwright 的浏览器自动化，支持打开网页、登录、填表、抓取页面内容等。
+- **电脑管家（Computer Use）**：截图 + 视觉模型 + 键鼠控制，实现「像人一样看屏幕、点鼠标、敲键盘」的桌面自动化。
+- **skills 技能（OpenClaw 风格）**：
+  - `skills/<name>/SKILL.md` 定义技能说明与工具用法（支持 YAML frontmatter）。
+  - 浏览器助手与电脑管家可按需加载技能文档并调用对应工具。
+- **MCP 工具**：可接入外部 MCP server，将更多系统能力暴露为工具。
+
+### 安全、运营与基础能力
+
+- **用户与认证**：JWT 登录、用户管理。
+- **计费与用量统计**：调用次数、token 用量等监控（如启用相关模块）。
+- **审计日志**：对关键操作进行审计记录。
+- **文件安全与脱敏**：上传文件的内容检查与敏感信息脱敏（视配置而定）。
+
+---
 
 ## 技术栈
 
-### 前端
-
-- React 18 + TypeScript
-- Ant Design 5
-- Vite
-- Axios
-
 ### 后端
 
-- FastAPI
-- PostgreSQL / MySQL
-- Redis
-- Zilliz / Qdrant（向量数据库）
-- MinIO（对象存储）
-- Celery（异步任务）
+- **框架**：FastAPI（异步）、SQLAlchemy 2.0 + AsyncSession、Pydantic 2.x。
+- **数据库**：PostgreSQL / MySQL（通过 `asyncmy`）。
+- **缓存 / 队列**：Redis、Celery（可选）。
+- **向量数据库**：Zilliz Cloud / Milvus 兼容，或 Qdrant。
+- **对象存储**：MinIO。
+- **RAG / LLM**：
+  - 自研 `ChatService`：封装检索、上下文构造、对话历史、联网检索、工具调用等。
+  - `advanced_rag_service`：基于 LlamaIndex 的 Advanced RAG（多查询改写）。
+  - `llm_service`：统一的 LLM 封装，走 OpenAI 兼容接口（可接 Qwen、GPT 等）。
+  - `embedding_service`：文本 / 多模态向量化（如 `qwen3-vl-embedding`）。
+  - 支持 **LangChain** 作为可选实现（RAG 链、工具调用等），可通过环境变量开关。
 
-### AI 与自动化
+### 前端
 
-- **LangChain**：默认使用 LangChain 封装 LLM（`langchain-openai` ChatOpenAI）、RAG 生成链与浏览器助手 Agent（`create_tool_calling_agent` + `AgentExecutor`）。可通过 `USE_LANGCHAIN=False` 回退为原生 OpenAI 调用。
-- **LLM**：OpenAI 兼容接口（如 Qwen、GPT、Claude），支持多轮对话与 function calling
-- **视觉模型**：用于电脑管家截图分析（可配置 `VISION_MODEL`，默认与 `LLM_MODEL` 一致）
-- **Embedding**：文本向量化（如 qwen3-vl-embedding、m3e-base）
-- **Rerank / OCR**：可选 Rerank 与 OCR 模型（如阿里百炼）
-- **浏览器自动化**：Playwright（需执行 `playwright install`）
-- **桌面自动化**：pyautogui（电脑管家需在有图形界面的环境，如 Windows 桌面）
+- **框架**：React 18 + TypeScript。
+- **构建**：Vite。
+- **UI**：Ant Design 5。
+- **数据请求**：Axios，统一 `api` 封装。
+- **状态管理**：Zustand 等（按模块划分）。
+- **可视化**：ECharts（RAG 指标展示）。
 
-## 快速开始
+---
 
-**详细说明见 [环境与启动指南](./docs/08-环境与启动指南.md)。**
+## 环境准备与配置
 
 ### 前置要求
 
-- **Docker 方式（推荐）**：Docker 20.10+ 与 Docker Compose 2.0+
-- **本地开发**：Python 3.11+、Node.js 18+，以及 PostgreSQL、Redis、向量库、MinIO
+- Python 3.11+
+- Node.js 18+
+- 数据与基础设施：
+  - MySQL / PostgreSQL
+  - Redis
+  - 向量数据库（Zilliz / Qdrant 等）
+  - MinIO（或兼容对象存储）
 
-### 必须配置
+### 必要环境变量（示例）
 
-在项目根目录创建 `.env`（可参考 `.env.example`），**至少配置**：
+在项目根目录创建 `.env`（可参考 `.env.example`），常用关键项包括：
 
-- `POSTGRES_PASSWORD`（或 MySQL 相关）：数据库密码
-- 生产环境务必设置：`SECRET_KEY`、`JWT_SECRET_KEY`
-- AI 能力：`OPENAI_API_KEY`、`OPENAI_BASE_URL`（或阿里等兼容接口），以及 `LLM_MODEL` 等
+- **数据库与缓存**
+  - `DATABASE_URL`：数据库连接字符串，例如  
+    `mysql+asyncmy://user:password@127.0.0.1:3306/multi_model_rag`
+  - `REDIS_URL`：Redis 连接，例如 `redis://127.0.0.1:6379/0`
+- **向量库**
+  - `VECTOR_DB_TYPE`：`zilliz` / `qdrant`
+  - `ZILLIZ_URI`、`ZILLIZ_TOKEN` 或 `QDRANT_URL`、`QDRANT_API_KEY`
+- **对象存储**
+  - `MINIO_ENDPOINT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`
+- **LLM / Embedding**
+  - `OPENAI_API_KEY`、`OPENAI_BASE_URL`
+  - `LLM_MODEL`（如 `qwen3-vl-plus`）
+  - `EMBEDDING_MODEL`（如 `qwen3-vl-embedding`）
+- **安全相关**
+  - `SECRET_KEY`、`JWT_SECRET_KEY`（生产环境务必自定义）
+- **RAG 行为控制（节选）**
+  - `USE_LANGCHAIN`：是否开启 LangChain 实现（`True` / `False`）
+  - `USE_ADVANCED_RAG`：是否开启 LlamaIndex 查询变换
+  - `RAG_CONFIDENCE_THRESHOLD`：低于该置信度时才返回检索上下文
+  - `RAG_USE_BM25`：是否启用 BM25 全文检索
 
-### 启动方式
+更多配置可在 `backend/app/core/config.py` 中查看。
 
-**1. Docker 一键启动（推荐）**
+---
 
-```bash
-cd multi-model-rag
-docker-compose up -d --build
-```
+## 本地启动
 
-- 后端 API：http://localhost:8000  
-- API 文档：http://localhost:8000/docs  
-- MinIO 控制台：http://localhost:9001（用户名/密码见 `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`）
-
-数据库表在后端首次启动时自动创建。
-
-**2. 本地启动**
-
-- 数据库用 MySQL、模型用阿里云、存储用远程服务时，见 **[本地启动（MySQL与远程存储）](./docs/09-本地启动（MySQL与远程存储）.md)**。
-- **前后端分别启动**：见 **[前后端启动步骤](./docs/10-前后端启动步骤.md)**。
-
-**3. 本地开发简要步骤**
-
-- **后端**：`cd backend` → `pip install -r requirements.txt`（首次）→ `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
-  - **浏览器助手**：需在 backend 环境中执行一次 `playwright install`
-  - **电脑管家**：需安装 `pyautogui`（已在 requirements.txt），且需在**有图形界面的环境**（如 Windows 桌面）运行
-- **前端**：`cd frontend` → `npm install`（首次）→ `npm run dev`
-
-前端默认 http://localhost:3000，会代理 `/api` 到后端 8000 端口。
-
-## 项目结构
-
-```
-multi-model-rag/
-├── skills/                    # 技能目录（OpenClaw 方式）
-│   └── <name>/SKILL.md        # 每个技能一个子目录，内含 SKILL.md（可含 frontmatter）
-├── backend/                   # 后端
-│   ├── app/
-│   │   ├── api/v1/            # API 路由（认证、文件、知识库、问答、计费、审计、MCP、浏览器助手、电脑管家等）
-│   │   ├── core/              # 配置、数据库、健康检查
-│   │   ├── models/            # 数据库模型
-│   │   ├── schemas/           # Pydantic 模型
-│   │   ├── services/          # 业务逻辑（RAG、LLM、skill_loader、steward_agent、computer_steward_agent、desktop_tools 等）
-│   │   └── tasks/             # Celery 任务
-│   ├── alembic/               # 数据库迁移
-│   └── requirements.txt
-├── frontend/                  # 前端
-│   ├── src/
-│   │   ├── components/        # 布局、错误边界等
-│   │   ├── pages/             # 首页、文件、知识库、问答、多模态检索、计费、审计、MCP、浏览器助手、电脑管家等
-│   │   ├── services/           # API 调用
-│   │   └── stores/             # 认证、主题等状态
-│   └── package.json
-├── docs/                      # 文档
-├── docker-compose.yml
-└── README.md
-```
-
-## 技能与管家说明
-
-### skills 技能（OpenClaw 方式）
-
-- 在项目根目录下创建 `skills` 目录，每个技能为子目录 `<name>/`，内含必选 **SKILL.md**：
-  - 支持 YAML frontmatter：`name`、`description`（用于摘要与列表）
-  - 正文为使用说明（工具名、参数、用法）
-- **浏览器助手**与**电脑管家**在 system prompt 中会注入「可用技能」摘要；需要某技能时先调用 `skill_load(skill_id)` 加载完整文档，再按文档使用对应工具（如 `file_write` 保存到 data 目录）。
-
-### 浏览器助手
-
-- 入口：前端「浏览器助手」→ 输入自然语言指令。
-- 能力：启动无头浏览器，打开 URL、填表、点击、获取页面文本/Cookie 等，并可调用 `file_write` 与 skills 技能。
-- 依赖：Playwright，需执行 `playwright install`。
-
-### 电脑管家
-
-- 入口：前端「电脑管家」→ 输入任务目标。
-- 能力：截取当前屏幕 → 视觉模型分析截图 → 决策下一步（点击、输入、滚动、按键等）→ 执行键鼠操作；可结合 `skill_list` / `skill_load` 使用 skills 能力。
-- 依赖：pyautogui，且需在**有图形界面的环境**（如 Windows 桌面）运行；视觉模型可通过 `VISION_MODEL` 配置，为空则使用 `LLM_MODEL`。
-
-## 文档
-
-- [需求分析](./docs/01-需求分析.md)
-- [技术选型](./docs/02-技术选型.md)
-- [系统架构设计](./docs/03-系统架构设计.md)
-- [价格策略](./docs/04-价格策略.md)
-- [部署方案](./docs/05-部署方案.md)
-- [实施步骤记录](./docs/06-实施步骤记录.md)
-- [项目总结](./docs/07-项目总结.md)
-- [环境与启动指南](./docs/08-环境与启动指南.md)
-- [本地启动（MySQL与远程存储）](./docs/09-本地启动（MySQL与远程存储）.md)
-- [前后端启动步骤](./docs/10-前后端启动步骤.md)
-- [优化方向建议](./docs/11-优化方向建议.md)
-- [anyio4 依赖升级](./docs/12-anyio4-依赖升级.md)
-- [项目完善策略与实施](./docs/13-项目完善策略与实施.md)
-
-## LangChain 改造说明
-
-项目已接入 LangChain，在保持原有 API 与行为的前提下：
-
-- **配置**：`.env` 或环境中设置 `USE_LANGCHAIN=True`（默认）则启用 LangChain；设为 `False` 则使用原生 OpenAI 调用。
-- **LLM**：`app.services.langchain_llm` 提供与 `llm_service` 一致的接口（`chat_completion`、`chat_completion_stream`、`chat_completion_with_tools`、`query_expand`、`expand_image_search_terms`），内部使用 `ChatOpenAI`（base_url + bind_tools）。
-- **RAG**：`app.services.langchain_rag` 提供基于 LangChain 的 RAG 生成链（prompt + LLM），检索逻辑仍由 `ChatService._rag_context` 完成；问答流程通过 `llm_service.chat_completion` 统一走 LangChain（当 `USE_LANGCHAIN=True`）。
-- **Advanced RAG（第二类）**：当 `USE_ADVANCED_RAG=true`（默认）时，检索阶段使用 **LlamaIndex** 做查询变换（多查询/改写），再经现有向量+全文+RRF+rerank 混合检索，生成阶段仍为 **LangChain** RAG 链。实现见 `app.services.advanced_rag_service`；关闭则回退为仅用配置的 `RAG_QUERY_EXPAND` 或原问单查询。
-- **浏览器助手**：当 `USE_LANGCHAIN=True` 时，`run_steward` 会调用 `langchain_steward_agent.run_steward_langchain`，使用 `create_tool_calling_agent` + `AgentExecutor` 执行任务；若 LangChain/Agent 依赖缺失则自动回退到原有「消息循环 + tool_calls」实现。
-- **电脑管家**：仍为「截图 → 视觉模型 + tool_calls → 键鼠执行」循环，其中 `chat_completion_with_tools` 在启用 LangChain 时已为 LangChain 实现。
-
-依赖见 `backend/requirements.txt`：`langchain-core`、`langchain-openai`、`langchain`、`langchain-community`；Advanced RAG 需 `llama-index-core`、`llama-index-llms-openai`、`llama-index-llms-openai-like`。
-
-## 开发
-
-### 后端
+### 1. 启动后端
 
 ```bash
 cd backend
 python -m venv venv
-# Windows: venv\Scripts\activate  |  Linux/macOS: source venv/bin/activate
+# Windows: venv\Scripts\activate
+# macOS / Linux: source venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+
+# 开发模式启动
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 前端
+- 后端默认监听 `http://localhost:8000`
+- OpenAPI 文档：`http://localhost:8000/docs`
+- 部分功能（如浏览器助手、电脑管家）需要额外依赖：
+  - 浏览器助手：在 backend 虚拟环境中执行一次 `playwright install`
+  - 电脑管家：依赖 `pyautogui`，需在有图形界面的环境（如 Windows 桌面）运行
+
+### 2. 启动前端
 
 ```bash
 cd frontend
@@ -197,22 +150,111 @@ npm install
 npm run dev
 ```
 
-## 测试
+- 前端默认：`http://localhost:6006`（以实际 `vite.config.ts` 为准）
+- 开发环境下 `/api` 会被代理到 `http://localhost:8000`
 
-- **后端**：`cd backend && pytest`
-- **前端**：`cd frontend && npm test`
+### 3. 可选：启动 Celery 任务队列
 
-## 部署
+若需要在后台异步执行长任务（如大批量文件处理），可以启动 Celery：
 
-- **Docker**：`docker-compose up -d`
-- **Kubernetes**：`kubectl apply -f k8s/`（如有）
+```bash
+cd backend
+celery -A app.celery_app worker -l info
+```
 
-详见 [部署方案](./docs/05-部署方案.md)。
+---
 
-## 许可证
+## 目录结构
 
-MIT License
+```text
+multi-model-rag/
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/                 # API 路由
+│   │   │   ├── auth.py             # 认证 / 用户
+│   │   │   ├── files.py            # 文件上传 / 管理
+│   │   │   ├── knowledge_bases.py  # 知识库管理
+│   │   │   ├── chat.py             # 问答接口
+│   │   │   ├── evaluation.py       # 召回率与 RAG 六大指标
+│   │   │   ├── search.py           # 检索与多模态检索
+│   │   │   ├── steward.py          # 浏览器助手
+│   │   │   ├── computer_steward.py # 电脑管家
+│   │   │   └── ...
+│   │   ├── core/                   # 配置、数据库、健康检查
+│   │   │   ├── config.py
+│   │   │   ├── database.py
+│   │   │   └── health.py
+│   │   ├── models/                 # SQLAlchemy ORM 模型（User / File / Chunk / KnowledgeBase 等）
+│   │   ├── schemas/                # Pydantic 模型（请求 / 响应）
+│   │   ├── services/               # 业务逻辑
+│   │   │   ├── chat_service.py             # 问答主流程（RAG、工具、联网等）
+│   │   │   ├── advanced_rag_service.py     # LlamaIndex Advanced RAG
+│   │   │   ├── recall_evaluation_service.py# 召回率评测
+│   │   │   ├── rag_metrics_service.py      # RAG 六大指标评测
+│   │   │   ├── vector_store.py             # 向量库封装
+│   │   │   ├── embedding_service.py        # 向量模型封装
+│   │   │   ├── llm_service.py              # LLM 统一调用
+│   │   │   ├── knowledge_base_service.py   # 知识库相关操作
+│   │   │   └── ...
+│   │   └── tasks/                  # Celery 任务（如 KB 相关异步任务）
+│   ├── run.py                      # 入口脚本
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── Chat.tsx                   # 问答页面
+│   │   │   ├── KnowledgeBases.tsx         # 知识库管理
+│   │   │   ├── RecallEvaluation.tsx       # 召回率评测
+│   │   │   ├── AdvancedRAGMetrics.tsx     # RAG 六大指标
+│   │   │   ├── ImageSearch.tsx            # 多模态检索
+│   │   │   └── ...
+│   │   ├── services/                      # 前端 API 调用封装
+│   │   ├── components/                    # 公共组件、布局
+│   │   └── stores/                        # 全局状态（认证、配置等）
+│   └── vite.config.ts
+├── skills/                        # skills 技能目录（若使用）
+├── docs/                          # 设计与部署文档
+└── README.md
+```
 
-## 贡献
+---
 
-欢迎提交 Issue 与 Pull Request。
+## RAG 流程与评测简介
+
+### 问答数据流（简要）
+
+1. 前端 `Chat` 页面发送问题与所选知识库 ID。
+2. 后端 `ChatService`：
+   - 根据配置决定是否启用 RAG、是否使用 Advanced RAG/LlamaIndex。
+   - 在向量库 + BM25 中检索候选片段，使用 RRF + Rerank 融合结果。
+   - 结合对话历史与（可选）联网检索结果构造上下文。
+3. 通过 `llm_service` 调用 LLM，生成回答。
+4. 返回回答、置信度与命中的片段信息，前端做可视化展示。
+
+### RAG 六大指标评测（简要）
+
+- 评测集由 `backend/data/rag_default_benchmarks.json` 或 `rag_metrics_defaults.py` 提供。
+- 后端的 `rag_metrics_service.py` 与 `recall_evaluation_service.py` 负责：
+  - 并发检索 / 并发构造上下文。
+  - 使用固定输入/输出格式一次调用 LLM（批量问题统一回答）。
+  - 在本地对每条结果做判分与指标聚合。
+- 前端 `AdvancedRAGMetrics.tsx` 提供一键评测界面与可视化展示。
+
+---
+
+## 开发、测试与部署
+
+- **后端开发**：见「本地启动」小节命令。
+- **前端开发**：`cd frontend && npm install && npm run dev`。
+- **测试**：
+  - 后端：`cd backend && pytest`（若已编写测试）。
+  - 前端：`cd frontend && npm test`（若已配置测试脚本）。
+- **部署**：
+  - 可通过 Docker / K8s 等方式部署（参考 `docs/05-部署方案.md` 与你当前的实际部署脚本）。
+
+---
+
+## 许可证与贡献
+
+- 本项目使用 MIT License（如需，可在根目录更新 LICENSE 文件）。
+- 欢迎提 Issue 与 Pull Request，一起完善 RAG 流程与评测能力。
