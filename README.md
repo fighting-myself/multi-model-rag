@@ -171,10 +171,11 @@ multi-model-rag/
 - **配置**：`.env` 或环境中设置 `USE_LANGCHAIN=True`（默认）则启用 LangChain；设为 `False` 则使用原生 OpenAI 调用。
 - **LLM**：`app.services.langchain_llm` 提供与 `llm_service` 一致的接口（`chat_completion`、`chat_completion_stream`、`chat_completion_with_tools`、`query_expand`、`expand_image_search_terms`），内部使用 `ChatOpenAI`（base_url + bind_tools）。
 - **RAG**：`app.services.langchain_rag` 提供基于 LangChain 的 RAG 生成链（prompt + LLM），检索逻辑仍由 `ChatService._rag_context` 完成；问答流程通过 `llm_service.chat_completion` 统一走 LangChain（当 `USE_LANGCHAIN=True`）。
+- **Advanced RAG（第二类）**：当 `USE_ADVANCED_RAG=true`（默认）时，检索阶段使用 **LlamaIndex** 做查询变换（多查询/改写），再经现有向量+全文+RRF+rerank 混合检索，生成阶段仍为 **LangChain** RAG 链。实现见 `app.services.advanced_rag_service`；关闭则回退为仅用配置的 `RAG_QUERY_EXPAND` 或原问单查询。
 - **浏览器助手**：当 `USE_LANGCHAIN=True` 时，`run_steward` 会调用 `langchain_steward_agent.run_steward_langchain`，使用 `create_tool_calling_agent` + `AgentExecutor` 执行任务；若 LangChain/Agent 依赖缺失则自动回退到原有「消息循环 + tool_calls」实现。
 - **电脑管家**：仍为「截图 → 视觉模型 + tool_calls → 键鼠执行」循环，其中 `chat_completion_with_tools` 在启用 LangChain 时已为 LangChain 实现。
 
-依赖见 `backend/requirements.txt`：`langchain-core`、`langchain-openai`、`langchain`、`langchain-community`。
+依赖见 `backend/requirements.txt`：`langchain-core`、`langchain-openai`、`langchain`、`langchain-community`；Advanced RAG 需 `llama-index-core`、`llama-index-llms-openai`、`llama-index-llms-openai-like`。
 
 ## 开发
 

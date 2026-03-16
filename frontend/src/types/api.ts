@@ -347,3 +347,21 @@ export interface BenchmarkDatasetListResponse {
   page: number
   page_size: number
 }
+
+/** Advanced RAG 单条指标说明（六大指标） */
+export interface RAGMetricItem {
+  priority: number
+  id: string
+  name: string
+  name_en: string
+  description: string
+  tip: string
+  link: string | null
+  unit: string | null
+}
+
+/** Advanced RAG 六大指标接口 */
+export interface RAGMetricsResponse {
+  metrics: RAGMetricItem[]
+  latency_standards: Record<string, string>
+}

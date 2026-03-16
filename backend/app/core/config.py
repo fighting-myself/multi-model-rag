@@ -146,7 +146,7 @@ class Settings(BaseSettings):
     RAG_CONFIDENCE_THRESHOLD: float = 0.6
     RRF_K: int = 60  # RRF混合打分的k值
     RAG_USE_BM25: bool = True  # 全文检索使用 BM25 打分（否则仅关键词计数）
-    RAG_QUERY_EXPAND: bool = True  # 多查询/查询改写
+    RAG_QUERY_EXPAND: bool = False  # 多查询/查询改写（会多一次 LLM，增加约 10s+ 首字延迟，默认关）
     RAG_QUERY_EXPAND_COUNT: int = 2  # 改写子问题数量（不含原问）
     RAG_CONTEXT_WINDOW_EXPAND: int = 1  # 检索后向左右各扩展 N 个相邻块（0=不扩展）
     RAG_IMAGE_SEARCH_EXPAND_TERMS: bool = True  # 以文搜图时用 LLM 扩展同义/相关词（狗→哈士奇/犬等）提高全文召回
@@ -158,6 +158,14 @@ class Settings(BaseSettings):
     
     # LangChain：是否使用 LangChain 封装 LLM/RAG/Agent（True 时走 langchain_llm 与 LangChain 链）
     USE_LANGCHAIN: bool = True
+    # Advanced RAG（第二类）：是否使用 LlamaIndex 查询变换 + 现有混合检索 + LangChain 生成
+    USE_ADVANCED_RAG: bool = True
+    # Advanced RAG 下是否启用「查询变换」多查询改写（会多一次 LLM 调用，增加约 5–15s 首字延迟，默认关）
+    ADVANCED_RAG_QUERY_TRANSFORM: bool = False
+    # 仅当问题长度 >= 该字符数时才做查询变换（避免短句如「你是什么模型」也多一次调用），默认 20
+    ADVANCED_RAG_QUERY_TRANSFORM_MIN_LEN: int = 20
+    # 未选知识库时是否跳过检索（直接空上下文答，首字延迟≈仅 LLM；默认 True 以降低 19s+ 延迟）
+    RAG_SKIP_WHEN_NO_KB_SELECTED: bool = True
 
     # 日志配置
     LOG_LEVEL: str = "INFO"

@@ -227,23 +227,28 @@ class ChatService:
         top_k: int = 10,
         use_rerank: bool = True,
         use_hybrid: bool = True,
+        optional_queries: Optional[List[str]] = None,
     ) -> tuple[str, float, Optional[str], List[Chunk]]:
         """根据用户问题在知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。
         
+        optional_queries: 若提供则直接用作多查询列表（Advanced RAG 由 LlamaIndex 生成），否则用 query_expand。
         Returns:
             (context, confidence, max_confidence_context, selected_chunks): 
             上下文、置信度、最高置信度对应单段、用于溯源的 chunk 列表
         """
         import logging
         
-        # 多查询：原问 + 改写/子问题（可选）
-        queries = [message]
-        if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
-            try:
-                extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
-                queries.extend(extra)
-            except Exception:
-                pass
+        # 多查询：优先使用 Advanced RAG 传入的 optional_queries，否则原问 + 改写/子问题
+        if optional_queries:
+            queries = list(optional_queries)
+        else:
+            queries = [message]
+            if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
+                try:
+                    extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
+                    queries.extend(extra)
+                except Exception:
+                    pass
         
         k = settings.RRF_K
         chunk_rrf_scores: Dict[int, float] = {}
@@ -351,11 +356,42 @@ class ChatService:
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
         return (context, max_conf, max_conf_context, chunk_list)
 
+    async def get_rag_context_for_eval(
+        self,
+        message: str,
+        user_id: int,
+        knowledge_base_id: Optional[int] = None,
+        knowledge_base_ids: Optional[List[int]] = None,
+        top_k: int = 10,
+    ) -> str:
+        """供评测使用：仅返回单条 query 的 RAG 检索上下文，不调用 LLM。"""
+        no_kb = not knowledge_base_id and not (knowledge_base_ids and len(knowledge_base_ids))
+        if no_kb:
+            return ""
+        try:
+            if knowledge_base_id:
+                ctx, _, _, _ = await self._rag_context(
+                    message, knowledge_base_id, top_k=top_k, use_rerank=True, use_hybrid=True, optional_queries=None
+                )
+                return ctx or ""
+            if knowledge_base_ids:
+                ctx, _, _, _ = await self._rag_context_kb_ids(message, knowledge_base_ids, user_id, top_k=top_k)
+                return ctx or ""
+            ctx, _, _, _ = await self._rag_context_all_kbs(message, user_id, top_k=top_k)
+            return ctx or ""
+        except Exception:
+            return ""
+
     async def _rag_context_all_kbs(
-        self, message: str, user_id: int, top_k: int = 10
+        self,
+        message: str,
+        user_id: int,
+        top_k: int = 10,
+        optional_queries: Optional[List[str]] = None,
     ) -> tuple[str, float, Optional[str], List[Chunk]]:
         """在所有知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。
         
+        optional_queries: 若提供则直接用作多查询列表（Advanced RAG 由 LlamaIndex 生成）。
         Returns:
             (context, confidence, max_confidence_context, selected_chunks)
         """
@@ -375,13 +411,16 @@ class ChatService:
         if not kb_ids:
             return ("", 0.0, None, [])
         
-        queries = [message]
-        if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
-            try:
-                extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
-                queries.extend(extra)
-            except Exception:
-                pass
+        if optional_queries:
+            queries = list(optional_queries)
+        else:
+            queries = [message]
+            if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
+                try:
+                    extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
+                    queries.extend(extra)
+                except Exception:
+                    pass
         k = settings.RRF_K
         chunk_rrf_scores = {}
         vector_chunk_map = {}
@@ -502,19 +541,28 @@ class ChatService:
         return (context, max_conf, max_conf_context, chunk_list)
 
     async def _rag_context_kb_ids(
-        self, message: str, kb_ids: List[int], user_id: int, top_k: int = 10
+        self,
+        message: str,
+        kb_ids: List[int],
+        user_id: int,
+        top_k: int = 10,
+        optional_queries: Optional[List[str]] = None,
     ) -> tuple[str, float, Optional[str], List[Chunk]]:
-        """在指定的多个知识库中检索最相关上下文；逻辑同 _rag_context_all_kbs，仅 kb_ids 由调用方传入。"""
+        """在指定的多个知识库中检索最相关上下文；逻辑同 _rag_context_all_kbs，仅 kb_ids 由调用方传入。
+        optional_queries: 若提供则直接用作多查询列表（Advanced RAG 由 LlamaIndex 生成）。"""
         if not kb_ids:
             return ("", 0.0, None, [])
         import logging
-        queries = [message]
-        if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
-            try:
-                extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
-                queries.extend(extra)
-            except Exception:
-                pass
+        if optional_queries:
+            queries = list(optional_queries)
+        else:
+            queries = [message]
+            if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
+                try:
+                    extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
+                    queries.extend(extra)
+                except Exception:
+                    pass
         k = settings.RRF_K
         chunk_rrf_scores: Dict[int, float] = {}
         vector_chunk_map: Dict[int, Chunk] = {}
@@ -772,13 +820,14 @@ class ChatService:
         message: str,
         conversation_id: Optional[int] = None,
         knowledge_base_id: Optional[int] = None,
+        knowledge_base_ids: Optional[List[int]] = None,
         stream: bool = False,
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
         attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> ChatResponse:
-        """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史；工具分 MCP 与 Skills 两档开关。"""
+        """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史；支持单库 knowledge_base_id 或多库 knowledge_base_ids。"""
         import logging
         conv = None
         try:
@@ -1002,7 +1051,55 @@ class ChatService:
                 tool_results, tools_used = "", []
 
             # 2) RAG 上下文（知识库检索，可由前端关闭；支持多选 knowledge_base_ids）
-            if enable_rag and knowledge_base_ids:
+            # 未选知识库时若开启「跳过检索」则直接用空上下文，首字延迟≈仅 LLM
+            no_kb_selected = not knowledge_base_id and not (knowledge_base_ids and len(knowledge_base_ids))
+            skip_rag_when_no_kb = getattr(settings, "RAG_SKIP_WHEN_NO_KB_SELECTED", True)
+            if enable_rag and no_kb_selected and skip_rag_when_no_kb:
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+                retrieved_context_original = ""
+            elif enable_rag and getattr(settings, "USE_ADVANCED_RAG", False):
+                try:
+                    from app.services.advanced_rag_service import retrieve_advanced
+                    rag_context, rag_confidence, max_confidence_context, selected_chunks = await retrieve_advanced(
+                        self,
+                        message,
+                        conv.user_id,
+                        knowledge_base_id=knowledge_base_id,
+                        knowledge_base_ids=knowledge_base_ids,
+                        top_k=10,
+                        use_llamaindex_transform=getattr(settings, "ADVANCED_RAG_QUERY_TRANSFORM", False),
+                        expand_count=getattr(settings, "RAG_QUERY_EXPAND_COUNT", 2),
+                    )
+                    retrieved_context_original = rag_context
+                    if not rag_context.strip():
+                        _kb_ids = knowledge_base_ids or ([knowledge_base_id] if knowledge_base_id else None)
+                        if not _kb_ids:
+                            _kb_result = await self.db.execute(
+                                select(KnowledgeBase.id).where(KnowledgeBase.user_id == conv.user_id)
+                            )
+                            _kb_ids = [r[0] for r in _kb_result.all()]
+                        if _kb_ids:
+                            try:
+                                fallback = await self.db.execute(
+                                    select(Chunk).where(
+                                        Chunk.knowledge_base_id.in_(_kb_ids),
+                                        Chunk.content != "",
+                                    ).order_by(Chunk.id).limit(20)
+                                )
+                                chunks = fallback.scalars().all()
+                                if chunks:
+                                    rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
+                                    retrieved_context_original = rag_context
+                                    rag_confidence = 0.5
+                                    selected_chunks = chunks
+                            except Exception:
+                                pass
+                    if not rag_context.strip():
+                        rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
+                except Exception as e:
+                    logging.warning(f"Advanced RAG 检索失败: {e}，回退为普通 RAG")
+                    rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+            elif enable_rag and knowledge_base_ids:
                 try:
                     rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_kb_ids(
                         message, knowledge_base_ids, conv.user_id, top_k=10
@@ -1201,8 +1298,11 @@ class ChatService:
         attachments_meta: Optional[List[Dict[str, Any]]] = None,
         content_for_save: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources）；支持多选知识库 knowledge_base_ids。"""
+        """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources、ttft_ms、e2e_ms）；支持多选知识库 knowledge_base_ids。"""
         import logging
+        import time
+        t_start = time.perf_counter()
+        first_token_time: Optional[float] = None
         # 多选时用第一个作为会话展示用
         first_kb_id = (knowledge_base_ids[0] if knowledge_base_ids else None) or knowledge_base_id
         conv = None
@@ -1248,7 +1348,7 @@ class ChatService:
         else:
             tool_results, tools_used = "", []
 
-        # 2) RAG + 历史上下文（可由前端关闭 RAG）
+        # 2) RAG + 历史上下文（可由前端关闭 RAG）；未选知识库时可跳过检索以降低首字延迟
         rag_context = ""
         rag_confidence = 0.0
         low_confidence_warning = ""
@@ -1256,7 +1356,51 @@ class ChatService:
         selected_chunks: List[Chunk] = []
         web_retrieved_context = ""
         web_sources_list: List[Dict[str, str]] = []
-        if enable_rag and knowledge_base_ids:
+        _no_kb = not knowledge_base_id and not (knowledge_base_ids and len(knowledge_base_ids))
+        _skip_when_no_kb = getattr(settings, "RAG_SKIP_WHEN_NO_KB_SELECTED", True)
+        if enable_rag and _no_kb and _skip_when_no_kb:
+            pass  # 保持空上下文，首字延迟≈仅 LLM
+        elif enable_rag and getattr(settings, "USE_ADVANCED_RAG", False):
+            try:
+                from app.services.advanced_rag_service import retrieve_advanced
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = await retrieve_advanced(
+                    self,
+                    message,
+                    user_id,
+                    knowledge_base_id=knowledge_base_id,
+                    knowledge_base_ids=knowledge_base_ids,
+                    top_k=10,
+                    use_llamaindex_transform=getattr(settings, "ADVANCED_RAG_QUERY_TRANSFORM", False),
+                    expand_count=getattr(settings, "RAG_QUERY_EXPAND_COUNT", 2),
+                )
+                if not rag_context.strip():
+                    _kb_ids = knowledge_base_ids or ([knowledge_base_id] if knowledge_base_id else None)
+                    if not _kb_ids:
+                        _kb_result = await self.db.execute(
+                            select(KnowledgeBase.id).where(KnowledgeBase.user_id == user_id)
+                        )
+                        _kb_ids = [r[0] for r in _kb_result.all()]
+                    if _kb_ids:
+                        try:
+                            fallback = await self.db.execute(
+                                select(Chunk).where(
+                                    Chunk.knowledge_base_id.in_(_kb_ids),
+                                    Chunk.content != "",
+                                ).order_by(Chunk.id).limit(20)
+                            )
+                            chunks = fallback.scalars().all()
+                            if chunks:
+                                rag_context = "\n\n".join(c.content for c in chunks if c.content)[:8000]
+                                rag_confidence = 0.5
+                                selected_chunks = chunks
+                        except Exception:
+                            pass
+                if not rag_context.strip():
+                    rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」。]"
+            except Exception as e:
+                logging.warning(f"Advanced RAG 检索失败: {e}，回退为普通 RAG")
+                rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+        elif enable_rag and knowledge_base_ids:
             try:
                 rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_kb_ids(
                     message, knowledge_base_ids, user_id, top_k=10
@@ -1357,6 +1501,8 @@ class ChatService:
         full_content: List[str] = []
         try:
             async for delta in llm_chat_stream(user_content=user_content_llm, context=full_context.strip()):
+                if first_token_time is None:
+                    first_token_time = time.perf_counter()
                 full_content.append(delta)
                 yield {"type": "token", "content": delta}
         except Exception:
@@ -1399,6 +1545,9 @@ class ChatService:
         )
         return_confidence = rag_confidence if has_real else None
         web_sources_response = [WebSourceItem(**w) for w in web_sources_list] if web_sources_list else None
+        t_end = time.perf_counter()
+        ttft_ms = round((first_token_time - t_start) * 1000, 0) if first_token_time is not None else None
+        e2e_ms = round((t_end - t_start) * 1000, 0)
         yield {
             "type": "done",
             "conversation_id": conv.id,
@@ -1407,6 +1556,8 @@ class ChatService:
             "tools_used": tools_used if tools_used else None,
             "web_retrieved_context": web_retrieved_context or None,
             "web_sources": [s.model_dump() for s in web_sources_response] if web_sources_response else None,
+            "ttft_ms": ttft_ms,
+            "e2e_ms": e2e_ms,
         }
     
     async def get_conversations(

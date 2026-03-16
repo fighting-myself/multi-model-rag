@@ -51,6 +51,12 @@ langchain-openai>=1.0.0
 langchain-text-splitters>=1.0.0
 # 浏览器助手 create_tool_calling_agent + AgentExecutor 在 1.x 中已移至 langchain-classic
 langchain-classic>=1.0.0
+# LlamaIndex（Advanced RAG：查询变换、多步检索等，与 LangChain 配合）
+# llms-openai 0.2.x 要求 core<0.12，故用 0.11.x
+llama-index-core>=0.11.0,<0.12.0
+llama-index-llms-openai>=0.2.0
+# OpenAI 兼容端点（豆包/百炼等）用 OpenAILike
+llama-index-llms-openai-like>=0.2.0
 sentence-transformers==2.2.2
 transformers==4.35.2
 torch==2.10.0

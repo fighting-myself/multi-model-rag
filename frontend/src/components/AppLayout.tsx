@@ -51,6 +51,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
     { key: '/image-search', icon: <PictureOutlined />, label: '多模态检索' },
     { key: '/recall-evaluation', icon: <LineChartOutlined />, label: '召回率评测' },
+    { key: '/advanced-rag-metrics', icon: <BulbOutlined />, label: 'RAG 指标' },
     { key: '/mcp-servers', icon: <ApiOutlined />, label: 'MCP 工具' },
     { key: '/steward', icon: <RobotOutlined />, label: '浏览器助手' },
     { key: '/computer-steward', icon: <DesktopOutlined />, label: '电脑管家' },

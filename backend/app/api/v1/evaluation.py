@@ -18,14 +18,233 @@ from app.schemas.evaluation import (
     BenchmarkDatasetResponse,
     BenchmarkDatasetListResponse,
     BenchmarkItem,
+    RAGMetricsResponse,
+    RAGMetricItem,
+    RunAccuracyRequest,
+    RunRecallRequest,
+    RunPrecisionRequest,
+    RunLatencyRequest,
+    RunHallucinationRequest,
+    RunQPSRequest,
 )
 from app.api.v1.auth import get_current_active_user
 from app.schemas.auth import UserResponse
 from app.services.recall_evaluation_service import run_recall_evaluation
+from app.services.rag_metrics_defaults import get_default_benchmarks
+from app.services.rag_metrics_service import (
+    run_accuracy,
+    run_recall,
+    run_precision,
+    run_latency,
+    run_hallucination,
+    run_qps,
+)
 from app.models.benchmark_dataset import BenchmarkDataset
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Advanced RAG 六大指标说明（按优先级）
+RAG_METRICS_DEFINITIONS = [
+    RAGMetricItem(
+        priority=1,
+        id="accuracy",
+        name="答案准确率 / 正确率",
+        name_en="Accuracy / Answer Correctness",
+        description="看模型回答对不对、有没有幻觉。企业最关心能不能用、敢不敢给客户用。",
+        tip="面试常说：我们重点评估答案准确率、幻觉率、事实一致性。",
+        link=None,
+        unit="%",
+    ),
+    RAGMetricItem(
+        priority=2,
+        id="recall",
+        name="检索召回率 Recall",
+        name_en="Recall@1 / @3 / @5 / @10",
+        description="RAG 效果的根，召回差则答案必错。看正确的文档块有没有被检索出来。",
+        tip="企业做 RAG 优化，90% 时间都在提召回。",
+        link="/recall-evaluation",
+        unit="%",
+    ),
+    RAGMetricItem(
+        priority=3,
+        id="precision",
+        name="检索精准度 Precision",
+        name_en="Precision",
+        description="看检索回来的内容有没有用。召回高但精准低 → 给模型喂一堆垃圾 → 答案乱。",
+        tip="需与召回平衡，避免噪声过多。",
+        link=None,
+        unit="%",
+    ),
+    RAGMetricItem(
+        priority=4,
+        id="latency",
+        name="首包延迟 / 首字延迟",
+        name_en="TTFT & E2E Latency",
+        description="首字延迟 TTFT（Time To First Token）、端到端延迟 E2E。用户体验生命线。",
+        tip="召回、准确率再高，慢到 3s+ 直接不能上线。",
+        link=None,
+        unit="ms",
+    ),
+    RAGMetricItem(
+        priority=5,
+        id="hallucination",
+        name="幻觉率 Hallucination Rate",
+        name_en="Hallucination Rate",
+        description="看模型瞎编、捏造、引用错误的比例。企业风控红线。",
+        tip="金融、法律、医疗：必须 < 1%。",
+        link=None,
+        unit="%",
+    ),
+    RAGMetricItem(
+        priority=6,
+        id="qps",
+        name="并发能力 QPS",
+        name_en="QPS / Concurrency",
+        description="看系统能不能扛量。如 10/20/50 并发下的延迟、失败率。",
+        tip="压测与容量规划必备。",
+        link=None,
+        unit="req/s",
+    ),
+]
+
+
+@router.get("/rag-metrics", response_model=RAGMetricsResponse)
+async def get_rag_metrics(
+    current_user: UserResponse = Depends(get_current_active_user),
+):
+    """获取 RAG 六大指标说明与参考标准（用于前端展示）。"""
+    return RAGMetricsResponse(
+        metrics=RAG_METRICS_DEFINITIONS,
+        latency_standards={
+            "internal": "内网/内部工具：≤ 1~2 秒",
+            "toc": "ToC 产品/对话助手：≤ 800ms~1s",
+            "search": "搜索类：≤ 500ms",
+        },
+    )
+
+
+@router.get("/rag-metrics/defaults")
+async def get_rag_metrics_defaults(
+    current_user: UserResponse = Depends(get_current_active_user),
+):
+    """获取默认评测集（若不存在则生成并保存）。用于一键评测。"""
+    return get_default_benchmarks()
+
+
+@router.post("/rag-metrics/run-accuracy")
+async def run_rag_accuracy(
+    body: RunAccuracyRequest,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键评测：答案准确率。使用默认 Q&A 集跑 RAG，与期望答案对比。"""
+    try:
+        return await run_accuracy(
+            db=db,
+            user_id=current_user.id,
+            knowledge_base_id=body.knowledge_base_id,
+            knowledge_base_ids=body.knowledge_base_ids,
+        )
+    except Exception as e:
+        logger.exception("准确率评测失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rag-metrics/run-recall")
+async def run_rag_recall(
+    body: RunRecallRequest,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键评测：召回率。使用默认 benchmark 在指定知识库上运行。"""
+    try:
+        return await run_recall(
+            db=db,
+            user_id=current_user.id,
+            knowledge_base_id=body.knowledge_base_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("召回率评测失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rag-metrics/run-precision")
+async def run_rag_precision(
+    body: RunPrecisionRequest,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键评测：精准度。同召回检索，额外计算 Precision@k。"""
+    try:
+        return await run_precision(
+            db=db,
+            user_id=current_user.id,
+            knowledge_base_id=body.knowledge_base_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("精准度评测失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rag-metrics/run-latency")
+async def run_rag_latency(
+    body: RunLatencyRequest,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键评测：首字/端到端延迟。发送数次流式请求，汇总 TTFT、E2E。"""
+    try:
+        return await run_latency(
+            db=db,
+            user_id=current_user.id,
+            num_samples=body.num_samples,
+        )
+    except Exception as e:
+        logger.exception("延迟评测失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rag-metrics/run-hallucination")
+async def run_rag_hallucination(
+    body: RunHallucinationRequest,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键评测：幻觉率。用默认集跑 RAG，简单判回答是否偏离期望/上下文。"""
+    try:
+        return await run_hallucination(
+            db=db,
+            user_id=current_user.id,
+            knowledge_base_id=body.knowledge_base_id,
+            knowledge_base_ids=body.knowledge_base_ids,
+        )
+    except Exception as e:
+        logger.exception("幻觉率评测失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rag-metrics/run-qps")
+async def run_rag_qps(
+    body: RunQPSRequest,
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键评测：并发能力。多协程同时发请求，统计 QPS、延迟、失败率。"""
+    try:
+        return await run_qps(
+            db=db,
+            user_id=current_user.id,
+            concurrency=body.concurrency,
+            requests_per_worker=body.requests_per_worker,
+        )
+    except Exception as e:
+        logger.exception("QPS 评测失败")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/recall/run", response_model=RecallRunResponse)
