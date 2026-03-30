@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings
 from app.schemas.chat import ChatMessage, ChatResponse, ConversationResponse, ConversationListResponse, MessageResponse
 from app.schemas.auth import UserResponse
@@ -56,6 +56,7 @@ async def chat_completion(
         enable_mcp_tools = message.enable_mcp_tools if message.enable_mcp_tools is not None else default_tools
         enable_skills_tools = message.enable_skills_tools if message.enable_skills_tools is not None else default_tools
         enable_rag = message.enable_rag if message.enable_rag is not None else True
+        super_mode = message.super_mode if message.super_mode is not None else False
         attachments_list = None
         if message.attachments:
             attachments_list = [
@@ -71,6 +72,7 @@ async def chat_completion(
             enable_mcp_tools=enable_mcp_tools,
             enable_skills_tools=enable_skills_tools,
             enable_rag=enable_rag,
+            super_mode=super_mode,
             attachments=attachments_list,
         )
         return response
@@ -194,7 +196,6 @@ async def chat_completion_stream(
     conversation_id: Optional[int] = None,
     knowledge_base_id: Optional[int] = None,
     current_user: UserResponse = Depends(require_chat_rate_limit),
-    db: AsyncSession = Depends(get_db)
 ):
     """发送消息（流式）。支持 application/json（含 attachments base64）或 multipart/form-data（直接上传文件，服务端提取文本后走 RAG）。"""
     content = ""
@@ -236,6 +237,7 @@ async def chat_completion_stream(
     enable_mcp_tools = body.get("enable_mcp_tools") if body.get("enable_mcp_tools") is not None else (enable_tools if enable_tools is not None else True)
     enable_skills_tools = body.get("enable_skills_tools") if body.get("enable_skills_tools") is not None else (enable_tools if enable_tools is not None else True)
     enable_rag = body.get("enable_rag") if body.get("enable_rag") is not None else True
+    super_mode = body.get("super_mode") if body.get("super_mode") is not None else False
 
     raw_attachments = body.get("attachments")
     attachments_list = []
@@ -294,30 +296,34 @@ async def chat_completion_stream(
                     meta["extracted_text"] = got["extracted_text"]
             attachments_meta.append(meta)
 
-    chat_service = ChatService(db)
-
     async def generate():
         import logging
         last_conv_id: Optional[int] = None
+        chat_stream_gen = None
         try:
-            async for event in chat_service.chat_stream(
-                user_id=current_user.id,
-                message=content,
-                conversation_id=conv_id,
-                knowledge_base_id=kb_id,
-                knowledge_base_ids=kb_ids,
-                enable_mcp_tools=enable_mcp_tools,
-                enable_skills_tools=enable_skills_tools,
-                enable_rag=enable_rag,
-                attachments=attachments_list,
-                attachments_meta=attachments_meta,
-                content_for_save=content_for_save,
-            ):
-                if await request.is_disconnected():
-                    break
-                if isinstance(event, dict) and event.get("type") == "done" and event.get("conversation_id") is not None:
-                    last_conv_id = event["conversation_id"]
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            # 流式独立 session：响应结束/中断即归还连接，避免连接被 GC 清理告警
+            async with AsyncSessionLocal() as db:
+                chat_service = ChatService(db)
+                chat_stream_gen = chat_service.chat_stream(
+                    user_id=current_user.id,
+                    message=content,
+                    conversation_id=conv_id,
+                    knowledge_base_id=kb_id,
+                    knowledge_base_ids=kb_ids,
+                    enable_mcp_tools=enable_mcp_tools,
+                    enable_skills_tools=enable_skills_tools,
+                    enable_rag=enable_rag,
+                    super_mode=super_mode,
+                    attachments=attachments_list,
+                    attachments_meta=attachments_meta,
+                    content_for_save=content_for_save,
+                )
+                async for event in chat_stream_gen:
+                    if await request.is_disconnected():
+                        break
+                    if isinstance(event, dict) and event.get("type") == "done" and event.get("conversation_id") is not None:
+                        last_conv_id = event["conversation_id"]
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             if not await request.is_disconnected():
                 yield "data: [DONE]\n\n"
             if last_conv_id is not None:
@@ -329,6 +335,12 @@ async def chat_completion_stream(
                 err_msg = err_msg[:200] + "…"
             if not await request.is_disconnected():
                 yield f"data: {json.dumps({'type': 'error', 'message': err_msg}, ensure_ascii=False)}\n\n"
+        finally:
+            if chat_stream_gen is not None:
+                try:
+                    await chat_stream_gen.aclose()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         generate(),
@@ -337,6 +349,8 @@ async def chat_completion_stream(
             "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            # 显式禁用压缩，避免 GZipMiddleware/代理层对 SSE 分片缓冲，导致前端“批量崩出”
+            "Content-Encoding": "identity",
             "Content-Type": "text/event-stream; charset=utf-8",
         },
     )

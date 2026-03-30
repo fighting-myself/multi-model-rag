@@ -24,6 +24,7 @@ class ChatMessage(BaseModel):
     enable_mcp_tools: Optional[bool] = None   # True=开启 MCP 工具，False=关闭，None=用 enable_tools 或 True
     enable_skills_tools: Optional[bool] = None  # True=开启 Skills 技能（skill_list/skill_load/file_write），False=关闭，None=用 enable_tools 或 True
     enable_rag: Optional[bool] = None    # True=开启 RAG 增强上下文，False=关闭，None=默认 True
+    super_mode: Optional[bool] = None  # 豆包式超能模式：任务拆解 + 多轮检索/必要时浏览器自动化 + 结构化报告
     attachments: Optional[List[ChatMessageAttachment]] = None  # 多模态：图片等，url 为 data URL 或可访问的 https
 
 

@@ -76,10 +76,12 @@ function ThemeWrapper({ children }: { children: React.ReactNode }) {
   )
 }
 
+const RootWrap = import.meta.env.DEV ? React.Fragment : React.StrictMode
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  <RootWrap>
     <ThemeWrapper>
       <App />
     </ThemeWrapper>
-  </React.StrictMode>,
+  </RootWrap>,
 )

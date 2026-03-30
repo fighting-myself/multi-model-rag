@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card, List, message, Select, Drawer, Space, Popconfirm, Collapse, Modal, Switch } from 'antd'
-import { StopOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, VideoCameraOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined } from '@ant-design/icons'
+import { StopOutlined, MessageOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined, PictureOutlined, VideoCameraOutlined, GlobalOutlined, PaperClipOutlined, CloseOutlined, LoadingOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import api, { streamPost, uploadChatFile } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -52,6 +52,15 @@ function parseContentWithCharts(content: string | undefined): Array<{ type: 'tex
   return parts
 }
 
+/** 豆包式时长：不足 60 秒用「12s」，否则「1m 24s」 */
+function formatThinkingDuration(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '0s'
+  if (sec < 60) return `${Math.max(0, Math.round(sec))}s`
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}m ${s}s`
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
@@ -90,10 +99,20 @@ export default function Chat() {
   const [attachmentConfig, setAttachmentConfig] = useState<ChatAttachmentConfig | null>(null)
   const [attachmentList, setAttachmentList] = useState<Array<{ id: string; file: File; dataUrl?: string; isImage: boolean; isVideo: boolean; fileName: string; uploadId?: string }>>([])
   const [loading, setLoading] = useState(false)
+  // 每条 assistant 消息的思考面板展开状态
+  const [thinkingOpenMap, setThinkingOpenMap] = useState<Record<number, boolean>>({})
+  /** 当前正在流式生成中的助手消息 id（用于思考区标题「思考中」与计时） */
+  const [streamingAssistantId, setStreamingAssistantId] = useState<number | null>(null)
+  /** 思考阶段已过秒数（仅当 loading 且存在流式助手消息时递增） */
+  const [thinkingLiveSec, setThinkingLiveSec] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const dragCounterRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const tokenRafRef = useRef<number | null>(null)
+  const traceRafRef = useRef<number | null>(null)
+  const scrollRafRef = useRef<number | null>(null)
+  const isMountedRef = useRef(true)
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseListResponse['knowledge_bases']>([])
   const [selectedKbIds, setSelectedKbIds] = useState<number[]>([])
   const [conversations, setConversations] = useState<ConversationItem[]>([])
@@ -108,20 +127,58 @@ export default function Chat() {
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [sourcePreview, setSourcePreview] = useState<SourceItem | null>(null)
-  const [enableMcpTools, setEnableMcpTools] = useState(false)
-  const [enableSkillsTools, setEnableSkillsTools] = useState(false)
-  const [enableRag, setEnableRag] = useState(false)
+  // 超能模式固定启用：不需要 MCP/Skills/RAG 切换，由后端 Agent 决定调用链路
+  const enableMcpTools = false
+  const enableSkillsTools = false
+  const enableRag = false
+  const enableSuperMode = true
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const justSentMessageRef = useRef(false)
   const navigate = useNavigate()
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // 流式过程/思考逐字会高频触发 messages 更新，smooth 滚动会造成明显卡顿
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
   }
 
   useEffect(() => {
-    scrollToBottom()
+    return () => {
+      isMountedRef.current = false
+      // 离开 Chat 页面时，强制中断 SSE，避免后台 reader/动画继续占用主线程
+      abortControllerRef.current?.abort()
+      if (tokenRafRef.current != null) {
+        cancelAnimationFrame(tokenRafRef.current)
+        tokenRafRef.current = null
+      }
+      if (traceRafRef.current != null) {
+        cancelAnimationFrame(traceRafRef.current)
+        traceRafRef.current = null
+      }
+      if (scrollRafRef.current != null) {
+        cancelAnimationFrame(scrollRafRef.current)
+        scrollRafRef.current = null
+      }
+    }
+  }, [])
+
+  // 高频更新时最多每帧滚动一次，避免每次 setMessages 都触发 layout 抖动
+  useEffect(() => {
+    if (scrollRafRef.current != null) return
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null
+      scrollToBottom()
+    })
   }, [messages])
+
+  useEffect(() => {
+    if (!loading || streamingAssistantId == null) {
+      setThinkingLiveSec(0)
+      return
+    }
+    setThinkingLiveSec(0)
+    const id = window.setInterval(() => setThinkingLiveSec((s) => s + 1), 1000)
+    return () => clearInterval(id)
+  }, [loading, streamingAssistantId])
 
   useEffect(() => {
     api.get<KnowledgeBaseListResponse>('/knowledge-bases?page_size=100')
@@ -321,6 +378,7 @@ export default function Chat() {
     setLoading(true)
 
     const tempAssistantId = Date.now() + 1
+    setStreamingAssistantId(tempAssistantId)
     setMessages((prev: MessageItem[]) => [
       ...prev,
       {
@@ -350,6 +408,7 @@ export default function Chat() {
           enable_mcp_tools: enableMcpTools,
           enable_skills_tools: enableSkillsTools,
           enable_rag: enableRag,
+          super_mode: enableSuperMode,
           ...(attachmentsToSend.length ? { attachments: attachmentsToSend } : {}),
         },
         { signal: controller.signal }
@@ -362,24 +421,78 @@ export default function Chat() {
       let sources: SourceItem[] = []
       let webSources: WebSourceItem[] = []
       let webRetrievedContext: string | null = null
+      let traceEvents: Array<{ step?: string; title?: string; text?: string; data?: unknown }> = []
+      const traceCharQueue: Array<{ traceIndex: number; chars: string; pos: number }> = []
+      let traceDrainScheduled = false
+      const TRACE_CHARS_PER_FRAME = 16
+      const drainTraceQueue = () => {
+        if (!isMountedRef.current) return
+        traceDrainScheduled = false
+        if (traceCharQueue.length === 0) return
+        let left = TRACE_CHARS_PER_FRAME
+        const appendByIndex: Record<number, string> = {}
+        while (left > 0 && traceCharQueue.length > 0) {
+          const cur = traceCharQueue[0]
+          const rest = cur.chars.length - cur.pos
+          if (rest <= 0) {
+            traceCharQueue.shift()
+            continue
+          }
+          const take = Math.min(left, rest)
+          const piece = cur.chars.slice(cur.pos, cur.pos + take)
+          cur.pos += take
+          left -= take
+          appendByIndex[cur.traceIndex] = `${appendByIndex[cur.traceIndex] ?? ''}${piece}`
+          if (cur.pos >= cur.chars.length) {
+            traceCharQueue.shift()
+          }
+        }
+        const touched = Object.keys(appendByIndex)
+        if (touched.length > 0) {
+          traceEvents = traceEvents.map((t, idx) => {
+            const extra = appendByIndex[idx]
+            return extra ? { ...t, text: `${t.text ?? ''}${extra}` } : t
+          })
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempAssistantId
+                ? {
+                    ...m,
+                    agent_trace: traceEvents.length ? traceEvents : undefined,
+                  }
+                : m
+            )
+          )
+        }
+        if (traceCharQueue.length > 0) {
+          traceDrainScheduled = true
+          traceRafRef.current = requestAnimationFrame(drainTraceQueue)
+        }
+      }
       const tokenQueue: string[] = []
       let drainScheduled = false
+      const TOKEN_CHUNKS_PER_FRAME = 3
       const drainTokenQueue = () => {
+        if (!isMountedRef.current) return
         drainScheduled = false
         if (tokenQueue.length === 0) return
-        const token = tokenQueue.shift()!
+        let merged = ''
+        for (let i = 0; i < TOKEN_CHUNKS_PER_FRAME && tokenQueue.length > 0; i += 1) {
+          merged += tokenQueue.shift()!
+        }
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === tempAssistantId ? { ...m, content: (m.content || '') + token } : m
+            m.id === tempAssistantId ? { ...m, content: (m.content || '') + merged } : m
           )
         )
         if (tokenQueue.length > 0) {
           drainScheduled = true
-          requestAnimationFrame(drainTokenQueue)
+          tokenRafRef.current = requestAnimationFrame(drainTokenQueue)
         }
       }
 
       while (true) {
+          if (!isMountedRef.current) break
           const { done, value } = await reader.read()
           if (done) break
           buffer += decoder.decode(value, { stream: true })
@@ -399,12 +512,40 @@ export default function Chat() {
                 tools_used?: string[]
                 web_retrieved_context?: string | null
                 web_sources?: WebSourceItem[] | null
+                trace?: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
+                thinking_seconds?: number
               }
               if (event.type === 'token' && event.content) {
                 tokenQueue.push(event.content)
                 if (!drainScheduled) {
                   drainScheduled = true
-                  requestAnimationFrame(drainTokenQueue)
+                  tokenRafRef.current = requestAnimationFrame(drainTokenQueue)
+                }
+              } else if (event.type === 'trace') {
+                const delta = event.trace ?? []
+                for (const d of delta) {
+                  const rawText = d.text || d.title || '…'
+                  // 先插入空文本占位，再逐字填充
+                  traceEvents = [...(traceEvents ?? []), { ...d, text: '' }]
+                  traceCharQueue.push({
+                    traceIndex: traceEvents.length - 1,
+                    chars: rawText,
+                    pos: 0,
+                  })
+                }
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === tempAssistantId
+                      ? {
+                          ...m,
+                          agent_trace: traceEvents.length ? traceEvents : undefined,
+                        }
+                      : m
+                  )
+                )
+                if (!traceDrainScheduled && traceCharQueue.length > 0) {
+                  traceDrainScheduled = true
+                  traceRafRef.current = requestAnimationFrame(drainTraceQueue)
                 }
               } else if (event.type === 'done') {
                 newConvId = event.conversation_id ?? null
@@ -413,6 +554,12 @@ export default function Chat() {
                 webSources = event.web_sources ?? []
                 webRetrievedContext = event.web_retrieved_context ?? null
                 const toolsUsed = event.tools_used ?? []
+                const fromDone = event.trace ?? []
+                // 只在本地尚无 trace 时才用 done 的回填，避免把逐字动画“整段覆盖”
+                if (traceEvents.length === 0 && fromDone.length) {
+                  traceEvents = fromDone
+                }
+                const thinkingSec = event.thinking_seconds
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === tempAssistantId
@@ -423,6 +570,9 @@ export default function Chat() {
                           tools_used: toolsUsed.length ? toolsUsed : undefined,
                           web_sources: webSources.length ? webSources : undefined,
                           web_retrieved_context: webRetrievedContext ?? undefined,
+                          agent_trace: traceEvents.length ? traceEvents : m.agent_trace,
+                          thinking_seconds:
+                            thinkingSec !== undefined && thinkingSec !== null ? thinkingSec : m.thinking_seconds,
                         }
                       : m
                   )
@@ -437,16 +587,13 @@ export default function Chat() {
           }
         }
       justSentMessageRef.current = true
-      const finalConvId = currentConvId ?? newConvId
       if (!currentConvId && newConvId) {
         setCurrentConvId(newConvId)
       }
       try {
         await loadConversations(true)
-        // 重新拉取当前会话消息，使刚发送的那条带上服务端返回的 extracted_text，点文件可侧栏查看
-        if (finalConvId) {
-          await loadConversationMessages(finalConvId, false)
-        }
+        // 超能模式会带 agent_trace（仅流式返回，不落库），这里不强制重拉 messages，避免把 trace 覆盖掉。
+        // 如需附件 extracted_text，可手动切换会话触发刷新。
       } catch {
         // ignore
       }
@@ -462,7 +609,16 @@ export default function Chat() {
       setMessages((prev) => prev.filter((m) => m.id !== tempAssistantId))
     } finally {
       setLoading(false)
+      setStreamingAssistantId(null)
       abortControllerRef.current = null
+      if (tokenRafRef.current != null) {
+        cancelAnimationFrame(tokenRafRef.current)
+        tokenRafRef.current = null
+      }
+      if (traceRafRef.current != null) {
+        cancelAnimationFrame(traceRafRef.current)
+        traceRafRef.current = null
+      }
     }
   }
 
@@ -533,20 +689,7 @@ export default function Chat() {
           options={knowledgeBases.map((kb: KnowledgeBaseListResponse['knowledge_bases'][0]) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count || 0} 块）` }))}
           style={{ minWidth: 200 }}
         />
-        <Space split="|" style={{ color: 'var(--app-text-muted)', fontSize: 13 }}>
-          <Space size={6}>
-            <span>MCP 工具</span>
-            <Switch size="small" checked={enableMcpTools} onChange={setEnableMcpTools} />
-          </Space>
-          <Space size={6}>
-            <span>Skills 技能</span>
-            <Switch size="small" checked={enableSkillsTools} onChange={setEnableSkillsTools} />
-          </Space>
-          <Space size={6}>
-            <span>RAG 增强</span>
-            <Switch size="small" checked={enableRag} onChange={setEnableRag} />
-          </Space>
-        </Space>
+        {/* 超能模式固定启用：无需前端开关 */}
       </Space>
     </div>
 
@@ -724,6 +867,108 @@ export default function Chat() {
                                 </div>
                               )
                             )}
+                          </div>
+                        )}
+                        {/* 豆包式超能模式：思考过程在正文上方，可折叠；标题展示「思考中/已完成 (时长)」 */}
+                        {item.role === 'assistant' && item.agent_trace && item.agent_trace.length > 0 && (
+                          <div style={{ marginBottom: item.content?.trim() ? 12 : 0 }}>
+                            {(() => {
+                              const isAutoOpen = loading && streamingAssistantId === item.id && item.thinking_seconds == null
+                              const isOpen = thinkingOpenMap[item.id] ?? isAutoOpen
+                              const previewLines = item.agent_trace
+                                .map((t) => (t.text || t.title || '…').trim())
+                                .filter(Boolean)
+                                .slice(-3)
+                              const stablePreviewLines = [
+                                previewLines[0] || '',
+                                previewLines[1] || '',
+                                previewLines[2] || '',
+                              ]
+                              return (
+                                <>
+                                  <Collapse
+                                    key={`think-${item.id}-${item.thinking_seconds ?? 'live'}`}
+                                    size="small"
+                                    activeKey={isOpen ? ['agent_trace'] : []}
+                                    onChange={(keys) => {
+                                      const arr = Array.isArray(keys) ? keys : [keys]
+                                      const opened = arr.includes('agent_trace')
+                                      setThinkingOpenMap((prev) => ({ ...prev, [item.id]: opened }))
+                                    }}
+                                    items={[
+                                      {
+                                        key: 'agent_trace',
+                                        label: (
+                                          <span style={{ fontSize: 12, color: 'var(--app-text-muted)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                            {loading && streamingAssistantId === item.id && item.thinking_seconds == null && (
+                                              <LoadingOutlined spin />
+                                            )}
+                                            {typeof item.thinking_seconds === 'number'
+                                              ? `已完成 (${formatThinkingDuration(item.thinking_seconds)})`
+                                              : loading && streamingAssistantId === item.id
+                                                ? `思考中 (${thinkingLiveSec}s)`
+                                                : '思考过程'}
+                                          </span>
+                                        ),
+                                        children: (
+                                          <div
+                                            style={{
+                                              fontSize: 13,
+                                              color: 'var(--app-text-secondary)',
+                                              lineHeight: 1.75,
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                            }}
+                                          >
+                                            {item.agent_trace.map((t, i) => (
+                                              <p key={i} style={{ marginBottom: 12, marginTop: 0 }}>
+                                                {t.text || t.title || '…'}
+                                              </p>
+                                            ))}
+                                            {loading && streamingAssistantId === item.id && item.thinking_seconds == null && (
+                                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--app-text-muted)' }}>
+                                                <LoadingOutlined spin />
+                                                <span>正在检索/调用工具，请稍候...</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        ),
+                                      },
+                                    ]}
+                                  />
+                            {!isOpen && (
+                                    <div
+                                      style={{
+                                        marginTop: 8,
+                                        padding: '8px 12px',
+                                        borderRadius: 8,
+                                        background: 'var(--app-bg-subtle)',
+                                        border: '1px solid var(--app-border)',
+                                        color: 'var(--app-text-secondary)',
+                                        fontSize: 12,
+                                  lineHeight: '22px',
+                                  height: 82, // 固定三行高度，避免流式追加时边框抖动
+                                  boxSizing: 'border-box',
+                                      }}
+                                    >
+                                {stablePreviewLines.map((line, idx) => (
+                                        <div
+                                          key={idx}
+                                          style={{
+                                            whiteSpace: 'nowrap',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                      minHeight: 22,
+                                          }}
+                                        >
+                                    {line || '\u00A0'}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </>
+                              )
+                            })()}
                           </div>
                         )}
                         <div style={{ marginBottom: (item.max_confidence_context || item.retrieved_context) ? 12 : 0 }}>

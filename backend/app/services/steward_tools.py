@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.services.skill_loader import get_skills_summary, load_skill_documentation
 from app.services.time_context import get_system_time_context
 from app.services.memory_tools import get_memory_tools_for_prompt, run_memory_tool
-from app.services.web_tools import WEB_FETCH_TOOL, run_web_fetch_tool
+from app.services.web_tools import WEB_FETCH_TOOL, run_web_fetch_tool, WEB_SEARCH_TOOL, run_web_search_tool_async
 from app.services.bash_tools import BASH_TOOL, run_bash_tool, is_bash_enabled
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,22 @@ async def _run_in_browser_thread(coro, timeout: float = 120.0):
     """将协程提交到浏览器线程的事件循环执行，当前协程等待结果（不阻塞主循环）。"""
     loop = _get_browser_loop()
     future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return await asyncio.to_thread(future.result, timeout)
+    try:
+        return await asyncio.to_thread(future.result, timeout)
+    except concurrent.futures.TimeoutError:
+        # 避免超时任务悬挂在线程 loop 中
+        future.cancel()
+        raise
+
+
+def _is_driver_closed_error(msg: str) -> bool:
+    m = (msg or "").lower()
+    return (
+        "connection closed while reading from the driver" in m
+        or "target page, context or browser has been closed" in m
+        or "event loop is closed" in m
+        or "browser has been closed" in m
+    )
 
 
 def _get_page():
@@ -298,6 +313,7 @@ def get_steward_tools() -> list:
     """返回浏览器助手完整工具列表（含可选 memory、web_fetch、bash）。"""
     tools = list(STEWARD_TOOLS)
     tools.append(WEB_FETCH_TOOL)
+    tools.append(WEB_SEARCH_TOOL)
     tools.extend(get_memory_tools_for_prompt())
     if is_bash_enabled():
         tools.append(BASH_TOOL)
@@ -307,6 +323,8 @@ def get_steward_tools() -> list:
 def _playwright_friendly_error(e: Exception) -> str | None:
     """将 Playwright 常见环境错误转为用户可读提示。"""
     msg = str(e)
+    if _is_driver_closed_error(msg):
+        return "浏览器连接已关闭（可能是服务正在重启/退出或浏览器上下文已被关闭），请稍后重试。"
     if "No module named 'playwright'" in msg or "ModuleNotFoundError" in msg and "playwright" in msg:
         return "未安装 playwright。请执行: pip install playwright && playwright install"
     if "Executable doesn't exist" in msg or "playwright install" in msg:
@@ -356,6 +374,8 @@ async def run_steward_tool(name: str, arguments: Dict[str, Any]) -> str:
             return await _tool_browser_close()
         if name == "web_fetch":
             return run_web_fetch_tool(arguments)
+        if name == "web_search":
+            return await run_web_search_tool_async(arguments)
         if name in ("memory_search", "memory_get", "memory_store"):
             return run_memory_tool(name, arguments)
         if name == "bash":
@@ -421,6 +441,8 @@ async def _tool_page_goto(url: str) -> str:
     try:
         return await _run_in_browser_thread(_do_page_goto(url), timeout=65.0)
     except Exception as e:
+        if _is_driver_closed_error(str(e)):
+            return "浏览器连接已关闭（可能服务正在退出/重启），请稍后重试。"
         if "Timeout" in type(e).__name__ or "timeout" in str(e).lower():
             return (
                 f"打开页面超时（60 秒内未完成加载）：{url}。"

@@ -825,6 +825,7 @@ class ChatService:
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
+        super_mode: bool = False,
         attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> ChatResponse:
         """发送消息：可选基于知识库 RAG（向量检索 + LLM）+ 对话历史；支持单库 knowledge_base_id 或多库 knowledge_base_ids。"""
@@ -864,6 +865,7 @@ class ChatService:
                 enable_mcp_tools=enable_mcp_tools,
                 enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,
+                super_mode=super_mode,
             )
         except Exception:
             logging.exception("聊天处理失败")
@@ -902,7 +904,11 @@ class ChatService:
         MCP_LIST_TOOLS_NAME = "mcp_list_tools"  # 用户问「有哪些 MCP 工具」时由模型调用，动态查询
         openai_tools: List[Dict[str, Any]] = []
         mcp_call_map: Dict[str, tuple] = {}
+        # Chat 模式下，“Skills”开关除了原有的 skill_list/skill_load/file_write，
+        # 还提供 web_search/web_fetch 给模型直接检索/拉取页面内容（由 run_steward_tool 执行）。
         skills_tool_names = set(SKILLS_TOOL_NAMES) if enable_skills_tools else set()
+        if enable_skills_tools:
+            skills_tool_names |= {"web_fetch", "web_search"}
         existing_names: set = set()
         if enable_mcp_tools and MCP_AVAILABLE:
             # 始终加入「列出 MCP 工具」工具，用户问有哪些 MCP 能力时模型调用此工具动态查询（新接入的 MCP 也能查到）
@@ -937,6 +943,18 @@ class ChatService:
                 if fn and fn not in existing_names:
                     openai_tools.append(t)
                     existing_names.add(fn)
+
+            # 让 Chat 模式也能直接使用联网工具（避免必须走 skill_load 两步法）
+            try:
+                from app.services.web_tools import WEB_FETCH_TOOL, WEB_SEARCH_TOOL
+
+                for t in (WEB_SEARCH_TOOL, WEB_FETCH_TOOL):
+                    fn = (t.get("function") or {}).get("name")
+                    if fn and fn not in existing_names:
+                        openai_tools.append(t)
+                        existing_names.add(fn)
+            except Exception:
+                pass
 
         if not openai_tools:
             return "", []
@@ -1024,9 +1042,25 @@ class ChatService:
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
+        super_mode: bool = False,
         attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> ChatResponse:
-        """在已添加用户消息后执行：先判断并调用工具（若有）→ RAG 检索 → 结合工具结果与 RAG 上下文由 LLM 回答。"""
+        """在已添加用户消息后执行：先判断并调用工具（若有）→ RAG 检索 → 结合上下文由 LLM 回答。
+        
+        当 super_mode=True：走「超能模式」编排（任务拆解 + 多轮联网补证 + 必要时浏览器自动化 + 结构化报告生成）。
+        """
+        if super_mode:
+            return await self._super_mode_chat_after_user_message(
+                conv=conv,
+                user_msg=user_msg,
+                message=message,
+                knowledge_base_id=knowledge_base_id,
+                knowledge_base_ids=knowledge_base_ids,
+                enable_mcp_tools=enable_mcp_tools,
+                enable_skills_tools=enable_skills_tools,
+                enable_rag=enable_rag,
+                attachments=attachments,
+            )
         import logging
         assistant_content = ""
         rag_context = ""
@@ -1284,6 +1318,121 @@ class ChatService:
             web_sources=web_sources_response,
         )
     
+    async def _super_mode_chat_after_user_message(
+        self,
+        conv: Conversation,
+        user_msg: Message,
+        message: str,
+        knowledge_base_id: Optional[int],
+        knowledge_base_ids: Optional[List[int]] = None,
+        enable_mcp_tools: bool = True,
+        enable_skills_tools: bool = True,
+        enable_rag: bool = True,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> ChatResponse:
+        """豆包式超能模式编排：多查询补证 + 必要浏览器自动化 + 结构化报告输出。"""
+        import logging
+        from app.services.super_mode_agent import run_super_mode
+
+        assistant_content = ""
+        rag_confidence = 0.0
+        max_confidence_context = None
+        selected_chunks: List[Chunk] = []
+        tools_used: List[str] = []
+        web_retrieved_context = ""
+        web_sources_list: List[Dict[str, str]] = []
+
+        try:
+            (
+                assistant_content,
+                rag_confidence,
+                max_confidence_context,
+                selected_chunks,
+                tools_used,
+                web_retrieved_context,
+                web_sources_list,
+                _trace_events,
+            ) = await run_super_mode(
+                chat_svc=self,
+                conv=conv,
+                user_msg=user_msg,
+                message=message,
+                knowledge_base_id=knowledge_base_id,
+                knowledge_base_ids=knowledge_base_ids,
+                enable_mcp_tools=enable_mcp_tools,
+                enable_skills_tools=enable_skills_tools,
+                enable_rag=enable_rag,
+                attachments=attachments,
+            )
+        except Exception as e:
+            logging.exception("超能模式失败，回退为普通回复")
+            assistant_content = "抱歉，超能模式处理失败，请稍后重试。"
+
+        sources = await self._build_sources_from_chunks(selected_chunks or [])
+        sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
+        tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
+        web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
+
+        # 构建返回给前端的“检索上下文”（主要用于低置信度提示时展示）
+        retrieved_context_original = ""
+        if selected_chunks:
+            try:
+                retrieved_context_original = "\n\n".join(c.content for c in selected_chunks if c.content)[:8000]
+            except Exception:
+                retrieved_context_original = ""
+
+        has_real_retrieval = bool(
+            (retrieved_context_original and retrieved_context_original.strip() and not retrieved_context_original.startswith("[系统提示：")) or
+            (max_confidence_context and str(max_confidence_context).strip())
+        )
+
+        assistant_msg = Message(
+            conversation_id=conv.id,
+            role="assistant",
+            content=assistant_content,
+            tokens=len(assistant_content) // 2,
+            model=settings.LLM_MODEL,
+            confidence=str(rag_confidence) if has_real_retrieval else None,
+            retrieved_context=retrieved_context_original if has_real_retrieval and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD else None,
+            max_confidence_context=max_confidence_context if max_confidence_context else None,
+            sources=sources_json,
+            tools_used=tools_used_json,
+            web_retrieved_context=web_retrieved_context or None,
+            web_sources=web_sources_json,
+        )
+        self.db.add(assistant_msg)
+
+        if not conv.title or conv.title == message[:50]:
+            conv.title = message[:50] if len(message) > 50 else message
+        await self.db.commit()
+        await self.db.refresh(conv)
+        try:
+            await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
+        except Exception as e:
+            logging.warning("会话缓存失效失败（不影响回复）: %s", e)
+
+        return_confidence = rag_confidence if has_real_retrieval else None
+        return_context = None
+        if has_real_retrieval and rag_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
+            if retrieved_context_original and retrieved_context_original.strip() and not retrieved_context_original.startswith("[系统提示："):
+                return_context = retrieved_context_original
+
+        web_sources_response = [WebSourceItem(**w) for w in web_sources_list] if web_sources_list else None
+        return ChatResponse(
+            conversation_id=conv.id,
+            message=assistant_content,
+            tokens=assistant_msg.tokens,
+            model=assistant_msg.model,
+            created_at=datetime.now(timezone.utc),
+            confidence=return_confidence,
+            retrieved_context=return_context,
+            max_confidence_context=max_confidence_context,
+            sources=sources,
+            tools_used=tools_used if tools_used else None,
+            web_retrieved_context=web_retrieved_context or None,
+            web_sources=web_sources_response,
+        )
+
     async def chat_stream(
         self,
         user_id: int,
@@ -1294,6 +1443,7 @@ class ChatService:
         enable_mcp_tools: bool = True,
         enable_skills_tools: bool = True,
         enable_rag: bool = True,
+        super_mode: bool = False,
         attachments: Optional[List[Dict[str, Any]]] = None,
         attachments_meta: Optional[List[Dict[str, Any]]] = None,
         content_for_save: Optional[str] = None,
@@ -1335,6 +1485,152 @@ class ChatService:
         )
         self.db.add(user_msg)
         await self.db.flush()
+
+        # 超能模式（LangGraph 多智能体）：流式接口也要走 Agent 编排
+        if super_mode:
+            import time as _time
+
+            t_start = _time.perf_counter()
+            first_token_time: Optional[float] = None
+            assistant_content = ""
+            trace_events: List[Dict[str, Any]] = []
+
+            rag_confidence = 0.0
+            max_confidence_context = None
+            selected_chunks: List[Chunk] = []
+            tools_used: List[str] = []
+            web_retrieved_context = ""
+            web_sources_list: List[Dict[str, str]] = []
+
+            # 立即推送一条“已开始思考”，避免前端长时间无响应（带可读叙述，贴近豆包）
+            from app.services.super_mode_graph_agent import enrich_trace_event, run_super_mode_graph
+
+            yield {
+                "type": "trace",
+                "trace": [enrich_trace_event({"step": "start", "title": "开始", "data": {"status": "running"}})],
+            }
+
+            # 用 trace_emit 在每个 LangGraph 节点结束时立刻把轨迹推送给前端
+            _trace_queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
+
+            async def _emit_trace(ev: Dict[str, Any]) -> None:
+                await _trace_queue.put(ev)
+
+            super_task = asyncio.create_task(
+                run_super_mode_graph(
+                    chat_svc=self,
+                    conv=conv,
+                    user_msg=user_msg,
+                    message=message,
+                    knowledge_base_id=knowledge_base_id,
+                    knowledge_base_ids=knowledge_base_ids,
+                    enable_mcp_tools=enable_mcp_tools,
+                    enable_skills_tools=enable_skills_tools,
+                    enable_rag=enable_rag,
+                    attachments=None,
+                    trace_emit=_emit_trace,
+                    max_internal_rounds=2,
+                )
+            )
+
+            try:
+                while True:
+                    if super_task.done() and _trace_queue.empty():
+                        break
+                    try:
+                        ev = await asyncio.wait_for(_trace_queue.get(), timeout=0.2)
+                        # 每步增量推送
+                        yield {"type": "trace", "trace": [ev]}
+                    except asyncio.TimeoutError:
+                        continue
+
+                (
+                    assistant_content,
+                    rag_confidence,
+                    max_confidence_context,
+                    selected_chunks,
+                    tools_used,
+                    web_retrieved_context,
+                    web_sources_list,
+                    trace_events,
+                ) = await super_task
+            except Exception:
+                logging.exception("超能模式（LangGraph）失败")
+                assistant_content = "抱歉，超能模式处理失败，请稍后重试。"
+
+            assistant_content = (assistant_content or "").strip()
+            if not assistant_content:
+                assistant_content = "（超能模式：模型未返回可用内容）"
+
+            # 兜底：若未收集到 trace_events，则至少保证是 list
+            if not (trace_events and isinstance(trace_events, list)):
+                trace_events = []
+
+            # 思考阶段耗时（从发起到 LangGraph 结束、尚未输出正文 token），供前端展示「已完成 (Xm Ys)」
+            t_after_graph = _time.perf_counter()
+            thinking_seconds = round(t_after_graph - t_start, 1)
+
+            # 先推送 token（简单按字符切片模拟）
+            chunk_size = 10
+            for i in range(0, len(assistant_content), chunk_size):
+                delta = assistant_content[i : i + chunk_size]
+                if first_token_time is None and delta:
+                    first_token_time = _time.perf_counter()
+                yield {"type": "token", "content": delta}
+
+            # 构建 sources 并落库
+            sources = await self._build_sources_from_chunks(selected_chunks or [])
+            sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
+            tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
+            web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
+
+            assistant_msg = Message(
+                conversation_id=conv.id,
+                role="assistant",
+                content=assistant_content,
+                tokens=len(assistant_content) // 2,
+                model=settings.LLM_MODEL,
+                confidence=str(rag_confidence) if (selected_chunks and rag_confidence is not None) else None,
+                retrieved_context=None,
+                max_confidence_context=max_confidence_context if max_confidence_context else None,
+                sources=sources_json,
+                tools_used=tools_used_json,
+                web_retrieved_context=web_retrieved_context or None,
+                web_sources=web_sources_json,
+            )
+            self.db.add(assistant_msg)
+
+            if not conv.title or conv.title == message[:50]:
+                conv.title = message[:50] if len(message) > 50 else message
+            await self.db.commit()
+            await self.db.refresh(conv)
+            try:
+                await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
+            except Exception as e:
+                logging.warning("会话缓存失效失败（不影响回复）: %s", e)
+
+            # done（供前端展示）
+            t_end = _time.perf_counter()
+            ttft_ms = round((first_token_time - t_start) * 1000, 0) if first_token_time is not None else None
+            e2e_ms = round((t_end - t_start) * 1000, 0)
+
+            return_confidence = float(rag_confidence) if selected_chunks else None
+            web_sources_response = [WebSourceItem(**w) for w in web_sources_list] if web_sources_list else None
+
+            yield {
+                "type": "done",
+                "conversation_id": conv.id,
+                "confidence": return_confidence,
+                "sources": [s.model_dump() for s in sources],
+                "tools_used": tools_used if tools_used else None,
+                "web_retrieved_context": web_retrieved_context or None,
+                "web_sources": [s.model_dump() for s in web_sources_response] if web_sources_response else None,
+                "trace": trace_events if trace_events else None,
+                "thinking_seconds": thinking_seconds,
+                "ttft_ms": ttft_ms,
+                "e2e_ms": e2e_ms,
+            }
+            return
 
         # 1) 工具阶段（可由前端分别关闭 MCP / Skills）
         if enable_mcp_tools or enable_skills_tools:

@@ -118,3 +118,46 @@ def run_web_fetch_tool(arguments: Dict[str, Any]) -> str:
     url = (arguments.get("url") or "").strip()
     max_chars = arguments.get("max_chars") or DEFAULT_MAX_CHARS
     return web_fetch(url=url, max_chars=max_chars)
+
+
+# ---------- web_search 工具（检索网络） ----------
+
+WEB_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "在公网搜索引擎上检索与 query 相关的网页，并返回标题/链接/摘要，用于随后进行总结或交叉验证。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索查询（必填）"},
+                "max_results": {"type": "integer", "description": "最多返回结果数量（1-10），默认 5"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+
+async def run_web_search_tool_async(arguments: Dict[str, Any]) -> str:
+    """执行 web_search 工具，返回字符串（可直接拼入模型上下文）。"""
+    from app.services.web_search_service import web_search
+
+    query = (arguments.get("query") or "").strip()
+    if not query:
+        return "错误: query 不能为空"
+    max_results = arguments.get("max_results")
+    try:
+        max_results = int(max_results) if max_results is not None else 5
+    except (TypeError, ValueError):
+        max_results = 5
+    max_results = max(1, min(10, max_results))
+
+    results = await web_search(query=query, max_results=max_results)
+    lines = []
+    for i, r in enumerate(results or [], 1):
+        title = (r.get("title") or "")[:200]
+        url = (r.get("url") or "")[:500]
+        snippet = (r.get("snippet") or "")[:800]
+        lines.append(f"[{i}] {title}\n{url}\n{snippet}")
+    return "\n\n".join(lines) if lines else "（无搜索结果）"
