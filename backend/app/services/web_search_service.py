@@ -51,11 +51,31 @@ def _query_is_weather(q: str) -> bool:
     )
 
 
+def is_weather_question(q: str) -> bool:
+    """对外：是否为天气/气象类问题（超能模式、路由等可复用）。"""
+    return _query_is_weather(q or "")
+
+
 def _query_is_ai_job_market(q: str) -> bool:
     q = (q or "").lower()
     ai_terms = ("ai", "agent", "rag", "llm", "大模型", "智能体", "检索增强")
     job_terms = ("招聘", "岗位", "职位", "jd", "就业", "求职", "人才", "job", "career", "hiring")
     return any(t in q for t in ai_terms) and any(t in q for t in job_terms)
+
+
+def _extract_geo_tokens(text: str) -> List[str]:
+    src = text or ""
+    toks: List[str] = []
+    for m in re.finditer(r"[\u4e00-\u9fff]{2,12}(?:省|市|州|盟|区|县|旗)", src):
+        v = m.group(0)
+        if v not in toks:
+            toks.append(v)
+    # 支持「通城天气」这类不带后缀的提问
+    for m in re.finditer(r"([\u4e00-\u9fff]{2,12})(?:天气|气温|降雨|预报)", src):
+        v = m.group(1)
+        if len(v) >= 2 and v not in toks:
+            toks.append(v)
+    return toks
 
 
 def _score_result_relevance(query: str, item: Dict[str, Any]) -> int:
@@ -81,12 +101,11 @@ def _score_result_relevance(query: str, item: Dict[str, Any]) -> int:
         )
         if any(p in text for p in calendar_spam_url) and not has_metar:
             return -10
-        # 用户问上海/闵行时，压低明显外地预报
-        if ("闵行" in q or "上海" in q) and any(
-            x in text for x in ("雁塔", "西安", "101110113")
-        ):
-            if "上海" not in text and "闵行" not in text:
-                return -12
+        # 地理一致性：若 query 与结果都出现地理词且完全不重叠，则显著降权
+        q_geo = _extract_geo_tokens(query)
+        d_geo = _extract_geo_tokens(text)
+        if q_geo and d_geo and not any(g in text for g in q_geo):
+            return -10
         weather_terms = (
             "天气",
             "气温",
@@ -95,8 +114,6 @@ def _score_result_relevance(query: str, item: Dict[str, Any]) -> int:
             "风力",
             "湿度",
             "预报",
-            "闵行",
-            "上海",
             "weather",
             "forecast",
             "nmc",

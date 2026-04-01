@@ -93,6 +93,32 @@ export interface ChatAttachmentConfig {
 /** 对话内容与输入框统一的横向最大宽度（与 AI/用户气泡左右对齐） */
 const CHAT_CONTENT_MAX_WIDTH = 1024
 
+type AgentTraceItem = { step?: string; title?: string; text?: string; data?: unknown }
+
+function mergeAgentTrace(items: AgentTraceItem[]): AgentTraceItem[] {
+  const out: AgentTraceItem[] = []
+  for (const cur of items || []) {
+    const text = (cur.text || '').trim()
+    const title = (cur.title || '').trim()
+    const step = (cur.step || '').trim()
+    if (!text && !title) continue
+    const prev = out[out.length - 1]
+    // 连续同阶段同标题时合并为一个块，减少“重复标题刷屏”
+    if (prev && (prev.title || '') === title && (prev.step || '') === step) {
+      const prevText = (prev.text || '').trim()
+      const nextText = text || title
+      const append = nextText && nextText !== prevText
+      out[out.length - 1] = {
+        ...prev,
+        text: append ? `${prevText}\n${nextText}`.trim() : prevText,
+      }
+      continue
+    }
+    out.push({ ...cur, text: text || title })
+  }
+  return out
+}
+
 export default function Chat() {
   const [messages, setMessages] = useState<MessageItem[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -127,11 +153,8 @@ export default function Chat() {
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [sourcePreview, setSourcePreview] = useState<SourceItem | null>(null)
-  // 超能模式固定启用：不需要 MCP/Skills/RAG 切换，由后端 Agent 决定调用链路
-  const enableMcpTools = false
-  const enableSkillsTools = false
-  const enableRag = false
-  const enableSuperMode = true
+  /** 关闭：普通问答；开启：超能模式（内部 RAG → MCP → Skills 依次补上下文） */
+  const [superMode, setSuperMode] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const justSentMessageRef = useRef(false)
   const navigate = useNavigate()
@@ -392,6 +415,76 @@ export default function Chat() {
 
     const controller = new AbortController()
     abortControllerRef.current = controller
+
+    let traceEvents: Array<{ step?: string; title?: string; text?: string; data?: unknown }> = []
+    const traceCharQueue: Array<{ traceIndex: number; chars: string; pos: number }> = []
+    let traceDrainScheduled = false
+    const TRACE_CHARS_PER_FRAME = 16
+    const flushTraceTextPending = () => {
+      if (traceCharQueue.length === 0) return
+      const byIndex: Record<number, string> = {}
+      for (const cur of traceCharQueue) {
+        const rest = cur.chars.slice(cur.pos)
+        if (rest) byIndex[cur.traceIndex] = (byIndex[cur.traceIndex] ?? '') + rest
+      }
+      traceCharQueue.length = 0
+      traceEvents = traceEvents.map((t, idx) => {
+        const extra = byIndex[idx]
+        return extra ? { ...t, text: `${t.text ?? ''}${extra}` } : t
+      })
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempAssistantId
+            ? { ...m, agent_trace: traceEvents.length ? traceEvents : undefined }
+            : m
+        )
+      )
+    }
+    const drainTraceQueue = () => {
+      if (!isMountedRef.current) return
+      traceDrainScheduled = false
+      if (traceCharQueue.length === 0) return
+      let left = TRACE_CHARS_PER_FRAME
+      const appendByIndex: Record<number, string> = {}
+      while (left > 0 && traceCharQueue.length > 0) {
+        const cur = traceCharQueue[0]
+        const rest = cur.chars.length - cur.pos
+        if (rest <= 0) {
+          traceCharQueue.shift()
+          continue
+        }
+        const take = Math.min(left, rest)
+        const piece = cur.chars.slice(cur.pos, cur.pos + take)
+        cur.pos += take
+        left -= take
+        appendByIndex[cur.traceIndex] = `${appendByIndex[cur.traceIndex] ?? ''}${piece}`
+        if (cur.pos >= cur.chars.length) {
+          traceCharQueue.shift()
+        }
+      }
+      const touched = Object.keys(appendByIndex)
+      if (touched.length > 0) {
+        traceEvents = traceEvents.map((t, idx) => {
+          const extra = appendByIndex[idx]
+          return extra ? { ...t, text: `${t.text ?? ''}${extra}` } : t
+        })
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAssistantId
+              ? {
+                  ...m,
+                  agent_trace: traceEvents.length ? traceEvents : undefined,
+                }
+              : m
+          )
+        )
+      }
+      if (traceCharQueue.length > 0) {
+        traceDrainScheduled = true
+        traceRafRef.current = requestAnimationFrame(drainTraceQueue)
+      }
+    }
+
     try {
       const attachmentsToSend = listToSend.map((a) => ({
         type: (a.isVideo ? 'video' : a.isImage ? 'image' : 'file') as 'image' | 'file' | 'video',
@@ -405,10 +498,7 @@ export default function Chat() {
           content: messageContent,
           knowledge_base_ids: selectedKbIds.length ? selectedKbIds : null,
           conversation_id: currentConvId ?? null,
-          enable_mcp_tools: enableMcpTools,
-          enable_skills_tools: enableSkillsTools,
-          enable_rag: enableRag,
-          super_mode: enableSuperMode,
+          super_mode: superMode,
           ...(attachmentsToSend.length ? { attachments: attachmentsToSend } : {}),
         },
         { signal: controller.signal }
@@ -421,54 +511,6 @@ export default function Chat() {
       let sources: SourceItem[] = []
       let webSources: WebSourceItem[] = []
       let webRetrievedContext: string | null = null
-      let traceEvents: Array<{ step?: string; title?: string; text?: string; data?: unknown }> = []
-      const traceCharQueue: Array<{ traceIndex: number; chars: string; pos: number }> = []
-      let traceDrainScheduled = false
-      const TRACE_CHARS_PER_FRAME = 16
-      const drainTraceQueue = () => {
-        if (!isMountedRef.current) return
-        traceDrainScheduled = false
-        if (traceCharQueue.length === 0) return
-        let left = TRACE_CHARS_PER_FRAME
-        const appendByIndex: Record<number, string> = {}
-        while (left > 0 && traceCharQueue.length > 0) {
-          const cur = traceCharQueue[0]
-          const rest = cur.chars.length - cur.pos
-          if (rest <= 0) {
-            traceCharQueue.shift()
-            continue
-          }
-          const take = Math.min(left, rest)
-          const piece = cur.chars.slice(cur.pos, cur.pos + take)
-          cur.pos += take
-          left -= take
-          appendByIndex[cur.traceIndex] = `${appendByIndex[cur.traceIndex] ?? ''}${piece}`
-          if (cur.pos >= cur.chars.length) {
-            traceCharQueue.shift()
-          }
-        }
-        const touched = Object.keys(appendByIndex)
-        if (touched.length > 0) {
-          traceEvents = traceEvents.map((t, idx) => {
-            const extra = appendByIndex[idx]
-            return extra ? { ...t, text: `${t.text ?? ''}${extra}` } : t
-          })
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempAssistantId
-                ? {
-                    ...m,
-                    agent_trace: traceEvents.length ? traceEvents : undefined,
-                  }
-                : m
-            )
-          )
-        }
-        if (traceCharQueue.length > 0) {
-          traceDrainScheduled = true
-          traceRafRef.current = requestAnimationFrame(drainTraceQueue)
-        }
-      }
       const tokenQueue: string[] = []
       let drainScheduled = false
       const TOKEN_CHUNKS_PER_FRAME = 3
@@ -524,8 +566,8 @@ export default function Chat() {
               } else if (event.type === 'trace') {
                 const delta = event.trace ?? []
                 for (const d of delta) {
-                  const rawText = d.text || d.title || '…'
-                  // 先插入空文本占位，再逐字填充
+                  const rawText = typeof d.text === 'string' && d.text.length > 0 ? d.text : (d.title || '…')
+                  // 思考过程统一按逐字动画展示，避免 done 时整段“蹦出”
                   traceEvents = [...(traceEvents ?? []), { ...d, text: '' }]
                   traceCharQueue.push({
                     traceIndex: traceEvents.length - 1,
@@ -555,8 +597,9 @@ export default function Chat() {
                 webRetrievedContext = event.web_retrieved_context ?? null
                 const toolsUsed = event.tools_used ?? []
                 const fromDone = event.trace ?? []
-                // 只在本地尚无 trace 时才用 done 的回填，避免把逐字动画“整段覆盖”
-                if (traceEvents.length === 0 && fromDone.length) {
+                flushTraceTextPending()
+                // 本地已有逐字 trace 时，不用 done 的整段覆盖，避免“瞬间蹦出”
+                if (traceEvents.length === 0 && fromDone.length > 0) {
                   traceEvents = fromDone
                 }
                 const thinkingSec = event.thinking_seconds
@@ -608,6 +651,7 @@ export default function Chat() {
       message.error(msg)
       setMessages((prev) => prev.filter((m) => m.id !== tempAssistantId))
     } finally {
+      flushTraceTextPending()
       setLoading(false)
       setStreamingAssistantId(null)
       abortControllerRef.current = null
@@ -689,7 +733,8 @@ export default function Chat() {
           options={knowledgeBases.map((kb: KnowledgeBaseListResponse['knowledge_bases'][0]) => ({ value: kb.id, label: `${kb.name}（${kb.chunk_count || 0} 块）` }))}
           style={{ minWidth: 200 }}
         />
-        {/* 超能模式固定启用：无需前端开关 */}
+        <span style={{ color: 'var(--app-text-muted)', fontSize: 13, whiteSpace: 'nowrap' }}>超能模式</span>
+        <Switch checked={superMode} onChange={setSuperMode} />
       </Space>
     </div>
 
@@ -873,9 +918,10 @@ export default function Chat() {
                         {item.role === 'assistant' && item.agent_trace && item.agent_trace.length > 0 && (
                           <div style={{ marginBottom: item.content?.trim() ? 12 : 0 }}>
                             {(() => {
+                              const mergedTrace = mergeAgentTrace(item.agent_trace as AgentTraceItem[])
                               const isAutoOpen = loading && streamingAssistantId === item.id && item.thinking_seconds == null
                               const isOpen = thinkingOpenMap[item.id] ?? isAutoOpen
-                              const previewLines = item.agent_trace
+                              const previewLines = mergedTrace
                                 .map((t) => (t.text || t.title || '…').trim())
                                 .filter(Boolean)
                                 .slice(-3)
@@ -920,9 +966,51 @@ export default function Chat() {
                                               wordBreak: 'break-word',
                                             }}
                                           >
-                                            {item.agent_trace.map((t, i) => (
+                                            {mergedTrace.map((t, i) => (
                                               <p key={i} style={{ marginBottom: 12, marginTop: 0 }}>
-                                                {t.text || t.title || '…'}
+                                                {t.title ? (
+                                                  <>
+                                                    <span style={{ fontWeight: 600, color: 'var(--app-text-primary)' }}>{t.title}</span>
+                                                    {(t.text || '').trim() ? (
+                                                      <>
+                                                        <br />
+                                                        <span style={{ display: 'block' }}>
+                                                          {(t.text || '')
+                                                            .split('\n')
+                                                            .map((line) => line.trim())
+                                                            .filter(Boolean)
+                                                            .map((line, idx) => (
+                                                              <span
+                                                                key={idx}
+                                                                style={{
+                                                                  display: 'flex',
+                                                                  alignItems: 'flex-start',
+                                                                  gap: 8,
+                                                                  marginTop: idx === 0 ? 2 : 4,
+                                                                }}
+                                                              >
+                                                                <span
+                                                                  aria-hidden
+                                                                  style={{
+                                                                    width: 8,
+                                                                    height: 8,
+                                                                    borderRadius: '50%',
+                                                                    background: 'var(--app-text-muted)',
+                                                                    marginTop: 7,
+                                                                    flex: '0 0 8px',
+                                                                    opacity: 0.75,
+                                                                  }}
+                                                                />
+                                                                <span style={{ flex: 1 }}>{line}</span>
+                                                              </span>
+                                                            ))}
+                                                        </span>
+                                                      </>
+                                                    ) : null}
+                                                  </>
+                                                ) : (
+                                                  t.text || '…'
+                                                )}
                                               </p>
                                             ))}
                                             {loading && streamingAssistantId === item.id && item.thinking_seconds == null && (

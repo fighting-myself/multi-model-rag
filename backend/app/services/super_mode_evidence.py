@@ -1,8 +1,8 @@
 """
 超能模式：联网证据验收（气象等）。
 
-万年历/黄历 + **地域错配**（西安雁塔 vs 上海闵行）+ **百科/两会占榜** 必须剔除；
-验收通过需同时满足：**地理相关** + **强气象信号**（不能仅靠泛词「天气」）。
+万年历/黄历 + 地域错配 + 百科/两会占榜必须剔除；
+验收通过需同时满足：地理相关 + 强气象信号（不能仅靠泛词「天气」）。
 """
 from __future__ import annotations
 
@@ -125,26 +125,31 @@ def _is_year_encyclopedia_spam(src: Dict[str, Any]) -> bool:
     return False
 
 
-def _geo_ok_for_shanghai_area(src: Dict[str, Any], question: str) -> bool:
-    """用户问上海/闵行时，剔除明显外区（西安雁塔等）。"""
-    q = question or ""
-    if not ("上海" in q or "闵行" in q):
+def _extract_geo_tokens(text: str) -> List[str]:
+    src = text or ""
+    out: List[str] = []
+    for m in re.finditer(r"[\u4e00-\u9fff]{2,12}(?:省|市|州|盟|区|县|旗)", src):
+        v = m.group(0)
+        if v not in out:
+            out.append(v)
+    for m in re.finditer(r"([\u4e00-\u9fff]{2,12})(?:天气|气温|降雨|预报)", src):
+        v = m.group(1)
+        if len(v) >= 2 and v not in out:
+            out.append(v)
+    return out
+
+
+def _geo_ok_for_question(src: Dict[str, Any], question: str) -> bool:
+    """通用地理一致性：当问题和来源都提到了地理词，但二者无交集时剔除。"""
+    q_geo = _extract_geo_tokens(question or "")
+    if not q_geo:
         return True
     b = _blob(src)
-    url = str(src.get("url") or "").lower()
-    # 明确外地区县且未出现上海/闵行
-    if ("雁塔" in b or "西安" in b) and "上海" not in b and "闵行" not in b:
-        return False
-    if "广州" in b and "上海" not in b and "闵行" not in b and "广州" not in q:
-        return False
-    if "上海" in b or "闵行" in b:
+    s_geo = _extract_geo_tokens(b)
+    if not s_geo:
+        # 来源未显式地点，不做强剔除（避免误伤仅站点 ID 的天气页）
         return True
-    # 中国天气网上海/市区站 URL 常无中文「上海」字样
-    if "weather.com.cn" in url and ("101020" in url or "shanghai" in url):
-        return True
-    if "tianqi.com" in url and "shanghai" in url:
-        return True
-    return False
+    return any(g in b for g in q_geo)
 
 
 def filter_weather_usable_sources(sources: List[Dict[str, str]], question: str = "") -> List[Dict[str, str]]:
@@ -158,7 +163,7 @@ def filter_weather_usable_sources(sources: List[Dict[str, str]], question: str =
             continue
         if _is_macro_news_spam(s):
             continue
-        if question and not _geo_ok_for_shanghai_area(s, question):
+        if question and not _geo_ok_for_question(s, question):
             continue
         out.append(s)
     return out

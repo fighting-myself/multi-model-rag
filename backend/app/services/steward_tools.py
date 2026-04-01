@@ -215,11 +215,11 @@ STEWARD_TOOLS = [
         "type": "function",
         "function": {
             "name": "page_plan_and_act",
-            "description": "由 LLM 根据当前页面可操作元素与用户目标，决定并执行「下一步动作」（一次只执行一个动作）。传入 goal（当前要完成的子目标，如「点击查询按钮」「填写出发地上海」）。适合在 page_goto 或 page_wait 之后调用，让模型基于真实页面结构选择正确的 selector 并执行，避免盲目写选择器。返回该步执行结果；若模型判断无需再操作会返回 done 及原因。",
+            "description": "由 LLM 根据当前页面可操作元素与用户目标，决定并执行「下一步动作」（一次只执行一个动作）。传入 goal（当前要完成的子目标，如「点击查询按钮」「填写出发地」）。适合在 page_goto 或 page_wait 之后调用，让模型基于真实页面结构选择正确的 selector 并执行，避免盲目写选择器。返回该步执行结果；若模型判断无需再操作会返回 done 及原因。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "goal": {"type": "string", "description": "当前要完成的子目标，如：点击查询、填写出发地上海、打开车票页面"},
+                    "goal": {"type": "string", "description": "当前要完成的子目标，如：点击查询、填写出发地、打开车票页面"},
                 },
                 "required": ["goal"],
             },
@@ -286,6 +286,27 @@ STEWARD_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "skill_invoke",
+            "description": "在已了解该技能需求后执行技能：传入与 skills 目录名一致的 skill_id，以及 SKILL.md 约定的结构化参数 skill_args（JSON 对象）。通常应先 skill_load 阅读文档再调用。示例：weather 技能传 {\"location\": \"Shanghai\"}。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_id": {
+                        "type": "string",
+                        "description": "与 skills/<skill_id> 目录名一致，如 weather、nano-pdf（[a-z0-9][a-z0-9_-]*）",
+                    },
+                    "skill_args": {
+                        "type": "object",
+                        "description": "该技能的标准入参（键名由 SKILL.md 约定）",
+                    },
+                },
+                "required": ["skill_id", "skill_args"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "browser_close",
             "description": "关闭浏览器并释放资源。完成所有操作后应调用此工具。",
             "parameters": {"type": "object", "properties": {}},
@@ -294,8 +315,8 @@ STEWARD_TOOLS = [
 ]
 
 
-# 智能问答可调用的 Skills 工具名（仅 skill_list / skill_load / file_write，不含浏览器等）
-SKILLS_TOOL_NAMES = ("skill_list", "skill_load", "file_write")
+# 智能问答可调用的 Skills 工具名（不含浏览器等；联网与 bash 在 chat_service 中额外合并）
+SKILLS_TOOL_NAMES = ("skill_list", "skill_load", "skill_invoke", "file_write")
 
 
 def get_skills_openai_tools() -> list:
@@ -370,6 +391,8 @@ async def run_steward_tool(name: str, arguments: Dict[str, Any]) -> str:
             return _tool_skill_list()
         if name == "skill_load":
             return _tool_skill_load(arguments.get("skill_id", ""))
+        if name == "skill_invoke":
+            return await _tool_skill_invoke(arguments)
         if name == "browser_close":
             return await _tool_browser_close()
         if name == "web_fetch":
@@ -841,6 +864,27 @@ def _tool_skill_list() -> str:
 def _tool_skill_load(skill_id: str) -> str:
     """按需加载指定技能的完整使用文档。"""
     return load_skill_documentation(skill_id)
+
+
+async def _tool_skill_invoke(arguments: Dict[str, Any]) -> str:
+    """执行 skill_invoke，将参数交给 skill_runtime。"""
+    from app.services.skill_runtime import invoke_skill
+
+    skill_id = (arguments.get("skill_id") or "").strip()
+    raw = arguments.get("skill_args")
+    if raw is None:
+        raw = arguments.get("arguments")
+    skill_args: Dict[str, Any]
+    if isinstance(raw, dict):
+        skill_args = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            skill_args = json.loads(raw)
+        except Exception:
+            skill_args = {}
+    else:
+        skill_args = {}
+    return await invoke_skill(skill_id, skill_args)
 
 
 async def _do_browser_close() -> str:

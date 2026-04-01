@@ -52,11 +52,7 @@ async def chat_completion(
     import logging
     chat_service = ChatService(db)
     try:
-        default_tools = message.enable_tools if message.enable_tools is not None else True
-        enable_mcp_tools = message.enable_mcp_tools if message.enable_mcp_tools is not None else default_tools
-        enable_skills_tools = message.enable_skills_tools if message.enable_skills_tools is not None else default_tools
-        enable_rag = message.enable_rag if message.enable_rag is not None else True
-        super_mode = message.super_mode if message.super_mode is not None else False
+        super_mode = bool(message.super_mode) if message.super_mode is not None else False
         attachments_list = None
         if message.attachments:
             attachments_list = [
@@ -69,9 +65,6 @@ async def chat_completion(
             conversation_id=conversation_id or message.conversation_id,
             knowledge_base_id=knowledge_base_id or message.knowledge_base_id,
             stream=stream,
-            enable_mcp_tools=enable_mcp_tools,
-            enable_skills_tools=enable_skills_tools,
-            enable_rag=enable_rag,
             super_mode=super_mode,
             attachments=attachments_list,
         )
@@ -201,9 +194,6 @@ async def chat_completion_stream(
     content = ""
     conv_id = conversation_id
     kb_id = knowledge_base_id
-    enable_mcp_tools = True
-    enable_skills_tools = True
-    enable_rag = True
     attachments_list: Optional[List[dict]] = None
 
     try:
@@ -233,11 +223,7 @@ async def chat_completion_stream(
                 pass
         if not kb_ids:
             kb_ids = None
-    enable_tools = body.get("enable_tools")
-    enable_mcp_tools = body.get("enable_mcp_tools") if body.get("enable_mcp_tools") is not None else (enable_tools if enable_tools is not None else True)
-    enable_skills_tools = body.get("enable_skills_tools") if body.get("enable_skills_tools") is not None else (enable_tools if enable_tools is not None else True)
-    enable_rag = body.get("enable_rag") if body.get("enable_rag") is not None else True
-    super_mode = body.get("super_mode") if body.get("super_mode") is not None else False
+    super_mode = bool(body.get("super_mode")) if body.get("super_mode") is not None else False
 
     raw_attachments = body.get("attachments")
     attachments_list = []
@@ -310,9 +296,6 @@ async def chat_completion_stream(
                     conversation_id=conv_id,
                     knowledge_base_id=kb_id,
                     knowledge_base_ids=kb_ids,
-                    enable_mcp_tools=enable_mcp_tools,
-                    enable_skills_tools=enable_skills_tools,
-                    enable_rag=enable_rag,
                     super_mode=super_mode,
                     attachments=attachments_list,
                     attachments_meta=attachments_meta,

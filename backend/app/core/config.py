@@ -164,8 +164,13 @@ class Settings(BaseSettings):
     ADVANCED_RAG_QUERY_TRANSFORM: bool = False
     # 仅当问题长度 >= 该字符数时才做查询变换（避免短句如「你是什么模型」也多一次调用），默认 20
     ADVANCED_RAG_QUERY_TRANSFORM_MIN_LEN: int = 20
-    # 未选知识库时是否跳过检索（直接空上下文答，首字延迟≈仅 LLM；默认 True 以降低 19s+ 延迟）
-    RAG_SKIP_WHEN_NO_KB_SELECTED: bool = True
+    # 未选知识库时是否跳过检索（False=在用户全部知识库中渐进检索，见 RAG_ALL_KB_POOL_K / RAG_ITERATIVE_CHUNK_STEPS）
+    RAG_SKIP_WHEN_NO_KB_SELECTED: bool = False
+    # 全库检索：rerank 后参与打分与渐进扩充的候选 chunk 上限
+    RAG_ALL_KB_POOL_K: int = 40
+    # 渐进扩充每轮最多纳入的 chunk 数量（逗号分隔，依次评估是否足够直到模型认为足够或达到上限）
+    RAG_ITERATIVE_CHUNK_STEPS: str = "5,10,15,20,25,30"
+    RAG_ITERATIVE_MAX_ROUNDS: int = 5  # 渐进检索最多轮次（命中即停）
 
     # 日志配置
     LOG_LEVEL: str = "INFO"

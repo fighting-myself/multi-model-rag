@@ -18,6 +18,17 @@ REPO_ROOT: Path = getattr(settings, "PROJECT_ROOT", Path(__file__).resolve().par
 SKILLS_DIR: Path = REPO_ROOT / "skills"
 SKILL_MD = "SKILL.md"
 
+# skill_id：目录名即工具标识，须稳定可解析（便于意图识别与路由）
+# 规则：与仓库内 OpenClaw 技能目录一致，允许小写字母/数字开头，含连字符、下划线；长度 1～64（不含路径字符）
+VALID_SKILL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def is_valid_skill_id(skill_id: str) -> bool:
+    """skills 子目录名是否合法（作为工具名）。"""
+    s = (skill_id or "").strip()
+    return bool(s and VALID_SKILL_ID_RE.fullmatch(s))
+
+
 # frontmatter：---\n...\n---，解析 name 与 description
 _FM_BLOCK = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _FM_NAME = re.compile(r"^name:\s*(.+)$", re.MULTILINE)
@@ -83,6 +94,12 @@ def _collect_skill_entries() -> list[tuple[str, str, str]]:
     for d in sorted(SKILLS_DIR.iterdir()):
         if not d.is_dir() or d.name.startswith("."):
             continue
+        if not is_valid_skill_id(d.name):
+            logger.warning(
+                "跳过非法 skill 目录名（须 [a-z0-9][a-z0-9_-]*，不含路径）: %s",
+                d.name,
+            )
+            continue
         skill_md = d / SKILL_MD
         if not skill_md.is_file():
             continue
@@ -100,7 +117,9 @@ def get_skills_summary() -> str:
     entries = _collect_skill_entries()
     if not entries:
         return ""
-    lines = ["【可用技能（需要时请先调用 skill_load 加载该技能的完整使用文档，再按文档调用对应工具）】"]
+    lines = [
+        "【可用技能】skill_id 为目录名。需要时请先 skill_load(skill_id) 阅读 SKILL.md，再 skill_invoke(skill_id, skill_args) 或按文档使用 bash/web。"
+    ]
     for skill_id, display_name, brief in entries:
         if brief:
             lines.append(f"- **{display_name}**（skill_id: `{skill_id}`）：{brief}")
@@ -116,6 +135,11 @@ def load_skill_documentation(skill_id: str) -> str:
         return "请提供技能名（skill_id）。"
     if ".." in skill_id or "/" in skill_id or "\\" in skill_id:
         return "技能名不能包含路径或 ..。"
+    if not is_valid_skill_id(skill_id):
+        return (
+            f"技能名「{skill_id}」不符合规范：须以小写字母或数字开头，仅含小写字母、数字、下划线、连字符。"
+            "请使用 skill_list 查看合法 skill_id。"
+        )
 
     skill_md = SKILLS_DIR / skill_id / SKILL_MD
     if not skill_md.is_file():
@@ -124,6 +148,22 @@ def load_skill_documentation(skill_id: str) -> str:
     content = _read_file(skill_md)
     _, _, body = _parse_frontmatter(content)
     return body.strip() or "[该技能文件为空]"
+
+
+def get_skill_display_name(skill_id: str) -> str:
+    """返回技能展示名（优先 SKILL.md frontmatter 的 name，其次标题，最后 skill_id）。"""
+    sid = (skill_id or "").strip()
+    if not sid or not is_valid_skill_id(sid):
+        return sid or "unknown"
+    skill_md = SKILLS_DIR / sid / SKILL_MD
+    if not skill_md.is_file():
+        return sid
+    content = _read_file(skill_md)
+    if not content.strip():
+        return sid
+    name, _brief = _skill_display_name_and_brief(content)
+    n = (name or "").strip()
+    return n if n else sid
 
 
 def load_skills_text() -> str:

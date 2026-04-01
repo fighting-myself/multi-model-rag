@@ -44,6 +44,7 @@ from sqlalchemy import text
 from app.api.v1 import api_router
 from app.core.logging import setup_logging
 from app.core.health import check_db, check_redis, check_vector, check_minio
+from app.services.chat_service import warmup_mcp_tools_cache
 
 
 def _asyncio_exception_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
@@ -76,6 +77,10 @@ async def lifespan(app: FastAPI):
         loop.set_exception_handler(_asyncio_exception_handler)
     except RuntimeError:
         pass
+    try:
+        await warmup_mcp_tools_cache()
+    except Exception as e:
+        logging.getLogger(__name__).warning("MCP 缓存预热异常: %s", e)
     # 创建数据库表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

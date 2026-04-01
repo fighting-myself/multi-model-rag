@@ -160,9 +160,7 @@ async def run_accuracy(
                     message=q,
                     knowledge_base_id=knowledge_base_id,
                     knowledge_base_ids=knowledge_base_ids,
-                    enable_rag=True,
-                    enable_mcp_tools=False,
-                    enable_skills_tools=False,
+                    rag_only=True,
                 )
                 answers.append((resp.message or "").strip())
             except Exception as e:
@@ -266,9 +264,7 @@ async def run_latency(
                 message="测速",
                 knowledge_base_id=None,
                 knowledge_base_ids=None,
-                enable_rag=True,
-                enable_mcp_tools=False,
-                enable_skills_tools=False,
+                rag_only=True,
             ):
                 if isinstance(event, dict):
                     if event.get("type") == "token" and first_token_time is None:
@@ -368,9 +364,7 @@ async def run_qps(
                 async for event in chat_svc.chat_stream(
                     user_id=user_id,
                     message="QPS测速",
-                    enable_rag=True,
-                    enable_mcp_tools=False,
-                    enable_skills_tools=False,
+                    rag_only=True,
                 ):
                     if isinstance(event, dict) and event.get("type") == "done":
                         break

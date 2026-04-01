@@ -9,6 +9,12 @@ metadata: { "openclaw": { "emoji": "🌤️", "requires": { "bins": ["curl"] } }
 
 Get current weather conditions and forecasts.
 
+## 智能问答（skill_invoke）
+
+- 调用 `skill_invoke`，`skill_id` 固定为 `weather`。
+- `skill_args` 示例：`{"location": "Shanghai"}`（`location` 也可写作 `city` / `q`）。
+- 服务端通过 HTTPS 请求 wttr.in，与下方 `curl` 示例等价，无需本地安装 curl。
+
 ## When to Use
 
 ✅ **USE this skill when:**

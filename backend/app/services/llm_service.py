@@ -104,6 +104,27 @@ async def chat_completion(
     return (resp.choices[0].message.content or "").strip()
 
 
+async def chat_completion_simple(
+    system_content: str,
+    user_content: str,
+    *,
+    max_tokens: int = 256,
+    temperature: float = 0.2,
+) -> str:
+    """单次对话，不附加时间上下文，用于超能模式路由/意图等（与主模型相同 LLM_MODEL）。"""
+    client = _client()
+    resp = await client.chat.completions.create(
+        model=settings.LLM_MODEL,
+        messages=[
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ],
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
 async def chat_completion_with_tools(
     messages: List[Dict[str, Any]],
     tools: Optional[List[Dict[str, Any]]] = None,

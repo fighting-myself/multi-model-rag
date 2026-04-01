@@ -20,11 +20,7 @@ class ChatMessage(BaseModel):
     content: str
     knowledge_base_id: Optional[int] = None
     conversation_id: Optional[int] = None
-    enable_tools: Optional[bool] = None   # 兼容旧前端：未传 enable_mcp_tools/enable_skills_tools 时同时控制两者
-    enable_mcp_tools: Optional[bool] = None   # True=开启 MCP 工具，False=关闭，None=用 enable_tools 或 True
-    enable_skills_tools: Optional[bool] = None  # True=开启 Skills 技能（skill_list/skill_load/file_write），False=关闭，None=用 enable_tools 或 True
-    enable_rag: Optional[bool] = None    # True=开启 RAG 增强上下文，False=关闭，None=默认 True
-    super_mode: Optional[bool] = None  # 豆包式超能模式：任务拆解 + 多轮检索/必要时浏览器自动化 + 结构化报告
+    super_mode: Optional[bool] = None  # False=普通问答；True=超能模式（RAG→MCP→Skills 依次补上下文）
     attachments: Optional[List[ChatMessageAttachment]] = None  # 多模态：图片等，url 为 data URL 或可访问的 https
 
 
