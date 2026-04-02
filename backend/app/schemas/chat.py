@@ -31,6 +31,7 @@ class SourceItem(BaseModel):
     chunk_index: int
     snippet: str  # 片段，约前 200 字
     knowledge_base_id: Optional[int] = None  # 所属知识库，便于前端跳转
+    score: Optional[float] = None  # 该片段进入 LLM 时的相关性分数（0–1）
 
 
 class WebSourceItem(BaseModel):
@@ -71,6 +72,9 @@ class MessageResponse(BaseModel):
     tools_used: Optional[List[str]] = None  # 本回复调用的 MCP 工具名列表
     web_retrieved_context: Optional[str] = None  # 联网检索得到的文本
     web_sources: Optional[List[WebSourceItem]] = None  # 联网检索来源列表
+    # 超能模式思考轨迹（数据库存 JSON 字符串，接口为数组）
+    agent_trace: Optional[List[Dict[str, Any]]] = None
+    thinking_seconds: Optional[float] = None
     # 用户消息附件展示（豆包式），由 attachments_meta 解析得到，序列化时排除 attachments_meta
     attachments_meta: Optional[str] = Field(None, exclude=True)
     attachments: Optional[List[Dict[str, Any]]] = None
@@ -134,6 +138,35 @@ class MessageResponse(BaseModel):
     @field_validator("confidence", mode="before")
     @classmethod
     def parse_confidence(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    @field_validator("agent_trace", mode="before")
+    @classmethod
+    def parse_agent_trace(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                data = _json.loads(v)
+                return data if isinstance(data, list) else None
+            except Exception:
+                return None
+        return None
+
+    @field_validator("thinking_seconds", mode="before")
+    @classmethod
+    def parse_thinking_seconds(cls, v):
         if v is None:
             return None
         if isinstance(v, (int, float)):

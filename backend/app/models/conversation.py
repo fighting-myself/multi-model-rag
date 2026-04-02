@@ -1,7 +1,7 @@
 """
 对话模型
 """
-from sqlalchemy import Column, Integer, String, Text, Integer as IntCol, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Integer as IntCol, DateTime, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -54,6 +54,10 @@ class Message(Base):
     # 用户消息附件展示用（豆包式）：JSON 数组，图片含 dataUrl 以便历史会话中展示
     # MySQL 使用 LONGTEXT 以容纳含 base64 的 JSON；若已有库列为 TEXT，需执行: ALTER TABLE messages MODIFY COLUMN attachments_meta LONGTEXT NULL;
     attachments_meta = Column(LONGTEXT, nullable=True)
+    # 超能模式：思考过程轨迹 JSON 数组 [{"step","title","text",...}]；仅助手消息可能非空
+    agent_trace = Column(LONGTEXT, nullable=True)
+    # 超能模式：检索/工具管线阶段耗时（秒，不含最终正文流式），与前端「思考」时长一致
+    thinking_seconds = Column(Float, nullable=True)
 
     # 关系
     conversation = relationship("Conversation", back_populates="messages")

@@ -156,6 +156,8 @@ export default function Chat() {
   /** 关闭：普通问答；开启：超能模式（内部 RAG → MCP → Skills 依次补上下文） */
   const [superMode, setSuperMode] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  /** 用户是否停留在底部附近；为 false 时流式输出不再强制滚到底，便于向上翻阅 */
+  const stickToBottomRef = useRef(true)
   const justSentMessageRef = useRef(false)
   const navigate = useNavigate()
 
@@ -184,8 +186,26 @@ export default function Chat() {
     }
   }, [])
 
-  // 高频更新时最多每帧滚动一次，避免每次 setMessages 都触发 layout 抖动
+  // 监听主内容区滚动：用户离开底部后不再自动跟随流式输出
   useEffect(() => {
+    if (pageLoading) return
+    const end = messagesEndRef.current
+    const parent = end?.closest('.app-content-area') as HTMLElement | null
+    if (!parent) return
+    const onScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = parent
+      const gap = scrollHeight - scrollTop - clientHeight
+      stickToBottomRef.current = gap < 120
+    }
+    parent.addEventListener('scroll', onScroll, { passive: true })
+    // 切勿在挂载时同步调用 onScroll()：会覆盖 handleSend 里设的「贴底」，
+    // 若发送前不在底部则 gap 大 → 误判为不贴底 → 流式阶段不再滚到底，界面像「没输出」。
+    return () => parent.removeEventListener('scroll', onScroll)
+  }, [pageLoading, messages.length])
+
+  // 高频更新时最多每帧滚动一次；仅当用户仍在底部附近时才跟随（流式时可自由向上滚动）
+  useEffect(() => {
+    if (!stickToBottomRef.current) return
     if (scrollRafRef.current != null) return
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null
@@ -210,7 +230,15 @@ export default function Chat() {
     api.get<ChatAttachmentConfig>('/chat/settings/chat-attachment')
       .then((res: ChatAttachmentConfig) => setAttachmentConfig(res))
       .catch(() => setAttachmentConfig({ max_count: 10, max_size_bytes: 20 * 1024 * 1024, image_types: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], file_extensions: ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md'] }))
-    loadConversations()
+    // 防止后端/代理挂起导致永远不结束 loading（如 Redis 阻塞时）
+    let safetyCleared = false
+    const safety = window.setTimeout(() => {
+      safetyCleared = true
+      setPageLoading(false)
+    }, 15000)
+    loadConversations().finally(() => {
+      if (!safetyCleared) window.clearTimeout(safety)
+    })
   }, [])
 
   useEffect(() => {
@@ -254,7 +282,28 @@ export default function Chat() {
           )
         })
       } else {
-        setMessages(res.messages || [])
+        // 服务端不落库 agent_trace，重拉会话时用本地同 id 消息合并，避免切换会话/窗口后思考区丢失
+        setMessages((prev) => {
+          const serverMessages = res.messages || []
+          const prevById = new Map(prev.map((m) => [m.id, m]))
+          return serverMessages.map((sm) => {
+            const local = prevById.get(sm.id)
+            if (
+              local &&
+              sm.role === 'assistant' &&
+              local.agent_trace &&
+              local.agent_trace.length > 0 &&
+              (!sm.agent_trace || sm.agent_trace.length === 0)
+            ) {
+              return {
+                ...sm,
+                agent_trace: local.agent_trace,
+                thinking_seconds: local.thinking_seconds ?? sm.thinking_seconds,
+              }
+            }
+            return sm
+          })
+        })
       }
       // 恢复该对话的知识库选择（历史为单 id 则转为数组）
       if (res.knowledge_base_id != null) {
@@ -399,8 +448,14 @@ export default function Chat() {
     setInputValue('')
     setAttachmentList([])
     setLoading(true)
+    // 新发消息时恢复贴底跟随，便于从最新一条开始看流式输出
+    stickToBottomRef.current = true
 
     const tempAssistantId = Date.now() + 1
+    /** done 后与服务端消息 id 对齐，避免 rAF 晚于 done 时用临时 id 匹配失败 */
+    let assistantPersistedId: number | null = null
+    const isAssistantRow = (id: number) =>
+      id === tempAssistantId || (assistantPersistedId != null && id === assistantPersistedId)
     setStreamingAssistantId(tempAssistantId)
     setMessages((prev: MessageItem[]) => [
       ...prev,
@@ -434,7 +489,7 @@ export default function Chat() {
       })
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === tempAssistantId
+          isAssistantRow(m.id)
             ? { ...m, agent_trace: traceEvents.length ? traceEvents : undefined }
             : m
         )
@@ -470,7 +525,7 @@ export default function Chat() {
         })
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === tempAssistantId
+            isAssistantRow(m.id)
               ? {
                   ...m,
                   agent_trace: traceEvents.length ? traceEvents : undefined,
@@ -481,7 +536,11 @@ export default function Chat() {
       }
       if (traceCharQueue.length > 0) {
         traceDrainScheduled = true
-        traceRafRef.current = requestAnimationFrame(drainTraceQueue)
+        if (typeof document !== 'undefined' && document.hidden) {
+          window.setTimeout(drainTraceQueue, 48)
+        } else {
+          traceRafRef.current = requestAnimationFrame(drainTraceQueue)
+        }
       }
     }
 
@@ -524,12 +583,18 @@ export default function Chat() {
         }
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === tempAssistantId ? { ...m, content: (m.content || '') + merged } : m
+            isAssistantRow(m.id) ? { ...m, content: (m.content || '') + merged } : m
           )
         )
         if (tokenQueue.length > 0) {
           drainScheduled = true
-          tokenRafRef.current = requestAnimationFrame(drainTokenQueue)
+          const schedule =
+            typeof document !== 'undefined' && document.hidden
+              ? () => window.setTimeout(drainTokenQueue, 48)
+              : () => {
+                  tokenRafRef.current = requestAnimationFrame(drainTokenQueue)
+                }
+          schedule()
         }
       }
 
@@ -549,6 +614,7 @@ export default function Chat() {
                 type: string
                 content?: string
                 conversation_id?: number
+                assistant_message_id?: number
                 confidence?: number
                 sources?: SourceItem[]
                 tools_used?: string[]
@@ -561,7 +627,11 @@ export default function Chat() {
                 tokenQueue.push(event.content)
                 if (!drainScheduled) {
                   drainScheduled = true
-                  tokenRafRef.current = requestAnimationFrame(drainTokenQueue)
+                  if (typeof document !== 'undefined' && document.hidden) {
+                    window.setTimeout(drainTokenQueue, 48)
+                  } else {
+                    tokenRafRef.current = requestAnimationFrame(drainTokenQueue)
+                  }
                 }
               } else if (event.type === 'trace') {
                 const delta = event.trace ?? []
@@ -577,7 +647,7 @@ export default function Chat() {
                 }
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === tempAssistantId
+                    isAssistantRow(m.id)
                       ? {
                           ...m,
                           agent_trace: traceEvents.length ? traceEvents : undefined,
@@ -587,7 +657,11 @@ export default function Chat() {
                 )
                 if (!traceDrainScheduled && traceCharQueue.length > 0) {
                   traceDrainScheduled = true
-                  traceRafRef.current = requestAnimationFrame(drainTraceQueue)
+                  if (typeof document !== 'undefined' && document.hidden) {
+                    window.setTimeout(drainTraceQueue, 48)
+                  } else {
+                    traceRafRef.current = requestAnimationFrame(drainTraceQueue)
+                  }
                 }
               } else if (event.type === 'done') {
                 newConvId = event.conversation_id ?? null
@@ -603,11 +677,26 @@ export default function Chat() {
                   traceEvents = fromDone
                 }
                 const thinkingSec = event.thinking_seconds
+                const assistantMessageId = event.assistant_message_id
+                if (typeof assistantMessageId === 'number' && assistantMessageId > 0) {
+                  assistantPersistedId = assistantMessageId
+                  setStreamingAssistantId((sid) => (sid === tempAssistantId ? assistantMessageId : sid))
+                  setThinkingOpenMap((prev) => {
+                    if (!(tempAssistantId in prev)) return prev
+                    const next = { ...prev }
+                    next[assistantMessageId] = next[tempAssistantId]!
+                    delete next[tempAssistantId]
+                    return next
+                  })
+                }
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === tempAssistantId
+                    isAssistantRow(m.id)
                       ? {
                           ...m,
+                          ...(typeof assistantMessageId === 'number' && assistantMessageId > 0
+                            ? { id: assistantMessageId }
+                            : {}),
                           confidence: confidence ?? undefined,
                           sources: sources.length ? sources : undefined,
                           tools_used: toolsUsed.length ? toolsUsed : undefined,
@@ -649,7 +738,7 @@ export default function Chat() {
       console.error('发送消息失败:', err)
       const msg = err instanceof Error ? err.message : '发送消息失败'
       message.error(msg)
-      setMessages((prev) => prev.filter((m) => m.id !== tempAssistantId))
+      setMessages((prev) => prev.filter((m) => !isAssistantRow(m.id)))
     } finally {
       flushTraceTextPending()
       setLoading(false)
@@ -1163,9 +1252,14 @@ export default function Chat() {
                                         onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--app-list-hover)' }}
                                         onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--app-bg-muted)' }}
                                       >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 8, flexWrap: 'wrap' }}>
                                           <span style={{ fontWeight: 500, color: 'var(--app-text-primary)' }}>
                                             {s.original_filename} · 第 {s.chunk_index + 1} 段
+                                            {typeof s.score === 'number' && Number.isFinite(s.score) ? (
+                                              <span style={{ fontWeight: 400, color: 'var(--app-text-muted)', marginLeft: 8 }}>
+                                                相关性 {(s.score * 100).toFixed(1)}%
+                                              </span>
+                                            ) : null}
                                           </span>
                                           <span style={{ fontSize: 12, color: 'var(--app-accent)' }}>点击查看原文</span>
                                         </div>
@@ -1381,7 +1475,15 @@ export default function Chat() {
     </div>
 
       <Modal
-        title={sourcePreview ? `${sourcePreview.original_filename} · 第 ${(sourcePreview.chunk_index ?? 0) + 1} 段` : '引用来源'}
+        title={
+          sourcePreview
+            ? `${sourcePreview.original_filename} · 第 ${(sourcePreview.chunk_index ?? 0) + 1} 段${
+                typeof sourcePreview.score === 'number' && Number.isFinite(sourcePreview.score)
+                  ? ` · 相关性 ${(sourcePreview.score * 100).toFixed(1)}%`
+                  : ''
+              }`
+            : '引用来源'
+        }
         open={!!sourcePreview}
         onCancel={() => setSourcePreview(null)}
         footer={

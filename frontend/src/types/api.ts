@@ -145,6 +145,8 @@ export interface SourceItem {
   chunk_index: number
   snippet: string
   knowledge_base_id?: number | null
+  /** 该片段相关性分数 0–1 */
+  score?: number | null
 }
 
 /** 联网检索来源（标题、链接、摘要） */
@@ -177,9 +179,9 @@ export interface MessageItem {
   tools_used?: string[]  // 本回复调用的 MCP 工具名列表
   web_retrieved_context?: string  // 联网检索得到的文本
   web_sources?: WebSourceItem[]  // 联网检索来源列表
-  /** 超能模式中间过程轨迹（仅流式返回，前端可展开查看） */
+  /** 超能模式中间过程轨迹（流式实时 + 会话接口从库中恢复） */
   agent_trace?: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
-  /** 超能模式思考阶段耗时（秒，服务端在输出正文前统计） */
+  /** 超能模式思考阶段耗时（秒；流式为管线阶段，与库中一致） */
   thinking_seconds?: number
   /** 用户消息附件的展示用（图片缩略图、文件名+格式） */
   attachments?: MessageAttachmentDisplay[]
@@ -284,6 +286,17 @@ export interface McpToolsListResponse {
   server_id: number
   server_name: string
   tools: McpToolItem[]
+}
+
+/** 外接平台连接 */
+export interface ExternalConnectionItem {
+  id: number
+  name: string
+  account?: string | null
+  /** 后端脱敏：如有密码则为 '***'，否则为 null */
+  password?: string | null
+  cookies_present: boolean
+  enabled: boolean
 }
 
 /** 召回率评测：单条 benchmark 样本 */

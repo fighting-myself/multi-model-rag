@@ -11,6 +11,7 @@ import Profile from './pages/Profile'
 import ImageSearch from './pages/ImageSearch'
 import AuditLog from './pages/AuditLog'
 import McpServers from './pages/McpServers'
+import ExternalConnections from './pages/ExternalConnections'
 import Steward from './pages/Steward'
 import ComputerSteward from './pages/ComputerSteward'
 import RecallEvaluation from './pages/RecallEvaluation'
@@ -47,6 +48,7 @@ function App() {
                   <Route path="/recall-evaluation" element={<ErrorBoundary><RecallEvaluation /></ErrorBoundary>} />
                   <Route path="/advanced-rag-metrics" element={<ErrorBoundary><AdvancedRAGMetrics /></ErrorBoundary>} />
                   <Route path="/audit-log" element={<AuditLog />} />
+                  <Route path="/external-connections" element={<ErrorBoundary><ExternalConnections /></ErrorBoundary>} />
                   <Route path="/mcp-servers" element={<McpServers />} />
                   <Route path="/steward" element={<ErrorBoundary><Steward /></ErrorBoundary>} />
                   <Route path="/computer-steward" element={<ErrorBoundary><ComputerSteward /></ErrorBoundary>} />

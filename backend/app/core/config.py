@@ -191,6 +191,15 @@ class Settings(BaseSettings):
     BASH_APPROVAL_EXPIRE_SEC: int = 300  # 审批请求过期时间（秒）
     BASH_USE_PTY: bool = False  # 是否使用 PTY（交互式 CLI，仅 Unix 有效；Windows 忽略）
 
+    # 文档门户 REST（skills/confluence，见该目录 SKILL.md）；变量名沿用 CONFLUENCE_* 以兼容现有部署
+    # 自建：BASE=站点根，用户名+密码；云租户：BASE+邮箱+API Token（按实际环境）
+    CONFLUENCE_BASE_URL: str = ""  # 站点根，如 https://docs.example.com
+    CONFLUENCE_CONTEXT_PATH: str = ""  # 若 REST 在 /confluence/rest/api 则填 /confluence；根路径部署留空
+    CONFLUENCE_USERNAME: str = ""  # 自建：登录用户名；与 CONFLUENCE_PASSWORD 同时使用
+    CONFLUENCE_PASSWORD: str = ""  # 自建：登录密码（仅存服务端 .env）
+    CONFLUENCE_EMAIL: str = ""  # 云租户常见：邮箱；与 CONFLUENCE_API_TOKEN 同时使用
+    CONFLUENCE_API_TOKEN: str = ""  # Cloud：API 令牌
+
     # 用量与限流（按用户）
     RATE_LIMIT_UPLOAD_PER_DAY: int = 500  # 每日上传文件次数上限
     RATE_LIMIT_CONVERSATION_PER_DAY: int = 200  # 每日对话条数上限

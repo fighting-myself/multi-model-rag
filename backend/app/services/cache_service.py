@@ -19,9 +19,12 @@ def _get_redis():
     if _redis_client is None:
         try:
             import redis
+            # 必须设 socket 超时，否则 Redis 不可达时 sync get 会长时间阻塞 event loop 线程池，接口一直挂起、前端转圈
             _redis_client = redis.Redis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
+                socket_connect_timeout=2.5,
+                socket_timeout=3.0,
             )
         except Exception as e:
             logger.warning("缓存 Redis 连接失败，缓存将不生效: %s", e)

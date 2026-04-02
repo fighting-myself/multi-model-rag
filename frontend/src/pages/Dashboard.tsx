@@ -17,6 +17,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let done = false
+    const safety = window.setTimeout(() => {
+      if (!done) setLoading(false)
+    }, 15000)
     Promise.all([
       api.get<DashboardStats>('/dashboard/stats').catch(() => ({ file_count: 0, knowledge_base_count: 0, conversation_count: 0 })),
       api.get<UsageLimitsResponse>('/billing/usage-limits').catch(() => null),
@@ -25,7 +29,11 @@ export default function Dashboard() {
         setStats(s)
         setUsageLimits(ul ?? null)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        done = true
+        window.clearTimeout(safety)
+        setLoading(false)
+      })
   }, [])
 
   return (

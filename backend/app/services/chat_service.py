@@ -7,7 +7,7 @@ import json as _json
 import logging
 import re
 
-from typing import Optional, AsyncGenerator, List, Any, Dict, Tuple
+from typing import Optional, AsyncGenerator, List, Any, Dict, Tuple, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timezone
@@ -50,8 +50,28 @@ except ImportError:
     mcp_tool_to_openai_function = None
 
 from app.services.steward_tools import get_skills_openai_tools, run_steward_tool, SKILLS_TOOL_NAMES
+from app.services.external_connections_service import (
+    apply_external_connection_injection,
+    get_external_connections_names_summary,
+)
 from app.services.bash_tools import BASH_TOOL, is_bash_enabled
 from app.services.knowledge_base_service import KnowledgeBaseService
+
+# 超能模式思考区：检索子步骤实时推送（可选回调）
+RagProgressCb = Optional[Callable[[str], Awaitable[None]]]
+
+
+async def _rag_progress_call(cb: RagProgressCb, text: str) -> None:
+    if not cb or not (text or "").strip():
+        return
+    try:
+        await cb(text.strip())
+    except Exception:
+        pass
+
+
+# 超能模式流式思考：子步骤与主协程之间用 Queue 传递，此对象作为结束标记
+_RAG_TRACE_STREAM_END = object()
 
 # 用户上传文件（PDF 等）提取文本后注入上下文的总长度上限，避免超出模型上下文
 CHAT_FILE_CONTENT_MAX_CHARS = 80000
@@ -148,6 +168,50 @@ class ChatService:
                     expanded.append(c)
         expanded.sort(key=lambda c: (c.file_id or 0, c.chunk_index or 0))
         return expanded
+
+    def _score_for_expanded_chunk(self, chunk: Chunk, scored_pairs: List[Tuple[Chunk, float]]) -> float:
+        """窗口扩展出的 chunk：若不在检索命中列表中，则按同文件最近 chunk_index 继承分数。"""
+        by_id = {c.id: float(s) for c, s in scored_pairs}
+        if chunk.id in by_id:
+            return by_id[chunk.id]
+        ci = chunk.chunk_index or 0
+        best_s = 0.0
+        best_d = 10**9
+        for c2, s in scored_pairs:
+            if c2.file_id != chunk.file_id:
+                continue
+            d = abs((c2.chunk_index or 0) - ci)
+            if d < best_d:
+                best_d, best_s = d, float(s)
+        if best_d < 10**9:
+            return best_s
+        return max((float(s) for _, s in scored_pairs), default=0.0)
+
+    async def _scored_chunks_for_llm_prompt(self, scored_pairs: List[Tuple[Chunk, float]]) -> List[Tuple[Chunk, float]]:
+        """与拼进 LLM 的知识库正文一致：先窗口扩展，再为每个 chunk 赋分（去重）。"""
+        if not scored_pairs:
+            return []
+        chunk_list = [c for c, _ in scored_pairs]
+        window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
+        if window <= 0:
+            out: List[Tuple[Chunk, float]] = []
+            seen: set = set()
+            for c, s in scored_pairs:
+                if c.id in seen:
+                    continue
+                seen.add(c.id)
+                out.append((c, float(s)))
+            return out
+        expanded = await self._expand_chunks_with_window(chunk_list, window)
+        out2: List[Tuple[Chunk, float]] = []
+        seen2: set = set()
+        for c in expanded:
+            if c.id in seen2:
+                continue
+            seen2.add(c.id)
+            s = self._score_for_expanded_chunk(c, scored_pairs)
+            out2.append((c, s))
+        return out2
     
     async def _full_text_search(self, query: str, knowledge_base_id: int, top_k: int = 50) -> List[tuple]:
         """全文匹配：关键词 LIKE 取候选，再用 BM25（或关键词计数）排序。
@@ -279,13 +343,14 @@ class ChatService:
         use_rerank: bool = True,
         use_hybrid: bool = True,
         optional_queries: Optional[List[str]] = None,
-    ) -> tuple[str, float, Optional[str], List[Chunk]]:
+        rag_progress: RagProgressCb = None,
+    ) -> tuple[str, float, Optional[str], List[Chunk], List[Tuple[Chunk, float]]]:
         """根据用户问题在知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。
         
         optional_queries: 若提供则直接用作多查询列表（Advanced RAG 由 LlamaIndex 生成），否则用 query_expand。
         Returns:
-            (context, confidence, max_confidence_context, selected_chunks): 
-            上下文、置信度、最高置信度对应单段、用于溯源的 chunk 列表
+            (context, confidence, max_confidence_context, selected_chunks, scored_chunks_for_llm):
+            最后一项为进入 LLM 正文的片段及各自分数（已含窗口扩展，顺序与正文拼接一致）。
         """
         import logging
         
@@ -296,18 +361,27 @@ class ChatService:
             queries = [message]
             if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
                 try:
+                    await _rag_progress_call(rag_progress, "正在生成查询扩展（query_expand），用于多路召回…")
                     extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
                     queries.extend(extra)
                 except Exception:
                     pass
         
+        await _rag_progress_call(
+            rag_progress,
+            f"单库检索：共 {len(queries)} 条子查询；阶段 1/4 向量检索（Embedding → 向量库）…",
+        )
         k = settings.RRF_K
         chunk_rrf_scores: Dict[int, float] = {}
         vector_chunk_map: Dict[int, Chunk] = {}
         
         # 1. 向量检索（多查询合并 RRF）
-        for q in queries:
+        for qi, q in enumerate(queries):
             try:
+                await _rag_progress_call(
+                    rag_progress,
+                    f"· 子查询 {qi + 1}/{len(queries)}：正在向量化并检索…",
+                )
                 query_vec = await get_embedding(q)
                 vs = get_vector_client()
                 hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
@@ -328,15 +402,31 @@ class ChatService:
                             Chunk.knowledge_base_id == knowledge_base_id,
                         )
                     )
+                    mapped = 0
                     for c in result.scalars().all():
                         vector_chunk_map[c.id] = c
+                        mapped += 1
                         rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
                         chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
+                    await _rag_progress_call(
+                        rag_progress,
+                        f"· 子查询 {qi + 1}/{len(queries)}：向量库返回 {len(hits)} 条命中，已映射 {mapped} 条片段到当前知识库。",
+                    )
+                else:
+                    await _rag_progress_call(
+                        rag_progress,
+                        f"· 子查询 {qi + 1}/{len(queries)}：向量检索无可用向量 id（与本库未对齐或库中无对应 chunk）。",
+                    )
             except Exception as e:
                 logging.warning(f"向量检索失败: {e}")
         
+        await _rag_progress_call(
+            rag_progress,
+            f"向量阶段合并后，候选片段数：{len(chunk_rrf_scores)}。",
+        )
         # 2. 全文匹配（多查询合并 RRF），知识库未启用混合检索时跳过
         if use_hybrid:
+            await _rag_progress_call(rag_progress, "阶段 2/4：全文 / BM25 关键词检索（混合召回）…")
             for q in queries:
                 try:
                     fulltext_results = await self._full_text_search(q, knowledge_base_id, top_k=top_k * 3)
@@ -358,8 +448,9 @@ class ChatService:
             if all_chunks:
                 context = "\n\n".join(c.content for c in all_chunks if c.content)[:8000]
                 max_conf_context = all_chunks[0].content if all_chunks else None
-                return (context, 0.5, max_conf_context, all_chunks)
-            return ("", 0.0, None, [])
+                scored_llm = await self._scored_chunks_for_llm_prompt([(c, 0.5) for c in all_chunks])
+                return (context, 0.5, max_conf_context, all_chunks, scored_llm)
+            return ("", 0.0, None, [], [])
         
         # 按 RRF 分数排序，取前 top_k * 2 作为 rerank 候选
         candidate_chunks = sorted(
@@ -369,8 +460,12 @@ class ChatService:
         )[:top_k * 2]
         
         if not candidate_chunks:
-            return ("", 0.0, None, [])
+            return ("", 0.0, None, [], [])
         
+        await _rag_progress_call(
+            rag_progress,
+            f"阶段 3/4：Rerank 重排序（候选 {len(candidate_chunks)} 条 → 取 Top {min(top_k, len(candidate_chunks))}）…",
+        )
         # 4. Rerank 重排序（知识库未启用 rerank 时直接用 RRF 排序）
         if use_rerank:
             try:
@@ -391,9 +486,10 @@ class ChatService:
         else:
             final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
         
+        await _rag_progress_call(rag_progress, "Rerank 完成。阶段 4/4：拼接上下文与邻段扩展（若启用窗口）…")
         selected_chunks = final_chunks[:top_k]
         if not selected_chunks:
-            return ("", 0.0, None, [])
+            return ("", 0.0, None, [], [])
         chunk_list = [c for c, _, _ in selected_chunks]
         window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
         chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
@@ -405,7 +501,13 @@ class ChatService:
                 max_conf = min(1.0, max_rrf * k)
         max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        return (context, max_conf, max_conf_context, chunk_list)
+        scored_pairs = [(c, float(rel)) for c, rel, _ in selected_chunks]
+        scored_for_llm = await self._scored_chunks_for_llm_prompt(scored_pairs)
+        await _rag_progress_call(
+            rag_progress,
+            f"检索完成：综合置信度约 {max_conf:.2f}，已拼接约 {len(context)} 字上下文（进入回答阶段前）。",
+        )
+        return (context, max_conf, max_conf_context, chunk_list, scored_for_llm)
 
     async def get_rag_context_for_eval(
         self,
@@ -421,14 +523,14 @@ class ChatService:
             return ""
         try:
             if knowledge_base_id:
-                ctx, _, _, _ = await self._rag_context(
+                ctx, _, _, _, _ = await self._rag_context(
                     message, knowledge_base_id, top_k=top_k, use_rerank=True, use_hybrid=True, optional_queries=None
                 )
                 return ctx or ""
             if knowledge_base_ids:
-                ctx, _, _, _ = await self._rag_context_kb_ids(message, knowledge_base_ids, user_id, top_k=top_k)
+                ctx, _, _, _, _ = await self._rag_context_kb_ids(message, knowledge_base_ids, user_id, top_k=top_k)
                 return ctx or ""
-            ctx, _, _, _ = await self._rag_context_all_kbs(message, user_id, top_k=top_k)
+            ctx, _, _, _, _ = await self._rag_context_all_kbs(message, user_id, top_k=top_k)
             return ctx or ""
         except Exception:
             return ""
@@ -439,6 +541,7 @@ class ChatService:
         user_id: int,
         pool_k: int = 40,
         optional_queries: Optional[List[str]] = None,
+        rag_progress: RagProgressCb = None,
     ) -> Tuple[List[Tuple[Chunk, float]], float, Optional[str]]:
         """全库检索：返回按相关性降序的 (Chunk, score) 列表（长度不超过 pool_k），供渐进式 RAG 使用。"""
         import logging
@@ -462,16 +565,22 @@ class ChatService:
             queries = [message]
             if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
                 try:
+                    await _rag_progress_call(rag_progress, "全库检索：query_expand 扩展查询中…")
                     extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
                     queries.extend(extra)
                 except Exception:
                     pass
+        await _rag_progress_call(
+            rag_progress,
+            f"全库检索：{len(kb_ids)} 个知识库、{len(queries)} 条子查询；向量召回（pool_k={pool_k}）…",
+        )
         k = settings.RRF_K
         chunk_rrf_scores: Dict[int, float] = {}
         vector_chunk_map: Dict[int, Chunk] = {}
 
-        for q in queries:
+        for qi, q in enumerate(queries):
             try:
+                await _rag_progress_call(rag_progress, f"· 子查询 {qi + 1}/{len(queries)}：向量检索…")
                 query_vec = await get_embedding(q)
                 vs = get_vector_client()
                 hits = vs.search(query_vector=query_vec, top_k=pool_k * 3, filter_expr=None) or []
@@ -492,13 +601,15 @@ class ChatService:
                             Chunk.knowledge_base_id.in_(kb_ids),
                         )
                     )
+                    mapped = 0
                     for c in result.scalars().all():
                         vector_chunk_map[c.id] = c
+                        mapped += 1
                         rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
                         chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
             except Exception as e:
                 logging.warning(f"向量检索失败: {e}")
-        
+        await _rag_progress_call(rag_progress, f"向量阶段候选 id 数：{len(chunk_rrf_scores)}；全文/BM25…")
         for q in queries:
             try:
                 import re
@@ -551,6 +662,7 @@ class ChatService:
         if not candidate_chunks:
             return ([], 0.0, None)
 
+        await _rag_progress_call(rag_progress, f"全库 Rerank（候选 {len(candidate_chunks)} 条）…")
         try:
             documents = [chunk.content for chunk, _ in candidate_chunks]
             reranked = await rerank(query=message, documents=documents, top_n=min(pool_k, len(documents)))
@@ -595,19 +707,21 @@ class ChatService:
         user_id: int,
         top_k: int = 10,
         optional_queries: Optional[List[str]] = None,
-    ) -> tuple[str, float, Optional[str], List[Chunk]]:
+        rag_progress: RagProgressCb = None,
+    ) -> tuple[str, float, Optional[str], List[Chunk], List[Tuple[Chunk, float]]]:
         """在所有知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。"""
         scored, max_conf, max_conf_context = await self._rag_context_all_kbs_scored_pool(
-            message, user_id, pool_k=top_k, optional_queries=optional_queries
+            message, user_id, pool_k=top_k, optional_queries=optional_queries, rag_progress=rag_progress
         )
         if not scored:
-            return ("", 0.0, None, [])
+            return ("", 0.0, None, [], [])
         selected = scored[:top_k]
         chunk_list = [c for c, _ in selected]
         window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
         chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
         context = "\n\n".join(c.content for c in chunks_for_context if c.content)[:8000]
-        return (context, max_conf, max_conf_context, chunk_list)
+        scored_for_llm = await self._scored_chunks_for_llm_prompt(selected)
+        return (context, max_conf, max_conf_context, chunk_list, scored_for_llm)
 
     async def _eval_rag_context_sufficient(self, question: str, context: str) -> bool:
         """模型判断当前检索片段是否足以回答用户问题；失败时返回 False（倾向继续扩充）。"""
@@ -636,7 +750,27 @@ class ChatService:
     ) -> tuple[bool, bool, bool, bool, str]:
         """评估当前上下文是否足够回答，并给出下一轮建议能力开关。"""
         if not (context or "").strip():
+            # 路由已判定无需 RAG/MCP/Skills 时，累计上下文为空是预期情况（闲聊、自我介绍、纯对话记忆等），
+            # 不应判为「不充分」否则会在超能模式里空转满 RAG_ITERATIVE_MAX_ROUNDS 轮。
+            if not enabled_rag and not enabled_mcp and not enabled_skills:
+                return True, False, False, False, "无需检索与外部工具，可直接依据用户表述与对话历史作答。"
             return False, enabled_rag, enabled_mcp, enabled_skills, "当前无可用上下文。"
+
+        # 兜底启发式：当外部门户技能已经提取到“标题 + 正文”时，基本可直接生成总结
+        # 避免二次 LLM 评估误判导致超能模式循环到上限。
+        ctx = context or ""
+        if ("标题:" in ctx) and ("正文:" in ctx or "正文：" in ctx):
+            return True, enabled_rag, enabled_mcp, enabled_skills, "上下文已包含标题与正文摘要（可直接总结）。"
+
+        # 当 confluence skill 已明确返回“未配置/认证失败/获取失败”等可解释错误时，
+        # 直接视为 sufficient，避免后续循环改用 web_fetch / RAG 造成登录页等无效上下文。
+        if (
+            ("文档门户未配置" in ctx)
+            or ("文档门户认证失败" in ctx)
+            or ("获取页面失败" in ctx)
+            or ("未安装 httpx" in ctx)
+        ):
+            return True, False, False, enabled_skills, "confluence skill 已返回可解释错误，无需继续补检索。"
         system = """你是“上下文充分性与下一步策略”评估助手。
 根据用户问题与当前累计上下文，判断是否已经足够直接回答；若不足，给出下一轮应启用的能力组合。
 只输出 JSON（不要 markdown）：
@@ -678,6 +812,21 @@ class ChatService:
         # MCP 工具已由路由+编排阶段确定，避免再被二次 LLM 过滤误杀
         if (source or "").strip().lower() == "mcp":
             return True, text[:1200]
+        # Skills 阶段的 web_fetch/web_search 已按用户 URL/查询定向拉取；二次相关性 LLM 易误判（如百家号正文、反爬页）
+        # 导致 skill_results/skill_tools 被清空 → 评估阶段无上下文、无限重试。与 MCP 同样直接保留。
+        src_l = (source or "").strip().lower()
+        q_l = (question or "").strip().lower()
+        # Confluence 等“门户外链页正文提取”场景：即使正文里不复述鉴权信息，只要是同一页面拉取结果就应当保留。
+        if src_l == "skills" and ("viewpage.action" in q_l or "pageid=" in q_l or "/pages/" in q_l):
+            cap = int(getattr(settings, "SKILLS_WEB_TOOL_CONTEXT_CAP", 12000))
+            cap = max(1200, min(100_000, cap))
+            return True, text[:cap]
+        if src_l == "skills" and (
+            re.search(r"(?m)^\[web_fetch\]:", text) or re.search(r"(?m)^\[web_search\]:", text)
+        ):
+            cap = int(getattr(settings, "SKILLS_WEB_TOOL_CONTEXT_CAP", 12000))
+            cap = max(1200, min(100_000, cap))
+            return True, text[:cap]
         system = """你是检索相关性过滤助手。判断外部工具返回内容是否与用户问题直接相关。
 只输出 JSON：{"relevant": true/false, "filtered_context": "保留的关键片段（不超过1200字）", "reason": "一句话"}"""
         user = f"来源: {source}\n用户问题:\n{question}\n\n外部结果:\n{text[:6000]}"
@@ -700,7 +849,8 @@ class ChatService:
         self,
         conv: Conversation,
         message: str,
-    ) -> tuple[str, float, Optional[str], List[Chunk], str, str]:
+        rag_progress: RagProgressCb = None,
+    ) -> tuple[str, float, Optional[str], List[Chunk], str, str, List[Tuple[Chunk, float]]]:
         """
         未指定知识库时：在用户全部知识库中检索；先取满足阈值的片段优先，再按 5→10→15… 渐进扩充，
         每轮用模型评估是否足够，不足则继续直到上限或无可补充。
@@ -719,13 +869,19 @@ class ChatService:
             steps = [5, 10, 15, 20, 25, 30]
         steps = steps[:max_rounds]
 
+        await _rag_progress_call(rag_progress, "未指定知识库：全库候选池检索（向量+全文+Rerank）…")
         scored_list, _pool_max_conf, pool_max_ctx = await self._rag_context_all_kbs_scored_pool(
-            message, conv.user_id, pool_k=pool_k, optional_queries=None
+            message, conv.user_id, pool_k=pool_k, optional_queries=None, rag_progress=rag_progress
         )
         low_confidence_warning = ""
         if not scored_list:
-            return "", 0.0, None, [], "", ""
+            await _rag_progress_call(rag_progress, "全库候选池为空，结束检索。")
+            return "", 0.0, None, [], "", "", []
 
+        await _rag_progress_call(
+            rag_progress,
+            f"候选池已得 {len(scored_list)} 条片段，将按阈值与步数 {steps} 渐进扩充并做充分性评估。",
+        )
         score_by_id = {c.id: float(s) for c, s in scored_list}
         above = [(c, s) for c, s in scored_list if s >= thr]
         def take_n(n: int) -> List[Chunk]:
@@ -761,11 +917,19 @@ class ChatService:
             final_chunks = list(chunks)
             final_ctx = ctx
 
+            await _rag_progress_call(
+                rag_progress,
+                f"渐进步 {i + 1}/{len(steps)}：取 {len(chunks)} 条片段，综合分约 {rag_confidence:.2f}；调用模型判断是否足够回答…",
+            )
             try:
                 sufficient = await self._eval_rag_context_sufficient(message, ctx)
             except Exception as e:
                 logging.warning("检索充分性评估失败: %s", e)
                 sufficient = False
+            await _rag_progress_call(
+                rag_progress,
+                "充分性评估：已足够，停止扩充。" if sufficient else "充分性评估：不足，尝试扩充候选片段。",
+            )
             if sufficient:
                 break
             if i >= len(steps) - 1:
@@ -785,6 +949,23 @@ class ChatService:
             )
             rag_context = low_confidence_warning + "\n\n" + rag_context if rag_context else low_confidence_warning
 
+        chunk_for_ctx_final: List[Chunk] = []
+        if selected_chunks:
+            chunk_for_ctx_final = (
+                await self._expand_chunks_with_window(selected_chunks, window) if window > 0 else list(selected_chunks)
+            )
+        scored_for_llm: List[Tuple[Chunk, float]] = []
+        for c in chunk_for_ctx_final:
+            s = float(score_by_id.get(c.id, rag_confidence))
+            scored_for_llm.append((c, s))
+        seen_llm: set = set()
+        dedup_llm: List[Tuple[Chunk, float]] = []
+        for c, s in scored_for_llm:
+            if c.id in seen_llm:
+                continue
+            seen_llm.add(c.id)
+            dedup_llm.append((c, s))
+
         return (
             rag_context,
             rag_confidence,
@@ -792,6 +973,7 @@ class ChatService:
             selected_chunks,
             retrieved_context_original,
             low_confidence_warning,
+            dedup_llm,
         )
 
     async def _rag_context_kb_ids(
@@ -801,11 +983,12 @@ class ChatService:
         user_id: int,
         top_k: int = 10,
         optional_queries: Optional[List[str]] = None,
-    ) -> tuple[str, float, Optional[str], List[Chunk]]:
+        rag_progress: RagProgressCb = None,
+    ) -> tuple[str, float, Optional[str], List[Chunk], List[Tuple[Chunk, float]]]:
         """在指定的多个知识库中检索最相关上下文；逻辑同 _rag_context_all_kbs，仅 kb_ids 由调用方传入。
         optional_queries: 若提供则直接用作多查询列表（Advanced RAG 由 LlamaIndex 生成）。"""
         if not kb_ids:
-            return ("", 0.0, None, [])
+            return ("", 0.0, None, [], [])
         import logging
         if optional_queries:
             queries = list(optional_queries)
@@ -813,15 +996,24 @@ class ChatService:
             queries = [message]
             if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
                 try:
+                    await _rag_progress_call(rag_progress, "正在生成查询扩展（query_expand）…")
                     extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
                     queries.extend(extra)
                 except Exception:
                     pass
+        await _rag_progress_call(
+            rag_progress,
+            f"多库检索（{len(kb_ids)} 个知识库）：共 {len(queries)} 条子查询；阶段 1/4 向量检索…",
+        )
         k = settings.RRF_K
         chunk_rrf_scores: Dict[int, float] = {}
         vector_chunk_map: Dict[int, Chunk] = {}
-        for q in queries:
+        for qi, q in enumerate(queries):
             try:
+                await _rag_progress_call(
+                    rag_progress,
+                    f"· 子查询 {qi + 1}/{len(queries)}：向量化与向量库检索中…",
+                )
                 query_vec = await get_embedding(q)
                 vs = get_vector_client()
                 hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
@@ -842,12 +1034,25 @@ class ChatService:
                             Chunk.knowledge_base_id.in_(kb_ids),
                         )
                     )
+                    mapped = 0
                     for c in result.scalars().all():
                         vector_chunk_map[c.id] = c
+                        mapped += 1
                         rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
                         chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
+                    await _rag_progress_call(
+                        rag_progress,
+                        f"· 子查询 {qi + 1}/{len(queries)}：命中 {len(hits)} 条向量结果，映射 {mapped} 条片段到所选知识库。",
+                    )
+                else:
+                    await _rag_progress_call(
+                        rag_progress,
+                        f"· 子查询 {qi + 1}/{len(queries)}：无可用向量 id 映射到片段。",
+                    )
             except Exception as e:
                 logging.warning(f"向量检索失败: {e}")
+        await _rag_progress_call(rag_progress, f"向量阶段合并后候选片段数：{len(chunk_rrf_scores)}。")
+        await _rag_progress_call(rag_progress, "阶段 2/4：全文 / BM25 检索…")
         for q in queries:
             try:
                 import re
@@ -888,14 +1093,18 @@ class ChatService:
             except Exception as e:
                 logging.warning(f"全文匹配失败: {e}")
         if not chunk_rrf_scores:
-            return ("", 0.0, None, [])
+            return ("", 0.0, None, [], [])
         candidate_chunks = sorted(
             [(vector_chunk_map[chunk_id], score) for chunk_id, score in chunk_rrf_scores.items()],
             key=lambda x: x[1],
             reverse=True
         )[:top_k * 2]
         if not candidate_chunks:
-            return ("", 0.0, None, [])
+            return ("", 0.0, None, [], [])
+        await _rag_progress_call(
+            rag_progress,
+            f"阶段 3/4：Rerank（候选 {len(candidate_chunks)} 条）…",
+        )
         try:
             documents = [chunk.content for chunk, _ in candidate_chunks]
             reranked = await rerank(query=message, documents=documents, top_n=min(top_k, len(documents)))
@@ -913,7 +1122,7 @@ class ChatService:
             final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
         selected_chunks = final_chunks[:top_k]
         if not selected_chunks:
-            return ("", 0.0, None, [])
+            return ("", 0.0, None, [], [])
         chunk_list = [c for c, _, _ in selected_chunks]
         window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
         chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
@@ -925,7 +1134,9 @@ class ChatService:
                 max_conf = min(1.0, max_rrf * k)
         max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
         max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        return (context, max_conf, max_conf_context, chunk_list)
+        scored_pairs = [(c, float(rel)) for c, rel, _ in selected_chunks]
+        scored_for_llm = await self._scored_chunks_for_llm_prompt(scored_pairs)
+        return (context, max_conf, max_conf_context, chunk_list, scored_for_llm)
 
     async def _load_conversation_history(self, conversation_id: int, max_messages: int = None) -> List[Message]:
         """加载对话历史消息（最近 N 条）"""
@@ -984,17 +1195,25 @@ class ChatService:
             history_lines.append(f"{role_name}: {m.content}")
         return "\n\n".join(history_lines)
 
-    async def _build_sources_from_chunks(self, chunks: List[Chunk]) -> List[SourceItem]:
-        """从 RAG 选中的 chunks 构建引用来源列表（含文件名、片段）。"""
-        if not chunks:
+    async def _build_sources_from_scored_chunks(self, scored_chunks: List[Tuple[Chunk, float]]) -> List[SourceItem]:
+        """从进入 LLM 的片段（含各自分数）构建引用来源列表；snippet 仍为约 200 字。"""
+        if not scored_chunks:
             return []
+        seen_ids: set = set()
+        ordered: List[Tuple[Chunk, float]] = []
+        for c, s in scored_chunks:
+            if c.id in seen_ids:
+                continue
+            seen_ids.add(c.id)
+            ordered.append((c, float(s)))
+        chunks = [c for c, _ in ordered]
         file_ids = list({c.file_id for c in chunks if c.file_id})
         if not file_ids:
             return []
         result = await self.db.execute(select(File).where(File.id.in_(file_ids)))
         files = {f.id: f for f in result.scalars().all()}
         sources = []
-        for c in chunks:
+        for c, score in ordered:
             f = files.get(c.file_id) if c.file_id else None
             name = f.original_filename if f else f"file_{c.file_id}"
             snippet = (c.content or "")[:200]
@@ -1005,9 +1224,16 @@ class ChatService:
                     chunk_index=c.chunk_index or 0,
                     snippet=snippet,
                     knowledge_base_id=getattr(c, "knowledge_base_id", None),
+                    score=score,
                 )
             )
         return sources
+
+    async def _build_sources_from_chunks(self, chunks: List[Chunk]) -> List[SourceItem]:
+        """兼容旧调用：无逐条分数时用 0.0。"""
+        if not chunks:
+            return []
+        return await self._build_sources_from_scored_chunks([(c, 0.0) for c in chunks])
 
     async def _build_super_mode_rag_trace_text(
         self,
@@ -1162,8 +1388,9 @@ class ChatService:
         knowledge_base_id: Optional[int],
         knowledge_base_ids: Optional[List[int]],
         enable_rag: bool,
-    ) -> tuple[str, float, Optional[str], List[Chunk], str, str]:
-        """返回 (rag_context, rag_confidence, max_confidence_context, selected_chunks, retrieved_context_original, low_confidence_warning)。"""
+        rag_progress: RagProgressCb = None,
+    ) -> tuple[str, float, Optional[str], List[Chunk], str, str, List[Tuple[Chunk, float]]]:
+        """返回 (…, rag_scored_chunks)：最后一项为进入 LLM 知识库正文的片段及各自分数（与正文拼接顺序一致，snippet 仍由前端截断展示）。"""
         import logging
         rag_context = ""
         rag_confidence = 0.0
@@ -1171,20 +1398,22 @@ class ChatService:
         retrieved_context_original = ""
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
+        rag_scored_chunks: List[Tuple[Chunk, float]] = []
         if not enable_rag:
-            return rag_context, rag_confidence, max_confidence_context, selected_chunks, retrieved_context_original, low_confidence_warning
+            return rag_context, rag_confidence, max_confidence_context, selected_chunks, retrieved_context_original, low_confidence_warning, rag_scored_chunks
 
+        await _rag_progress_call(rag_progress, "已进入检索管线，后续步骤将实时显示。")
         no_kb_selected = not knowledge_base_id and not (knowledge_base_ids and len(knowledge_base_ids))
         skip_rag_when_no_kb = getattr(settings, "RAG_SKIP_WHEN_NO_KB_SELECTED", True)
         if no_kb_selected and skip_rag_when_no_kb:
-            return "", 0.0, None, [], "", ""
+            return "", 0.0, None, [], "", "", []
         if no_kb_selected and not skip_rag_when_no_kb:
-            return await self._retrieve_rag_iterative_all_kb(conv, message)
+            return await self._retrieve_rag_iterative_all_kb(conv, message, rag_progress=rag_progress)
 
         if getattr(settings, "USE_ADVANCED_RAG", False):
             try:
                 from app.services.advanced_rag_service import retrieve_advanced
-                rag_context, rag_confidence, max_confidence_context, selected_chunks = await retrieve_advanced(
+                rag_context, rag_confidence, max_confidence_context, selected_chunks, rag_scored_chunks = await retrieve_advanced(
                     self,
                     message,
                     conv.user_id,
@@ -1193,6 +1422,7 @@ class ChatService:
                     top_k=10,
                     use_llamaindex_transform=getattr(settings, "ADVANCED_RAG_QUERY_TRANSFORM", False),
                     expand_count=getattr(settings, "RAG_QUERY_EXPAND_COUNT", 2),
+                    rag_progress=rag_progress,
                 )
                 retrieved_context_original = rag_context
                 if not rag_context.strip():
@@ -1216,6 +1446,7 @@ class ChatService:
                                 retrieved_context_original = rag_context
                                 rag_confidence = 0.5
                                 selected_chunks = chunks
+                                rag_scored_chunks = [(c, rag_confidence) for c in chunks]
                         except Exception:
                             pass
                 if not rag_context.strip():
@@ -1223,10 +1454,11 @@ class ChatService:
             except Exception as e:
                 logging.warning(f"Advanced RAG 检索失败: {e}，回退为普通 RAG")
                 rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+                rag_scored_chunks = []
         elif knowledge_base_ids:
             try:
-                rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context_kb_ids(
-                    message, knowledge_base_ids, conv.user_id, top_k=10
+                rag_context, rag_confidence, max_confidence_context, selected_chunks, rag_scored_chunks = await self._rag_context_kb_ids(
+                    message, knowledge_base_ids, conv.user_id, top_k=10, rag_progress=rag_progress
                 )
                 retrieved_context_original = rag_context
                 if not rag_context.strip():
@@ -1243,6 +1475,7 @@ class ChatService:
                             retrieved_context_original = rag_context
                             rag_confidence = 0.5
                             selected_chunks = chunks
+                            rag_scored_chunks = [(c, rag_confidence) for c in chunks]
                     except Exception:
                         pass
                 if not rag_context.strip():
@@ -1250,13 +1483,14 @@ class ChatService:
             except Exception as e:
                 logging.warning(f"多知识库检索失败: {e}")
                 rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
+                rag_scored_chunks = []
         elif knowledge_base_id:
             kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
             kb = kb_result.scalar_one_or_none()
             use_rerank = getattr(kb, "enable_rerank", True) if kb else True
             use_hybrid = getattr(kb, "enable_hybrid", True) if kb else True
-            rag_context, rag_confidence, max_confidence_context, selected_chunks = await self._rag_context(
-                message, knowledge_base_id, top_k=10, use_rerank=use_rerank, use_hybrid=use_hybrid
+            rag_context, rag_confidence, max_confidence_context, selected_chunks, rag_scored_chunks = await self._rag_context(
+                message, knowledge_base_id, top_k=10, use_rerank=use_rerank, use_hybrid=use_hybrid, rag_progress=rag_progress
             )
             retrieved_context_original = rag_context
             if not rag_context.strip():
@@ -1273,11 +1507,12 @@ class ChatService:
                         retrieved_context_original = rag_context
                         rag_confidence = 0.5
                         selected_chunks = chunks
+                        rag_scored_chunks = [(c, rag_confidence) for c in chunks]
                 except Exception:
                     pass
             if not rag_context.strip():
                 rag_context = "[系统提示：未在所选知识库中检索到与用户问题相关的内容，请明确告知用户「未在知识库中找到相关内容」，并建议用户检查知识库是否已添加文档并完成切分。]"
-        return rag_context, rag_confidence, max_confidence_context, selected_chunks, retrieved_context_original, low_confidence_warning
+        return rag_context, rag_confidence, max_confidence_context, selected_chunks, retrieved_context_original, low_confidence_warning, rag_scored_chunks
 
     async def _intent_history_snippet(self, conversation_id: int, max_chars: int = 1200) -> str:
         """供意图路由使用的近期对话摘录（不含当前条之外的过长内容）。"""
@@ -1324,6 +1559,120 @@ class ChatService:
             return nr, nm, ns, reason, mcp_tools, mcp_tool_plans
         except Exception:
             return True, True, True, "（意图 JSON 解析失败，已启用完整管线）", [], []
+
+    @staticmethod
+    def _message_indicates_portal_style_page_link(message: str) -> bool:
+        """问题中是否出现典型「门户/文档站点页面」链接形态（正文通常未向量化，不宜单靠 RAG）。"""
+        m = (message or "").strip()
+        if not m:
+            return False
+        low = m.lower()
+        if "viewpage.action" in low:
+            return True
+        if "pageid=" in low:
+            return True
+        if "/wiki/" in low:
+            return True
+        if re.search(r"/pages/\d+", low):
+            return True
+        return False
+
+    @staticmethod
+    def _extract_confluence_url_and_credentials(message: str) -> tuple[str | None, str | None, str | None]:
+        """
+        从用户输入中提取：
+        - Confluence 页面链接（包含 viewpage.action 且有 pageId=）
+        - 账号（Liqu.li）
+        - 密码（Driver）
+        仅使用用户输入，不读取 env/配置。
+        """
+        text = (message or "").strip()
+        if not text:
+            return None, None, None
+
+        url = None
+        m_url = re.search(r"(https?://[^\s)]+?viewpage\.action\?pageId=\d+)", text, re.IGNORECASE)
+        if m_url:
+            url = (m_url.group(1) or "").strip()
+            # 去掉尾部中文标点等
+            url = url.rstrip("。.,，）]）")
+
+        username = None
+        m_user = re.search(r"账号\s*(?:[:：]|是)?\s*([^，,\s]+)", text, re.IGNORECASE)
+        if m_user:
+            username = (m_user.group(1) or "").strip()
+            username = username.rstrip("。.,，）]）")
+
+        password = None
+        m_pwd = re.search(r"密码\s*(?:[:：]|是)?\s*([^，,\s]+)", text, re.IGNORECASE)
+        if m_pwd:
+            password = (m_pwd.group(1) or "").strip()
+            password = password.rstrip("。.,，）]）")
+
+        return url, username, password
+
+    async def _try_direct_confluence_page_from_user_input(
+        self, message: str
+    ) -> tuple[str, List[str]] | tuple[None, List[str]]:
+        """
+        如果用户输入包含 Confluence 外链 + 账号密码，则直接调用 confluence skill 获取正文。
+        成功返回 (skill_results, ["confluence"])；失败返回 (None, [])。
+        """
+        from app.services.skill_runtime import invoke_skill
+
+        url, username, password = self._extract_confluence_url_and_credentials(message)
+        if not url:
+            return None, []
+
+        try:
+            skill_args: Dict[str, Any] = {
+                "action": "get_page",
+                "url": url,
+            }
+            if username:
+                skill_args["username"] = username
+            if password:
+                skill_args["password"] = password
+
+            skill_results = await invoke_skill(
+                "confluence",
+                skill_args,
+            )
+        except Exception:
+            logging.exception("direct confluence invoke failed")
+            return None, []
+
+        if not skill_results or not str(skill_results).strip():
+            return None, []
+        # 防止回退到“未配置/错误提示”当作正文
+        bad_markers = (
+            "文档门户未配置",
+            "获取页面失败",
+            "错误:",
+            "未安装 httpx",
+        )
+        sr = str(skill_results)
+        if any(m in sr for m in bad_markers) and ("标题:" not in sr and "正文:" not in sr):
+            return None, []
+        return skill_results, ["confluence"]
+
+    def _adjust_super_mode_intent_for_portal_links(
+        self,
+        message: str,
+        need_rag: bool,
+        need_mcp: bool,
+        need_skills: bool,
+        reason: str,
+    ) -> tuple[bool, bool, bool, str]:
+        """命中门户式页面链接时：优先走 Skills（专用集成或 web_fetch），避免误开向量检索。"""
+        if not self._message_indicates_portal_style_page_link(message):
+            return need_rag, need_mcp, need_skills, reason
+        extra = (
+            "问题含外部门户/文档页链接，应使用 Skills（专用技能或网页拉取）获取正文，"
+            "未入库链接无法由向量知识库直接命中。"
+        )
+        r = (reason + "；" + extra) if (reason or "").strip() else extra
+        return False, need_mcp, True, r
 
     async def _mcp_catalog_for_router(self) -> str:
         """为意图路由提供当前可用 MCP 服务/工具清单（运行时真实状态，不截断）。"""
@@ -1396,24 +1745,26 @@ class ChatService:
 """
 
         system_router = """你是路由助手。根据用户最新问题（及可选的对话摘录），判断是否需要以下能力（可多选）：
-- need_rag：是否需从知识库检索内部文档、政策、产品说明、手册、制度等
+- need_rag：是否需从**已上传并向量化的知识库**中检索片段（仅覆盖已入库内容）
 - need_mcp：是否需调用已接入的 MCP 工具（外部系统、数据库、用户想「列出有哪些 MCP」等）
-- need_skills：是否需调用 Skills（天气、联网搜索 web_search、抓取网页 web_fetch、具体技能如 1password、bash 等）
+- need_skills：是否需调用 Skills（天气、web_search、web_fetch、其它已注册 SKILL、bash 等）
 
 只输出一个 JSON 对象，不要 markdown 代码块，不要其它文字：
 {"need_rag": true, "need_mcp": false, "need_skills": true, "reason": "一句话说明", "mcp_tools": ["从上方清单复制的工具名，可空数组"], "mcp_tool_plans":[{"tool":"工具名","args":{"参数名":"参数值"}}]}
 
 规则：
-1. 公司/业务/内部文档类问题 → need_rag 倾向 true
+1. 依赖**已入库知识库**的文档类问题 → need_rag 倾向 true
 2. 用户已选择知识库且问题与资料相关 → need_rag 应为 true
-3. 实时天气、新闻、股价、联网、抓取网页、明确技能 → need_skills 倾向 true
-4. 明确要列出或使用 MCP、接外部系统 → need_mcp 为 true
-4.1 只有当「当前可用 MCP 服务/工具清单」里存在可解决该问题的工具时，need_mcp 才应为 true
-4.2 若 MCP 清单里已存在与问题直接匹配的能力，优先 need_mcp=true；除非 MCP 不可用或清单无匹配，再用 need_skills=true
-4.3 如果 need_mcp=true，尽量给出 mcp_tool_plans：包含最相关工具和可从用户问题直接提取的参数（args 必须是 JSON 对象）
-5. 纯闲聊、翻译、简单问候、无检索与工具需求 → 三者均可 false
-6. 不确定是否要用知识库时，need_rag 取 true（保守）
-7. 解析或输出失败时由系统回退为全流程，你只需尽力输出合法 JSON"""
+3. 用户粘贴**外部门户/文档系统页面链接**（常见形态含 viewpage.action、pageId=、路径含 /wiki/ 或 /pages/数字 等）并要求总结/翻译/提取正文 → **need_skills=true，need_rag=false**。未入库的链接正文不能指望向量检索命中，应由页面拉取类能力处理。
+4. 实时天气、新闻、联网、抓取网页、明确技能 → need_skills 倾向 true
+5. 明确要列出或使用 MCP、接外部系统 → need_mcp 为 true
+5.1 只有当「当前可用 MCP 服务/工具清单」里存在可解决该问题的工具时，need_mcp 才应为 true
+5.2 若 MCP 清单里已存在与问题直接匹配的能力，优先 need_mcp=true；除非 MCP 不可用或清单无匹配，再用 need_skills=true
+5.3 如果 need_mcp=true，尽量给出 mcp_tool_plans：包含最相关工具和可从用户问题直接提取的参数（args 必须是 JSON 对象）
+6. 纯闲聊、简单问候、无检索与工具需求 → 三者均可 false
+7. 「总结某链接里的内容」若该链接指向**未入库页面**，不要仅因「内部文档」就判 need_rag
+8. 不确定时：若问题**主要是外链页面、未明确要查已上传库**，则优先 need_skills；若明确要查已上传库则 need_rag
+9. 解析或输出失败时由系统回退为全流程，你只需尽力输出合法 JSON"""
 
         try:
             raw = await llm_chat_simple(system_router, user_block, max_tokens=256, temperature=0.15)
@@ -1421,6 +1772,9 @@ class ChatService:
             logging.warning("超能意图路由 LLM 失败: %s", e)
             return True, True, True, "（意图路由调用失败，已启用完整管线）", [], []
         need_rag, need_mcp, need_skills, reason, mcp_tools, mcp_tool_plans = self._parse_super_mode_intent(raw)
+        need_rag, need_mcp, need_skills, reason = self._adjust_super_mode_intent_for_portal_links(
+            message, need_rag, need_mcp, need_skills, reason
+        )
         _ = mcp_enabled_names
         return need_rag, need_mcp, need_skills, reason, mcp_tools, mcp_tool_plans
 
@@ -1476,6 +1830,7 @@ class ChatService:
         rag_confidence = 0.0
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
+        rag_scored_chunks: List[Tuple[Chunk, float]] = []
         retrieved_context_original = ""
         low_confidence_warning = ""
         tools_used: List[str] = []
@@ -1502,8 +1857,36 @@ class ChatService:
                 if round_idx == 1 or not (retrieved_context_original or "").strip():
                     yield (
                         "trace",
-                        {"step": "rag", "title": "知识库检索 (RAG)", "text": f"第 {round_idx} 轮：开始检索知识库并评估片段置信度…"},
+                        {
+                            "step": "rag",
+                            "title": "知识库检索 (RAG)",
+                            "text": f"第 {round_idx} 轮：开始检索（下方将实时展示向量化、召回、Rerank 等各步结果）…",
+                        },
                     )
+                    q: asyncio.Queue = asyncio.Queue()
+
+                    async def rag_progress(text: str) -> None:
+                        await q.put(text)
+
+                    async def run_rag_task() -> tuple:
+                        try:
+                            return await self._retrieve_rag_context(
+                                conv,
+                                message,
+                                knowledge_base_id,
+                                knowledge_base_ids,
+                                enable_rag=True,
+                                rag_progress=rag_progress,
+                            )
+                        finally:
+                            await q.put(_RAG_TRACE_STREAM_END)
+
+                    rag_task = asyncio.create_task(run_rag_task())
+                    while True:
+                        item = await q.get()
+                        if item is _RAG_TRACE_STREAM_END:
+                            break
+                        yield ("trace", {"step": "rag", "title": "知识库检索 (RAG)", "text": item})
                     (
                         rag_context,
                         rag_confidence,
@@ -1511,7 +1894,8 @@ class ChatService:
                         selected_chunks,
                         retrieved_context_original,
                         low_confidence_warning,
-                    ) = await self._retrieve_rag_context(conv, message, knowledge_base_id, knowledge_base_ids, enable_rag=True)
+                        rag_scored_chunks,
+                    ) = rag_task.result()
 
                     has_real_rag = bool(
                         retrieved_context_original
@@ -1627,23 +2011,39 @@ class ChatService:
                     "trace",
                     {"step": "skills", "title": "Skills 工具编排", "text": f"第 {round_idx} 轮：开始尝试调用 Skills 工具补充上下文…"},
                 )
-                skill_results, skill_tools = await self._try_tool_phase(
-                    message,
-                    enable_mcp_tools=False,
-                    enable_skills_tools=True,
-                    prior_context=prior_mcp,
-                    trace_logs=skill_trace_logs,
-                    stop_after_first_success=True,
-                )
-                for tl in skill_trace_logs:
-                    yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": tl})
+
+                # 强约束：用户给了 Confluence 外链与账号密码时，直接用 confluence skill_invoke 拉取正文
+                direct_results, direct_tools = await self._try_direct_confluence_page_from_user_input(message)
+                if direct_results:
+                    skill_results, skill_tools = direct_results, direct_tools
+                    skill_trace_logs.append("直接使用 confluence 获取外链页面正文（跳过模型编排）。")
+                    yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": skill_trace_logs[-1]})
+                else:
+                    skill_results, skill_tools = await self._try_tool_phase(
+                        message,
+                        enable_mcp_tools=False,
+                        enable_skills_tools=True,
+                        prior_context=prior_mcp,
+                        trace_logs=skill_trace_logs,
+                        stop_after_first_success=True,
+                    )
+                    for tl in skill_trace_logs:
+                        yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": tl})
+
+                # 强约束：当需要“外链页面正文提取/摘要”类上下文时，仅调用 skill_load 文档属于无效结果。
+                # 否则系统会把“文档说明”当作有效上下文，进而在后续生成阶段编造摘要。
+                if skill_results and "[skill_load]:" in skill_results and "[skill_invoke]:" not in skill_results:
+                    skill_results = ""
+                    skill_tools = []
                 if skill_results and skill_results.strip():
-                    rel, kept = await self._filter_external_context_relevance(message, skill_results, "Skills")
-                    if rel:
-                        skill_results = kept
-                    else:
-                        skill_results = ""
-                        skill_tools = []
+                    # 仅当走模型编排时才做相关性过滤；直接拉取的正文应完整保留
+                    if not (direct_results and skill_results == direct_results):
+                        rel, kept = await self._filter_external_context_relevance(message, skill_results, "Skills")
+                        if rel:
+                            skill_results = kept
+                        else:
+                            skill_results = ""
+                            skill_tools = []
                 tools_used.extend(skill_tools)
 
                 if skill_tools:
@@ -1671,6 +2071,12 @@ class ChatService:
                     },
                 )
 
+            has_real_rag = bool(
+                retrieved_context_original
+                and str(retrieved_context_original).strip()
+                and not str(retrieved_context_original).strip().startswith("[系统提示：")
+            )
+
             eval_ctx = ""
             if (retrieved_context_original or "").strip():
                 eval_ctx += f"【RAG】\n{retrieved_context_original[:2500]}\n\n"
@@ -1681,6 +2087,15 @@ class ChatService:
             sufficient_now, next_rag, next_mcp, next_skills, assess_reason = await self._assess_context_and_next_actions(
                 message, eval_ctx, need_rag, need_mcp, need_skills
             )
+            # 本轮开了 RAG 但未拿到有效片段时，勿多轮重复「只开 RAG」；强制尝试 Skills/联网
+            if not sufficient_now and round_idx < max_rounds and need_rag and not has_real_rag:
+                next_rag = False
+                next_skills = True
+                if self._message_indicates_portal_style_page_link(message):
+                    tail = " [系统：检测到外部门户页链接特征，知识库未命中，已切换为 Skills。]"
+                else:
+                    tail = " [系统：知识库本轮未命中有效片段，下一轮改为尝试 Skills/联网。]"
+                assess_reason = (assess_reason or "") + tail
             yield (
                 "trace",
                 {
@@ -1735,6 +2150,28 @@ class ChatService:
         if tool_block:
             full_context += tool_block
 
+        # 防编造硬约束：当任务是“外链页面正文总结”（viewpage.action/pageId=），但 Skills 结果里没有正文字段，
+        # 则禁止模型编造“页面内容”。这能避免只拿到 skill_load 文档说明时仍生成虚构总结。
+        q_l = (message or "").strip().lower()
+        if need_skills and (
+            "viewpage.action" in q_l or "pageid=" in q_l or "/pages/" in q_l
+        ):
+            sr = (skill_results or "").strip()
+            has_title = ("标题:" in sr) or ("标题：" in sr)
+            has_body = ("正文:" in sr) or ("正文：" in sr)
+            if (not sr) or (not (has_title and has_body)):
+                full_context += (
+                    "【系统约束】未从 Skills 获取到外链页面正文（未检测到“标题:”和“正文:”）。"
+                    "不得编造页面内容；应明确说明未获取到可核验正文，并建议稍后重试或检查技能/权限配置。\n\n"
+                )
+            else:
+                # 当正文已具备时，强制禁止输出与事实冲突的免责声明模板，避免“已拿到内容却说拿不到”。
+                full_context += (
+                    "【输出约束】你已获得外链页面的【标题】与【正文】摘要，请只基于这些信息完成流畅总结。"
+                    "禁止输出任何与事实冲突的免责声明话术（如“无法访问外部网页/内容未给出/由于无法访问…”等）。"
+                    "输出要求：不要出现“由于无法访问/模拟返回/我无法直接访问”等前置说明；用连续的中文叙述组织要点，避免段落碎片化。\n\n"
+                )
+
         thr = float(getattr(settings, "RAG_CONFIDENCE_THRESHOLD", 0.6))
         has_real = bool(
             retrieved_context_original
@@ -1784,6 +2221,7 @@ class ChatService:
                 rag_confidence,
                 max_confidence_context,
                 selected_chunks,
+                rag_scored_chunks,
                 tools_used,
                 web_retrieved_context,
                 web_sources_list,
@@ -1797,26 +2235,46 @@ class ChatService:
         knowledge_base_id: Optional[int],
         knowledge_base_ids: Optional[List[int]],
         attachments: Optional[List[Dict[str, Any]]],
-    ) -> tuple[str, float, Optional[str], List[Chunk], List[str], str, List[Dict[str, str]]]:
+    ) -> tuple[
+        str,
+        float,
+        Optional[str],
+        List[Chunk],
+        List[Tuple[Chunk, float]],
+        List[str],
+        str,
+        List[Dict[str, str]],
+        List[Dict[str, Any]],
+        float,
+    ]:
         """
         超能模式：先意图路由，再按需 RAG / MCP / Skills，最后综合 LLM。
-        返回 (assistant_content, rag_confidence, max_confidence_context, selected_chunks, tools_used, web_retrieved_context, web_sources_list)
+        返回末尾两项为 (trace_events, thinking_seconds)，thinking_seconds 为管线阶段耗时（秒，不含最终 LLM 调用）。
         """
+        import time as _time
+
+        t_start = _time.perf_counter()
+        trace_events: List[Dict[str, Any]] = []
         out: Optional[tuple] = None
         async for kind, data in self._iter_super_mode_phases(
             conv, message, knowledge_base_id, knowledge_base_ids, attachments
         ):
-            if kind == "ready":
+            if kind == "trace":
+                trace_events.append(data)
+            elif kind == "ready":
                 out = data
                 break
+        t_after_pipeline = _time.perf_counter()
+        thinking_seconds = round(t_after_pipeline - t_start, 1)
         if out is None:
-            return "", 0.0, None, [], [], "", []
+            return "", 0.0, None, [], [], [], "", [], trace_events, thinking_seconds
         (
             full_context,
             user_content_llm,
             rag_confidence,
             max_confidence_context,
             selected_chunks,
+            rag_scored_chunks,
             tools_used,
             web_retrieved_context,
             web_sources_list,
@@ -1834,9 +2292,12 @@ class ChatService:
             rag_confidence,
             max_confidence_context,
             selected_chunks,
+            rag_scored_chunks,
             tools_used,
             web_retrieved_context,
             web_sources_list,
+            trace_events,
+            thinking_seconds,
         )
 
     async def chat(
@@ -1972,6 +2433,26 @@ class ChatService:
                     }
                     sname = str(item.get("server_name") or "server")
                     openai_def = mcp_tool_to_openai_function(tool, sname)
+                    # 为了支持外接平台连接注入：给 MCP 工具的入参 schema 增加可选字段
+                    # connection_name（系统会在调用前注入 account/password/cookies，并移除该字段避免工具端 schema 报错）
+                    try:
+                        fn = openai_def.get("function") or {}
+                        params = fn.get("parameters")
+                        if isinstance(params, dict):
+                            props = params.setdefault("properties", {})
+                            if isinstance(props, dict):
+                                props.setdefault(
+                                    "connection_name",
+                                    {
+                                        "type": "string",
+                                        "description": "外接平台连接名称，用于注入账号/密码/Cookies（由系统注入，无需工具端自行实现）。",
+                                    },
+                                )
+                                params["properties"] = props
+                            fn["parameters"] = params
+                            openai_def["function"] = fn
+                    except Exception:
+                        pass
                     openai_name = ((openai_def.get("function") or {}).get("name") or "").strip()
                     if not openai_name or openai_name in existing_names:
                         continue
@@ -2016,6 +2497,19 @@ class ChatService:
             prior_block = f"【前置检索结果（供你决定如何调用工具）】\n{(prior_context or '').strip()[:12000]}\n\n"
 
         catalog = get_skills_summary() or "（当前暂无已注册技能；目录名须为 [a-z0-9][a-z0-9_-]*）"
+
+        # 外接平台连接信息提示：用于引导模型在 tool args 中传入 connection_name。
+        try:
+            ext_conn_summary = await get_external_connections_names_summary(self.db, max_items=20)
+        except Exception:
+            ext_conn_summary = ""
+        ext_conn_hint = ""
+        if ext_conn_summary:
+            ext_conn_hint = (
+                f"\n【外接平台连接注入】{ext_conn_summary}。"
+                "如果你需要账号/密码/Cookies 执行登录或调用平台 API，请在 tool args 中传入 connection_name；"
+                "系统会根据 connection_name 自动注入 account/username/password/cookies（用户在提问中已给出相同字段则优先用户输入）。"
+            )
         if enable_mcp_tools and not enable_skills_tools:
             system_tool = (
                 prior_block
@@ -2030,7 +2524,9 @@ class ChatService:
                 + "你是「Skills 工具编排」阶段（超能模式第三步），仅可调用 Skills 与下列联网/本地辅助工具，不要调用 MCP。\n\n"
                 f"{catalog}\n\n"
                 "【Skills】skills 子目录名即 skill_id（[a-z0-9][a-z0-9_-]*）。\n"
-                "- 先 skill_load(skill_id) 再 skill_invoke(skill_id, skill_args)；可用 web_search/web_fetch/bash/file_write。\n"
+                "- 先 skill_load(skill_id) 仅用于读取用法文档；当需要“网页正文/摘要/内容提取”时，必须继续调用 skill_invoke 获取正文。\n"
+                "- 严禁只调用 skill_load 就结束：skill_load 不等于已获得外部正文上下文。\n"
+                "- 可用 web_search/web_fetch/bash/file_write。\n"
                 "- 若完全不需要工具，只回复一句：不需要调用工具。\n"
                 "若需要工具，请用 tool_calls；可多轮调用直到信息足够。"
             )
@@ -2046,6 +2542,9 @@ class ChatService:
                 "- 若完全不需要任何工具，只回复一句：不需要调用工具。\n"
                 "若需要工具，请用 tool_calls；可多轮调用直到信息足够。"
             )
+
+        if ext_conn_hint:
+            system_tool = system_tool + ext_conn_hint
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_tool},
             {"role": "user", "content": message},
@@ -2115,6 +2614,10 @@ class ChatService:
                     import time as _time
                     t0 = _time.perf_counter()
                     transport_type, config_json, mcp_tool_name = mcp_call_map[pick]
+                    try:
+                        pick_args = await apply_external_connection_injection(self.db, message, pick_args)
+                    except Exception:
+                        pass
                     if trace_logs is not None:
                         trace_logs.append(
                             f"快路径：首轮直连 MCP 工具 {pick_mcp_tool_name}，args={_json.dumps(pick_args, ensure_ascii=False)[:160]}。"
@@ -2259,6 +2762,20 @@ class ChatService:
             for tc in tool_calls:
                 name = tc.get("name") or ""
                 args = tc.get("arguments") or {}
+                # 在 MCP/Skills/其它工具执行前，按 connection_name 注入外接平台连接信息
+                try:
+                    args = await apply_external_connection_injection(self.db, message, args)
+                except Exception:
+                    pass
+
+                # Skills 的连接信息常出现在嵌套的 skill_args 中；单独对该嵌套对象做注入
+                if name == "skill_invoke":
+                    try:
+                        sa = args.get("skill_args")
+                        if isinstance(sa, dict):
+                            args["skill_args"] = await apply_external_connection_injection(self.db, message, sa)
+                    except Exception:
+                        pass
                 display_name = name
                 # 将通用技能调用动作细化为具体目标，便于前端展示“到底调用了哪个技能/工具”
                 if name in ("skill_load", "skill_invoke"):
@@ -2402,6 +2919,7 @@ class ChatService:
         retrieved_context_original = ""
         max_confidence_context = None
         selected_chunks: List[Chunk] = []
+        rag_scored_chunks: List[Tuple[Chunk, float]] = []
         web_retrieved_context = ""
         web_sources_list: List[Dict[str, str]] = []
         try:
@@ -2425,6 +2943,7 @@ class ChatService:
                 selected_chunks,
                 retrieved_context_original,
                 low_confidence_warning,
+                rag_scored_chunks,
             ) = await self._retrieve_rag_context(
                 conv, message, knowledge_base_id, knowledge_base_ids, enable_rag
             )
@@ -2463,7 +2982,11 @@ class ChatService:
              not retrieved_context_original.startswith("[系统提示：")) or
             (max_confidence_context and max_confidence_context.strip())
         )
-        sources = await self._build_sources_from_chunks(selected_chunks)
+        sources = (
+            await self._build_sources_from_scored_chunks(rag_scored_chunks)
+            if rag_scored_chunks
+            else await self._build_sources_from_chunks(selected_chunks)
+        )
         sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
         tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
         web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
@@ -2555,6 +3078,8 @@ class ChatService:
         tools_used: List[str] = []
         web_retrieved_context = ""
         web_sources_list: List[Dict[str, str]] = []
+        trace_events: List[Dict[str, Any]] = []
+        thinking_seconds_val: Optional[float] = None
 
         try:
             (
@@ -2562,9 +3087,12 @@ class ChatService:
                 rag_confidence,
                 max_confidence_context,
                 selected_chunks,
+                rag_scored_chunks,
                 tools_used,
                 web_retrieved_context,
                 web_sources_list,
+                trace_events,
+                thinking_seconds_val,
             ) = await self._super_mode_run_sequential(
                 conv=conv,
                 message=message,
@@ -2575,8 +3103,15 @@ class ChatService:
         except Exception as e:
             logging.exception("超能模式失败，回退为普通回复")
             assistant_content = "抱歉，超能模式处理失败，请稍后重试。"
+            rag_scored_chunks = []
+            trace_events = []
+            thinking_seconds_val = None
 
-        sources = await self._build_sources_from_chunks(selected_chunks or [])
+        sources = (
+            await self._build_sources_from_scored_chunks(rag_scored_chunks or [])
+            if rag_scored_chunks
+            else await self._build_sources_from_chunks(selected_chunks or [])
+        )
         sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
         tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
         web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
@@ -2594,6 +3129,10 @@ class ChatService:
             (max_confidence_context and str(max_confidence_context).strip())
         )
 
+        agent_trace_json = (
+            _json.dumps(trace_events, ensure_ascii=False, default=str) if trace_events else None
+        )
+
         assistant_msg = Message(
             conversation_id=conv.id,
             role="assistant",
@@ -2607,6 +3146,8 @@ class ChatService:
             tools_used=tools_used_json,
             web_retrieved_context=web_retrieved_context or None,
             web_sources=web_sources_json,
+            agent_trace=agent_trace_json,
+            thinking_seconds=thinking_seconds_val,
         )
         self.db.add(assistant_msg)
 
@@ -2709,6 +3250,7 @@ class ChatService:
             rag_confidence = 0.0
             max_confidence_context = None
             selected_chunks: List[Chunk] = []
+            rag_scored_chunks: List[Tuple[Chunk, float]] = []
             tools_used: List[str] = []
             web_retrieved_context = ""
             web_sources_list: List[Dict[str, str]] = []
@@ -2733,6 +3275,7 @@ class ChatService:
                             rag_confidence,
                             max_confidence_context,
                             selected_chunks,
+                            rag_scored_chunks,
                             tools_used,
                             web_retrieved_context,
                             web_sources_list,
@@ -2769,10 +3312,17 @@ class ChatService:
             if not assistant_content:
                 assistant_content = "（超能模式：模型未返回可用内容）"
 
-            sources = await self._build_sources_from_chunks(selected_chunks or [])
+            sources = (
+                await self._build_sources_from_scored_chunks(rag_scored_chunks or [])
+                if rag_scored_chunks
+                else await self._build_sources_from_chunks(selected_chunks or [])
+            )
             sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
             tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
             web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
+            agent_trace_json = (
+                _json.dumps(trace_events, ensure_ascii=False, default=str) if trace_events else None
+            )
 
             assistant_msg = Message(
                 conversation_id=conv.id,
@@ -2787,6 +3337,8 @@ class ChatService:
                 tools_used=tools_used_json,
                 web_retrieved_context=web_retrieved_context or None,
                 web_sources=web_sources_json,
+                agent_trace=agent_trace_json,
+                thinking_seconds=thinking_seconds,
             )
             self.db.add(assistant_msg)
 
@@ -2794,6 +3346,7 @@ class ChatService:
                 conv.title = message[:50] if len(message) > 50 else message
             await self.db.commit()
             await self.db.refresh(conv)
+            await self.db.refresh(assistant_msg)
             try:
                 await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
             except Exception as e:
@@ -2809,6 +3362,7 @@ class ChatService:
             yield {
                 "type": "done",
                 "conversation_id": conv.id,
+                "assistant_message_id": assistant_msg.id,
                 "confidence": return_confidence,
                 "sources": [s.model_dump() for s in sources],
                 "tools_used": tools_used if tools_used else None,
@@ -2841,6 +3395,7 @@ class ChatService:
             selected_chunks,
             _retrieved_context_original,
             low_confidence_warning,
+            rag_scored_chunks,
         ) = await self._retrieve_rag_context(
             conv, message, knowledge_base_id, knowledge_base_ids, enable_rag
         )
@@ -2875,7 +3430,11 @@ class ChatService:
             yield {"type": "token", "content": err_msg}
 
         assistant_content = "".join(full_content)
-        sources = await self._build_sources_from_chunks(selected_chunks)
+        sources = (
+            await self._build_sources_from_scored_chunks(rag_scored_chunks)
+            if rag_scored_chunks
+            else await self._build_sources_from_chunks(selected_chunks)
+        )
         sources_json = _json.dumps([s.model_dump() for s in sources], ensure_ascii=False) if sources else None
         tools_used_json = _json.dumps(tools_used, ensure_ascii=False) if tools_used else None
         web_sources_json = _json.dumps(web_sources_list, ensure_ascii=False) if web_sources_list else None
@@ -2898,6 +3457,7 @@ class ChatService:
             conv.title = message[:50] if len(message) > 50 else message
         await self.db.commit()
         await self.db.refresh(conv)
+        await self.db.refresh(assistant_msg)
         try:
             await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
         except Exception as e:
@@ -2914,6 +3474,7 @@ class ChatService:
         yield {
             "type": "done",
             "conversation_id": conv.id,
+            "assistant_message_id": assistant_msg.id,
             "confidence": return_confidence,
             "sources": [s.model_dump() for s in sources],
             "tools_used": tools_used if tools_used else None,

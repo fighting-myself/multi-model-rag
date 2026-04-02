@@ -102,6 +102,25 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(_ensure_attachments_meta)
         except Exception as e:
             logging.getLogger(__name__).debug("attachments_meta 列已存在或无法添加: %s", e)
+
+        def _ensure_agent_trace_columns(sync_conn):
+            try:
+                sync_conn.execute(text("ALTER TABLE messages ADD COLUMN agent_trace LONGTEXT NULL"))
+            except Exception as e:
+                err = str(e).lower()
+                if "1060" not in err and "duplicate column" not in err and "already exists" not in err:
+                    logging.getLogger(__name__).debug("agent_trace 列: %s", e)
+            try:
+                sync_conn.execute(text("ALTER TABLE messages ADD COLUMN thinking_seconds DOUBLE NULL"))
+            except Exception as e:
+                err = str(e).lower()
+                if "1060" not in err and "duplicate column" not in err and "already exists" not in err:
+                    logging.getLogger(__name__).debug("thinking_seconds 列: %s", e)
+
+        try:
+            await conn.run_sync(_ensure_agent_trace_columns)
+        except Exception as e:
+            logging.getLogger(__name__).debug("agent_trace/thinking_seconds 列已存在或无法添加: %s", e)
     
     yield
     

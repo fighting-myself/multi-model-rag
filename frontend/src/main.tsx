@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import App from './App'
-import { useThemeStore } from './stores/themeStore'
+import { useThemeStore, type ThemeState } from './stores/themeStore'
 import './index.css'
 
 // 首屏前恢复主题，避免闪烁（默认科技风深色）

@@ -12,6 +12,7 @@ const TITLE_MAP: Record<string, string> = {
   '/profile': '个人中心',
   '/image-search': '多模态检索',
   '/audit-log': '操作审计',
+  '/external-connections': '外接平台连接',
   '/mcp-servers': 'MCP 工具',
 }
 

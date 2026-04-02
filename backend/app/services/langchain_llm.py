@@ -12,6 +12,48 @@ from app.services.time_context import get_system_time_context
 
 logger = logging.getLogger(__name__)
 
+# DashScope 等内容安全：流式/长上下文易触发 DataInspectionFailed，可截断后重试
+_STREAM_INSPECTION_RETRY_MAX_CHARS = 6000
+
+_MSG_INSPECTION_BLOCKED = (
+    "当前回答未通过模型服务的内容安全审核，已停止输出。"
+    "若引用了较长网页正文，可尝试更换来源、缩短材料，或调整问题表述后重试。"
+)
+
+
+def _is_dashscope_content_inspection_error(exc: BaseException) -> bool:
+    """阿里云兼容接口返回的内容安全类错误（输入或输出侧检测）。"""
+    s = str(exc).lower()
+    if "datainspectionfailed" in s or "data_inspection" in s:
+        return True
+    if "internalerror.algo.datainspectionfailed" in s:
+        return True
+    if "inappropriate content" in s and ("internalerror" in s or "algo" in s):
+        return True
+    return False
+
+
+def _compose_stream_system_from_context(context: str) -> str:
+    """与 chat_completion_stream 的 context 拼接规则一致，不含时间后缀。"""
+    kb_part = ""
+    history_part = ""
+    if "【知识库上下文】" in context:
+        parts = context.split("【对话历史】")
+        kb_part = parts[0].replace("【知识库上下文】", "").strip()
+        history_part = parts[1].strip() if len(parts) > 1 else ""
+    elif "【对话历史】" in context:
+        history_part = context.replace("【对话历史】", "").strip()
+    else:
+        kb_part = context.strip()
+    system_parts = ["你是一个有帮助的AI助手。请根据以下信息回答用户问题："]
+    if kb_part:
+        system_parts.append(f"\n【知识库内容】\n{kb_part}")
+    if history_part:
+        system_parts.append(f"\n【对话历史】\n{history_part}")
+    system_parts.append("\n请基于以上信息回答用户问题，保持对话连贯性。")
+    return "".join(system_parts)
+
+
 # 延迟导入，避免无 LangChain 时启动即报错
 def _get_llm(model: Optional[str] = None, max_tokens: int = 2048):
     from langchain_openai import ChatOpenAI
@@ -181,35 +223,58 @@ async def chat_completion_stream(
     context: str = "",
 ) -> AsyncGenerator[str, None]:
     """流式对话（与 llm_service.chat_completion_stream 兼容）。"""
-    if context:
-        kb_part = ""
-        history_part = ""
-        if "【知识库上下文】" in context:
-            parts = context.split("【对话历史】")
-            kb_part = parts[0].replace("【知识库上下文】", "").strip()
-            history_part = parts[1].strip() if len(parts) > 1 else ""
-        elif "【对话历史】" in context:
-            history_part = context.replace("【对话历史】", "").strip()
-        else:
-            kb_part = context.strip()
-        system_parts = ["你是一个有帮助的AI助手。请根据以下信息回答用户问题："]
-        if kb_part:
-            system_parts.append(f"\n【知识库内容】\n{kb_part}")
-        if history_part:
-            system_parts.append(f"\n【对话历史】\n{history_part}")
-        system_parts.append("\n请基于以上信息回答用户问题，保持对话连贯性。")
-        system_content = "".join(system_parts)
-    system_content = system_content.rstrip() + "\n\n" + get_system_time_context()
-    llm = _get_llm()
     from langchain_core.messages import SystemMessage, HumanMessage
-    messages = [SystemMessage(content=system_content), HumanMessage(content=user_content)]
-    try:
-        async for chunk in llm.astream(messages):
+
+    def _full_system_text(ctx: str) -> str:
+        if ctx:
+            base = _compose_stream_system_from_context(ctx)
+        else:
+            base = system_content
+        return base.rstrip() + "\n\n" + get_system_time_context()
+
+    async def _emit_stream(sys_text: str):
+        llm = _get_llm()
+        msgs = [SystemMessage(content=sys_text), HumanMessage(content=user_content)]
+        async for chunk in llm.astream(msgs):
             if hasattr(chunk, "content") and chunk.content:
                 yield chunk.content
-    except Exception as e:
-        logger.exception("LangChain chat_completion_stream 失败: %s", e)
-        raise
+
+    ctx_full = (context or "").strip()
+    sys_full = _full_system_text(context or "")
+
+    try:
+        async for piece in _emit_stream(sys_full):
+            yield piece
+        return
+    except Exception as e1:
+        if not _is_dashscope_content_inspection_error(e1):
+            logger.exception("LangChain chat_completion_stream 失败: %s", e1)
+            raise
+        # 长上下文更易触发输入侧检测：截断后重试一次
+        if ctx_full and len(ctx_full) > _STREAM_INSPECTION_RETRY_MAX_CHARS:
+            short_ctx = ctx_full[:_STREAM_INSPECTION_RETRY_MAX_CHARS].rstrip()
+            short_ctx += "\n\n[系统说明：上文材料因长度已截断，请仅基于可见部分客观作答。]"
+            logger.warning(
+                "流式触发内容安全策略，已截断上下文后重试（%s -> %s 字符）",
+                len(ctx_full),
+                len(short_ctx),
+            )
+            try:
+                async for piece in _emit_stream(_full_system_text(short_ctx)):
+                    yield piece
+                return
+            except Exception as e2:
+                if _is_dashscope_content_inspection_error(e2):
+                    logger.warning(
+                        "截断后仍触发内容安全: %s",
+                        e2,
+                    )
+                    yield _MSG_INSPECTION_BLOCKED
+                    return
+                logger.exception("LangChain chat_completion_stream 失败: %s", e2)
+                raise
+        logger.warning("流式内容安全未通过（上下文未超过截断阈值或已无法重试）: %s", e1)
+        yield _MSG_INSPECTION_BLOCKED
 
 
 async def chat_completion_with_tools(

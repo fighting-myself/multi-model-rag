@@ -108,7 +108,8 @@ async def retrieve_advanced(
     top_k: int = 10,
     use_llamaindex_transform: bool = True,
     expand_count: int = DEFAULT_EXPAND_COUNT,
-) -> Tuple[str, float, Optional[str], List[Any]]:
+    rag_progress: Optional[Any] = None,
+) -> Tuple[str, float, Optional[str], List[Any], List[tuple]]:
     """
     Advanced RAG 检索：LlamaIndex 查询变换 + 现有混合检索（向量+全文+RRF+rerank）。
     
@@ -120,15 +121,24 @@ async def retrieve_advanced(
     expand_count: 额外生成的查询数量（仅当 use_llamaindex_transform 为 True 时有效）。
     
     Returns:
-        (context, confidence, max_confidence_context, selected_chunks)
+        (context, confidence, max_confidence_context, selected_chunks, scored_chunks_for_llm)
     """
+    async def _rp(text: str) -> None:
+        if rag_progress and (text or "").strip():
+            try:
+                await rag_progress(text.strip())
+            except Exception:
+                pass
+
     # 显式传 optional_queries，避免下游再跑 query_expand（多一次 LLM，约 10–15s 首字延迟）
     optional_queries: Optional[List[str]] = [message.strip()] if message.strip() else None
     min_len_for_transform = getattr(settings, "ADVANCED_RAG_QUERY_TRANSFORM_MIN_LEN", 20)
     if use_llamaindex_transform and message.strip() and len(message.strip()) >= min_len_for_transform:
+        await _rp("Advanced RAG：LlamaIndex 查询变换中（LLM 生成多路子查询，可能需 10～30 秒）…")
         optional_queries = await transform_query_llamaindex(message, num_queries=expand_count)
         if len(optional_queries) > 1:
             logger.info("Advanced RAG 使用 LlamaIndex 生成 %d 条查询", len(optional_queries))
+        await _rp(f"查询变换完成：共 {len(optional_queries or [])} 条子查询，开始混合检索。")
 
     if knowledge_base_ids:
         return await chat_service._rag_context_kb_ids(
@@ -137,6 +147,7 @@ async def retrieve_advanced(
             user_id,
             top_k=top_k,
             optional_queries=optional_queries,
+            rag_progress=rag_progress,
         )
     if knowledge_base_id:
         kb_result = await chat_service.db.execute(
@@ -152,12 +163,14 @@ async def retrieve_advanced(
             use_rerank=use_rerank,
             use_hybrid=use_hybrid,
             optional_queries=optional_queries,
+            rag_progress=rag_progress,
         )
     return await chat_service._rag_context_all_kbs(
         message,
         user_id,
         top_k=top_k,
         optional_queries=optional_queries,
+        rag_progress=rag_progress,
     )
 
 
