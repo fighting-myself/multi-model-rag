@@ -162,8 +162,15 @@ export default function Chat() {
   const navigate = useNavigate()
 
   const scrollToBottom = () => {
-    // 流式过程/思考逐字会高频触发 messages 更新，smooth 滚动会造成明显卡顿
-    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
+    // 流式过程/思考逐字会高频触发 messages 更新，smooth 滚动会造成明显卡顿。
+    // 勿用无 block 的 scrollIntoView：默认对齐方式易把底部锚点「对齐到视口顶端」，长列表会像文字先被卷上去再弹回。
+    const end = messagesEndRef.current
+    const parent = end?.closest('.app-content-area') as HTMLElement | null
+    if (parent) {
+      parent.scrollTop = parent.scrollHeight
+    } else {
+      end?.scrollIntoView({ behavior: 'auto', block: 'end' })
+    }
   }
 
   useEffect(() => {
@@ -195,7 +202,8 @@ export default function Chat() {
     const onScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = parent
       const gap = scrollHeight - scrollTop - clientHeight
-      stickToBottomRef.current = gap < 120
+      // 阈值过大时用户略向上看仍会被判成「贴底」，流式阶段会反复强制滚到底，像文字往上又爬回去
+      stickToBottomRef.current = gap < 64
     }
     parent.addEventListener('scroll', onScroll, { passive: true })
     // 切勿在挂载时同步调用 onScroll()：会覆盖 handleSend 里设的「贴底」，

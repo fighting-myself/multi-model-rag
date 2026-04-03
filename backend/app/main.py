@@ -236,13 +236,28 @@ async def root():
     }
 
 
+async def _health_check_db() -> tuple[bool, str]:
+    try:
+        return await asyncio.wait_for(check_db(), timeout=10.0)
+    except asyncio.TimeoutError:
+        return False, "database 检查超时（MySQL 不可达或连接过慢）"
+
+
+async def _health_sync(name: str, fn, timeout: float = 8.0) -> tuple[bool, str]:
+    """同步依赖检测放到线程池并限时，避免阻塞事件循环或长时间挂起。"""
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn), timeout=timeout)
+    except asyncio.TimeoutError:
+        return False, f"{name} 检查超时"
+
+
 @app.get("/health")
 async def health_check():
     """健康检查：返回各依赖连通状态"""
-    db_ok, db_msg = await check_db()
-    redis_ok, redis_msg = check_redis()
-    vector_ok, vector_msg = check_vector()
-    minio_ok, minio_msg = check_minio()
+    db_ok, db_msg = await _health_check_db()
+    redis_ok, redis_msg = await _health_sync("Redis", check_redis, 6.0)
+    vector_ok, vector_msg = await _health_sync("vector", check_vector, 12.0)
+    minio_ok, minio_msg = await _health_sync("MinIO", check_minio, 10.0)
     all_ok = db_ok and redis_ok and vector_ok and minio_ok
     return JSONResponse(
         content={

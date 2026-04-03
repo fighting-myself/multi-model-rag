@@ -1,0 +1,157 @@
+{
+  "site": "confluence-aishu",
+  "url": "https://confluence.aishu.cn/",
+  "capturedAt": "2026-04-03T09:50:46.975Z",
+  "requests": [
+    {
+      "body": {
+        "count": 0,
+        "maxTimeout": 300,
+        "timeout": 30
+      },
+      "capturedAt": 1775209785758,
+      "contentType": "application/json",
+      "method": "GET",
+      "requestBody": null,
+      "requestContentType": null,
+      "responseBody": {
+        "count": 0,
+        "maxTimeout": 300,
+        "timeout": 30
+      },
+      "responseContentType": "application/json",
+      "status": null,
+      "url": "/rest/mywork/latest/status/notification/count?_=1775209755028"
+    },
+    {
+      "body": {
+        "attachmentsCount": 0,
+        "comments": [],
+        "page": "",
+        "readOnlyMode": {
+          "isBannerMessageOn": false,
+          "isEnabled": false
+        },
+        "time": 1775209785768
+      },
+      "capturedAt": 1775209785786,
+      "contentType": "application/json",
+      "method": "GET",
+      "requestBody": null,
+      "requestContentType": null,
+      "responseBody": {
+        "attachmentsCount": 0,
+        "comments": [],
+        "page": "",
+        "readOnlyMode": {
+          "isBannerMessageOn": false,
+          "isEnabled": false
+        },
+        "time": 1775209785768
+      },
+      "responseContentType": "application/json",
+      "status": null,
+      "url": "/rest/quickreload/latest/35916447?since=1775209753981&_=1775209755029"
+    },
+    {
+      "body": {
+        "count": 0,
+        "maxTimeout": 300,
+        "timeout": 30
+      },
+      "capturedAt": 1775209815767,
+      "contentType": "application/json",
+      "method": "GET",
+      "requestBody": null,
+      "requestContentType": null,
+      "responseBody": {
+        "count": 0,
+        "maxTimeout": 300,
+        "timeout": 30
+      },
+      "responseContentType": "application/json",
+      "status": null,
+      "url": "/rest/mywork/latest/status/notification/count?_=1775209755030"
+    },
+    {
+      "body": {
+        "attachmentsCount": 0,
+        "comments": [],
+        "page": "",
+        "readOnlyMode": {
+          "isBannerMessageOn": false,
+          "isEnabled": false
+        },
+        "time": 1775209815775
+      },
+      "capturedAt": 1775209815790,
+      "contentType": "application/json",
+      "method": "GET",
+      "requestBody": null,
+      "requestContentType": null,
+      "responseBody": {
+        "attachmentsCount": 0,
+        "comments": [],
+        "page": "",
+        "readOnlyMode": {
+          "isBannerMessageOn": false,
+          "isEnabled": false
+        },
+        "time": 1775209815775
+      },
+      "responseContentType": "application/json",
+      "status": null,
+      "url": "/rest/quickreload/latest/35916447?since=1775209785768&_=1775209755031"
+    },
+    {
+      "body": {
+        "count": 0,
+        "maxTimeout": 300,
+        "timeout": 30
+      },
+      "capturedAt": 1775209845783,
+      "contentType": "application/json",
+      "method": "GET",
+      "requestBody": null,
+      "requestContentType": null,
+      "responseBody": {
+        "count": 0,
+        "maxTimeout": 300,
+        "timeout": 30
+      },
+      "responseContentType": "application/json",
+      "status": null,
+      "url": "/rest/mywork/latest/status/notification/count?_=1775209755032"
+    },
+    {
+      "body": {
+        "attachmentsCount": 0,
+        "comments": [],
+        "page": "",
+        "readOnlyMode": {
+          "isBannerMessageOn": false,
+          "isEnabled": false
+        },
+        "time": 1775209845777
+      },
+      "capturedAt": 1775209845793,
+      "contentType": "application/json",
+      "method": "GET",
+      "requestBody": null,
+      "requestContentType": null,
+      "responseBody": {
+        "attachmentsCount": 0,
+        "comments": [],
+        "page": "",
+        "readOnlyMode": {
+          "isBannerMessageOn": false,
+          "isEnabled": false
+        },
+        "time": 1775209845777
+      },
+      "responseContentType": "application/json",
+      "status": null,
+      "url": "/rest/quickreload/latest/35916447?since=1775209815775&_=1775209755033"
+    }
+  ]
+}

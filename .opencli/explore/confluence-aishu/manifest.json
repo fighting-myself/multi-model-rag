@@ -1,0 +1,16 @@
+{
+  "site": "confluence-aishu",
+  "target_url": "https://confluence.aishu.cn/",
+  "final_url": "https://confluence.aishu.cn/",
+  "title": "爱数研发知识库 - 研发知识库 - AISHU Confluence",
+  "framework": {
+    "nextjs": false,
+    "nuxt": false,
+    "react": false,
+    "vue2": false,
+    "vue3": false
+  },
+  "stores": [],
+  "top_strategy": "public",
+  "explored_at": "2026-04-03T09:44:14.229Z"
+}

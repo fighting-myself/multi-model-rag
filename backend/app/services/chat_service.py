@@ -756,21 +756,23 @@ class ChatService:
                 return True, False, False, False, "无需检索与外部工具，可直接依据用户表述与对话历史作答。"
             return False, enabled_rag, enabled_mcp, enabled_skills, "当前无可用上下文。"
 
-        # 兜底启发式：当外部门户技能已经提取到“标题 + 正文”时，基本可直接生成总结
+        # 兜底启发式：当外部门户技能已提取到可核验正文时，基本可直接生成总结
         # 避免二次 LLM 评估误判导致超能模式循环到上限。
         ctx = context or ""
-        if ("标题:" in ctx) and ("正文:" in ctx or "正文：" in ctx):
-            return True, enabled_rag, enabled_mcp, enabled_skills, "上下文已包含标题与正文摘要（可直接总结）。"
-
-        # 当 confluence skill 已明确返回“未配置/认证失败/获取失败”等可解释错误时，
-        # 直接视为 sufficient，避免后续循环改用 web_fetch / RAG 造成登录页等无效上下文。
+        q_l = (question or "").strip().lower()
+        if self._has_usable_page_content(ctx):
+            return True, enabled_rag, enabled_mcp, enabled_skills, "上下文已包含可核验正文（可直接总结）。"
+        # 门户外链场景：Skills 已返回明确失败信息时，不应再错误切换到 RAG（外链未入库时必然无效）。
+        # 直接结束补充循环，进入最终回答并向用户说明失败原因与排障建议。
         if (
-            ("文档门户未配置" in ctx)
-            or ("文档门户认证失败" in ctx)
-            or ("获取页面失败" in ctx)
-            or ("未安装 httpx" in ctx)
+            ("viewpage.action" in q_l or "pageid=" in q_l or "/pages/" in q_l)
+            and ("【Skills】" in ctx or "获取页面失败" in ctx or "技能执行失败" in ctx)
+            and ("获取页面失败" in ctx or "技能执行失败" in ctx or "未返回正文" in ctx or "未安装 opencli" in ctx)
+            and not self._has_usable_page_content(ctx)
         ):
-            return True, False, False, enabled_skills, "confluence skill 已返回可解释错误，无需继续补检索。"
+            return True, enabled_rag, enabled_mcp, enabled_skills, "Skills 已返回明确失败信息，停止循环并直接给出失败原因。"
+
+        # 连接/认证失败不应视为 sufficient：允许后续轮次继续尝试其它路径。
         system = """你是“上下文充分性与下一步策略”评估助手。
 根据用户问题与当前累计上下文，判断是否已经足够直接回答；若不足，给出下一轮应启用的能力组合。
 只输出 JSON（不要 markdown）：
@@ -1578,6 +1580,26 @@ class ChatService:
         return False
 
     @staticmethod
+    def _has_usable_page_content(text: str) -> bool:
+        """判断技能结果里是否包含可用于总结的页面正文（不依赖固定关键词）。"""
+        s = (text or "").strip()
+        if not s:
+            return False
+        low = s.lower()
+        bad_markers = (
+            "获取页面失败",
+            "技能执行失败",
+            "未返回正文",
+            "无正文",
+            "权限不足",
+            "未安装",
+            "error:",
+        )
+        if any(m in s for m in bad_markers) or any(m in low for m in bad_markers):
+            return False
+        return len(s) >= 80
+
+    @staticmethod
     def _extract_confluence_url_and_credentials(message: str) -> tuple[str | None, str | None, str | None]:
         """
         从用户输入中提取：
@@ -1591,7 +1613,11 @@ class ChatService:
             return None, None, None
 
         url = None
-        m_url = re.search(r"(https?://[^\s)]+?viewpage\.action\?pageId=\d+)", text, re.IGNORECASE)
+        m_url = re.search(
+            r"(https?://[^\s)]+?(?:viewpage\.action\?pageId=\d+|/pages/\d+[^\s)]*))",
+            text,
+            re.IGNORECASE,
+        )
         if m_url:
             url = (m_url.group(1) or "").strip()
             # 去掉尾部中文标点等
@@ -1615,13 +1641,22 @@ class ChatService:
         self, message: str
     ) -> tuple[str, List[str]] | tuple[None, List[str]]:
         """
-        如果用户输入包含 Confluence 外链 + 账号密码，则直接调用 confluence skill 获取正文。
+        如果用户输入包含 Confluence 页面链接，则直接调用 confluence skill 获取正文。
+        优先通过 connection_name 从外接平台连接注入凭证；用户显式提供账号密码时再覆盖。
         成功返回 (skill_results, ["confluence"])；失败返回 (None, [])。
         """
         from app.services.skill_runtime import invoke_skill
+        from app.services.skill_loader import SKILLS_DIR
 
         url, username, password = self._extract_confluence_url_and_credentials(message)
         if not url:
+            return None, []
+        # 技能优先级：优先 confluence；若仓库未安装则回退 opencli-confluence-aishu。
+        if (SKILLS_DIR / "confluence" / "SKILL.md").is_file():
+            confluence_skill_id = "confluence"
+        elif (SKILLS_DIR / "opencli-confluence-aishu" / "SKILL.md").is_file():
+            confluence_skill_id = "opencli-confluence-aishu"
+        else:
             return None, []
 
         try:
@@ -1629,21 +1664,46 @@ class ChatService:
                 "action": "get_page",
                 "url": url,
             }
+            # 优先用外接平台连接名注入凭证（connection_name）
+            try:
+                host = urlparse(url).netloc.lower()
+                if host:
+                    skill_args["connection_name"] = host
+            except Exception:
+                pass
+            try:
+                skill_args = await apply_external_connection_injection(self.db, message, skill_args)
+            except Exception:
+                pass
             if username:
                 skill_args["username"] = username
             if password:
                 skill_args["password"] = password
+            # 若未从 connection_name/用户输入拿到认证信息，则兜底使用服务端配置。
+            # 注意：这里把配置显式放进 skill_args，避免沙箱环境变量净化后技能拿不到凭证。
+            if not (str(skill_args.get("username") or "").strip() and str(skill_args.get("password") or "").strip()):
+                if not (
+                    str(skill_args.get("email") or "").strip()
+                    and str(skill_args.get("api_token") or skill_args.get("token") or "").strip()
+                ):
+                    if (settings.CONFLUENCE_USERNAME or "").strip() and (settings.CONFLUENCE_PASSWORD or "").strip():
+                        skill_args.setdefault("username", settings.CONFLUENCE_USERNAME)
+                        skill_args.setdefault("password", settings.CONFLUENCE_PASSWORD)
+                    elif (settings.CONFLUENCE_EMAIL or "").strip() and (settings.CONFLUENCE_API_TOKEN or "").strip():
+                        skill_args.setdefault("email", settings.CONFLUENCE_EMAIL)
+                        skill_args.setdefault("api_token", settings.CONFLUENCE_API_TOKEN)
+            if (settings.CONFLUENCE_BASE_URL or "").strip():
+                skill_args.setdefault("base_url", settings.CONFLUENCE_BASE_URL)
+            if (settings.CONFLUENCE_CONTEXT_PATH or "").strip():
+                skill_args.setdefault("context_path", settings.CONFLUENCE_CONTEXT_PATH)
 
-            skill_results = await invoke_skill(
-                "confluence",
-                skill_args,
-            )
+            skill_results = await invoke_skill(confluence_skill_id, skill_args)
         except Exception:
             logging.exception("direct confluence invoke failed")
             return None, []
 
         if not skill_results or not str(skill_results).strip():
-            return None, []
+            return "获取页面失败：技能返回为空。", [confluence_skill_id]
         # 防止回退到“未配置/错误提示”当作正文
         bad_markers = (
             "文档门户未配置",
@@ -1652,9 +1712,9 @@ class ChatService:
             "未安装 httpx",
         )
         sr = str(skill_results)
-        if any(m in sr for m in bad_markers) and ("标题:" not in sr and "正文:" not in sr):
-            return None, []
-        return skill_results, ["confluence"]
+        if any(m in sr for m in bad_markers) and (not self._has_usable_page_content(sr)):
+            return sr, [confluence_skill_id]
+        return skill_results, [confluence_skill_id]
 
     def _adjust_super_mode_intent_for_portal_links(
         self,
@@ -1664,12 +1724,12 @@ class ChatService:
         need_skills: bool,
         reason: str,
     ) -> tuple[bool, bool, bool, str]:
-        """命中门户式页面链接时：优先走 Skills（专用集成或 web_fetch），避免误开向量检索。"""
+        """命中门户式页面链接时：优先走 Skills 专用集成（Confluence 等），避免误开向量检索。"""
         if not self._message_indicates_portal_style_page_link(message):
             return need_rag, need_mcp, need_skills, reason
         extra = (
-            "问题含外部门户/文档页链接，应使用 Skills（专用技能或网页拉取）获取正文，"
-            "未入库链接无法由向量知识库直接命中。"
+            "问题含外部门户/文档页链接，应优先使用 Skills 专用技能获取正文；"
+            "未入库链接无法由向量知识库直接命中。仅当专用技能失败时，才回退网页拉取。"
         )
         r = (reason + "；" + extra) if (reason or "").strip() else extra
         return False, need_mcp, True, r
@@ -1755,7 +1815,7 @@ class ChatService:
 规则：
 1. 依赖**已入库知识库**的文档类问题 → need_rag 倾向 true
 2. 用户已选择知识库且问题与资料相关 → need_rag 应为 true
-3. 用户粘贴**外部门户/文档系统页面链接**（常见形态含 viewpage.action、pageId=、路径含 /wiki/ 或 /pages/数字 等）并要求总结/翻译/提取正文 → **need_skills=true，need_rag=false**。未入库的链接正文不能指望向量检索命中，应由页面拉取类能力处理。
+3. 用户粘贴**外部门户/文档系统页面链接**（常见形态含 viewpage.action、pageId=、路径含 /wiki/ 或 /pages/数字 等）并要求总结/翻译/提取正文 → **need_skills=true，need_rag=false**。对 Confluence 类链接优先调用 `skill_invoke(confluence)`；仅在专用技能失败时才考虑 `web_fetch`。
 4. 实时天气、新闻、联网、抓取网页、明确技能 → need_skills 倾向 true
 5. 明确要列出或使用 MCP、接外部系统 → need_mcp 为 true
 5.1 只有当「当前可用 MCP 服务/工具清单」里存在可解决该问题的工具时，need_mcp 才应为 true
@@ -2013,9 +2073,10 @@ class ChatService:
                 )
 
                 # 强约束：用户给了 Confluence 外链与账号密码时，直接用 confluence skill_invoke 拉取正文
-                direct_results, direct_tools = await self._try_direct_confluence_page_from_user_input(message)
-                if direct_results:
-                    skill_results, skill_tools = direct_results, direct_tools
+                dr, dt = await self._try_direct_confluence_page_from_user_input(message)
+                used_direct = bool(dr)
+                if dr:
+                    skill_results, skill_tools = dr, dt
                     skill_trace_logs.append("直接使用 confluence 获取外链页面正文（跳过模型编排）。")
                     yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": skill_trace_logs[-1]})
                 else:
@@ -2030,6 +2091,11 @@ class ChatService:
                     for tl in skill_trace_logs:
                         yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": tl})
 
+                # 实际发起过的工具名（过滤/校验后会清空 skill_tools，不能用它判断“是否调用过”）
+                skill_tools_invoked = list(skill_tools or [])
+                # 记录 Skills 原始返回，便于在思考区和日志中定位失败原因。
+                skill_raw_result = (skill_results or "").strip()
+
                 # 强约束：当需要“外链页面正文提取/摘要”类上下文时，仅调用 skill_load 文档属于无效结果。
                 # 否则系统会把“文档说明”当作有效上下文，进而在后续生成阶段编造摘要。
                 if skill_results and "[skill_load]:" in skill_results and "[skill_invoke]:" not in skill_results:
@@ -2037,17 +2103,17 @@ class ChatService:
                     skill_tools = []
                 if skill_results and skill_results.strip():
                     # 仅当走模型编排时才做相关性过滤；直接拉取的正文应完整保留
-                    if not (direct_results and skill_results == direct_results):
+                    if not (used_direct and skill_results == dr):
                         rel, kept = await self._filter_external_context_relevance(message, skill_results, "Skills")
                         if rel:
                             skill_results = kept
                         else:
                             skill_results = ""
                             skill_tools = []
-                tools_used.extend(skill_tools)
+                tools_used.extend(skill_tools_invoked)
 
-                if skill_tools:
-                    skill_txt = "本阶段 Skills 调用：" + "、".join(skill_tools) + "。"
+                if skill_tools_invoked:
+                    skill_txt = "本阶段 Skills 调用：" + "、".join(skill_tools_invoked) + "。"
                 else:
                     skill_txt = "本阶段未调用 Skills 工具（模型判断无需或无可调用）。"
                 if skill_results and skill_results.strip():
@@ -2055,6 +2121,19 @@ class ChatService:
                     if len(snip) > 600:
                         snip = snip[:600] + "…"
                     skill_txt += "\n输出摘要：\n" + snip
+                elif skill_tools_invoked:
+                    skill_txt += (
+                        "\n说明：已调用上述 Skills 工具，但结果未通过相关性过滤、或未能获得正文"
+                        "（例如仅 skill_load、或接口返回错误提示），未纳入后续上下文。"
+                    )
+                    if skill_raw_result:
+                        raw = skill_raw_result if len(skill_raw_result) <= 1200 else (skill_raw_result[:1200] + "…")
+                        skill_txt += "\n原始返回：\n" + raw
+                        logging.warning(
+                            "Skills 调用未纳入上下文 tools=%s raw=%s",
+                            ",".join(skill_tools_invoked),
+                            raw.replace("\n", "\\n"),
+                        )
                 yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": skill_txt})
             elif need_skills:
                 yield (
@@ -2087,6 +2166,18 @@ class ChatService:
             sufficient_now, next_rag, next_mcp, next_skills, assess_reason = await self._assess_context_and_next_actions(
                 message, eval_ctx, need_rag, need_mcp, need_skills
             )
+            # 门户外链场景下，若 Skills 已返回明确失败信息，不再切换到 RAG（外链通常未入库，继续 RAG 只会空转）。
+            msg_l = (message or "").strip().lower()
+            if (
+                ("viewpage.action" in msg_l or "pageid=" in msg_l or "/pages/" in msg_l)
+                and (("获取页面失败" in skill_results) or ("技能执行失败" in skill_results) or ("未返回正文" in skill_results))
+            ):
+                next_rag = False
+                next_skills = False
+                next_mcp = False
+                if not sufficient_now:
+                    sufficient_now = True
+                assess_reason = (assess_reason or "Skills 调用失败。") + " [系统：已停止循环，避免无效回退到 RAG。]"
             # 本轮开了 RAG 但未拿到有效片段时，勿多轮重复「只开 RAG」；强制尝试 Skills/联网
             if not sufficient_now and round_idx < max_rounds and need_rag and not has_real_rag:
                 next_rag = False
@@ -2150,24 +2241,23 @@ class ChatService:
         if tool_block:
             full_context += tool_block
 
-        # 防编造硬约束：当任务是“外链页面正文总结”（viewpage.action/pageId=），但 Skills 结果里没有正文字段，
+        # 防编造硬约束：当任务是“外链页面正文总结”（viewpage.action/pageId=），但 Skills 结果里没有可核验正文，
         # 则禁止模型编造“页面内容”。这能避免只拿到 skill_load 文档说明时仍生成虚构总结。
         q_l = (message or "").strip().lower()
         if need_skills and (
             "viewpage.action" in q_l or "pageid=" in q_l or "/pages/" in q_l
         ):
             sr = (skill_results or "").strip()
-            has_title = ("标题:" in sr) or ("标题：" in sr)
-            has_body = ("正文:" in sr) or ("正文：" in sr)
-            if (not sr) or (not (has_title and has_body)):
+            has_page_content = self._has_usable_page_content(sr)
+            if (not sr) or (not has_page_content):
                 full_context += (
-                    "【系统约束】未从 Skills 获取到外链页面正文（未检测到“标题:”和“正文:”）。"
+                    "【系统约束】未从 Skills 获取到可核验正文。"
                     "不得编造页面内容；应明确说明未获取到可核验正文，并建议稍后重试或检查技能/权限配置。\n\n"
                 )
             else:
                 # 当正文已具备时，强制禁止输出与事实冲突的免责声明模板，避免“已拿到内容却说拿不到”。
                 full_context += (
-                    "【输出约束】你已获得外链页面的【标题】与【正文】摘要，请只基于这些信息完成流畅总结。"
+                    "【输出约束】你已获得外链页面的可核验正文，请只基于这些信息完成流畅总结。"
                     "禁止输出任何与事实冲突的免责声明话术（如“无法访问外部网页/内容未给出/由于无法访问…”等）。"
                     "输出要求：不要出现“由于无法访问/模拟返回/我无法直接访问”等前置说明；用连续的中文叙述组织要点，避免段落碎片化。\n\n"
                 )
@@ -2526,6 +2616,7 @@ class ChatService:
                 "【Skills】skills 子目录名即 skill_id（[a-z0-9][a-z0-9_-]*）。\n"
                 "- 先 skill_load(skill_id) 仅用于读取用法文档；当需要“网页正文/摘要/内容提取”时，必须继续调用 skill_invoke 获取正文。\n"
                 "- 严禁只调用 skill_load 就结束：skill_load 不等于已获得外部正文上下文。\n"
+                "- Confluence/文档门户链接优先：先 skill_invoke(\"confluence\", {\"action\":\"get_page\", \"url\":\"...\", \"connection_name\":\"域名\"})；仅专用技能失败时再用 web_fetch。\n"
                 "- 可用 web_search/web_fetch/bash/file_write。\n"
                 "- 若完全不需要工具，只回复一句：不需要调用工具。\n"
                 "若需要工具，请用 tool_calls；可多轮调用直到信息足够。"
@@ -2538,6 +2629,7 @@ class ChatService:
                 "【Skills】skills 子目录名即 skill_id（[a-z0-9][a-z0-9_-]*，与 OpenClaw 目录风格一致）。\n"
                 "- 需要某技能时：先 skill_load(skill_id) 阅读 SKILL.md，再 skill_invoke(skill_id, skill_args) 传入文档约定的 JSON；不要编造 skill_id。\n"
                 "- 若文档要求 shell：在已提供 bash 工具时可调用 bash（受 BASH_SAFE_BINS / 审批策略约束）。\n"
+                "- Confluence/文档门户链接优先用 confluence 技能获取正文；仅失败时再走 web_fetch。\n"
                 "- 需要通用联网：可用 web_search / web_fetch。\n"
                 "- 若完全不需要任何工具，只回复一句：不需要调用工具。\n"
                 "若需要工具，请用 tool_calls；可多轮调用直到信息足够。"
@@ -2774,6 +2866,36 @@ class ChatService:
                         sa = args.get("skill_args")
                         if isinstance(sa, dict):
                             args["skill_args"] = await apply_external_connection_injection(self.db, message, sa)
+                            sid = str(args.get("skill_id") or "").strip().lower()
+                            if sid == "confluence":
+                                confluence_args = args["skill_args"]
+                                if isinstance(confluence_args, dict):
+                                    if not (
+                                        str(confluence_args.get("username") or "").strip()
+                                        and str(confluence_args.get("password") or "").strip()
+                                    ):
+                                        if not (
+                                            str(confluence_args.get("email") or "").strip()
+                                            and str(
+                                                confluence_args.get("api_token")
+                                                or confluence_args.get("token")
+                                                or ""
+                                            ).strip()
+                                        ):
+                                            if (settings.CONFLUENCE_USERNAME or "").strip() and (
+                                                settings.CONFLUENCE_PASSWORD or ""
+                                            ).strip():
+                                                confluence_args.setdefault("username", settings.CONFLUENCE_USERNAME)
+                                                confluence_args.setdefault("password", settings.CONFLUENCE_PASSWORD)
+                                            elif (settings.CONFLUENCE_EMAIL or "").strip() and (
+                                                settings.CONFLUENCE_API_TOKEN or ""
+                                            ).strip():
+                                                confluence_args.setdefault("email", settings.CONFLUENCE_EMAIL)
+                                                confluence_args.setdefault("api_token", settings.CONFLUENCE_API_TOKEN)
+                                    if (settings.CONFLUENCE_BASE_URL or "").strip():
+                                        confluence_args.setdefault("base_url", settings.CONFLUENCE_BASE_URL)
+                                    if (settings.CONFLUENCE_CONTEXT_PATH or "").strip():
+                                        confluence_args.setdefault("context_path", settings.CONFLUENCE_CONTEXT_PATH)
                     except Exception:
                         pass
                 display_name = name

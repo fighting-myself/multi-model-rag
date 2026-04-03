@@ -7,15 +7,36 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
+
+def _engine_connect_args() -> dict:
+    """避免 MySQL 等不可达时 TCP 长时间挂起，导致接口与前端一直 loading。"""
+    u = (settings.DATABASE_URL or "").lower()
+    if "sqlite" in u:
+        return {}
+    if "mysql" in u:
+        # aiomysql / asyncmy 均支持 connect_timeout（秒）
+        return {"connect_timeout": 10}
+    return {}
+
+
 # 创建异步引擎（MySQL/PostgreSQL 用连接池，SQLite 用 NullPool）
 _use_null_pool = "sqlite" in settings.DATABASE_URL
-engine = create_async_engine(
-    settings.DATABASE_URL,
+_engine_kwargs = dict(
     echo=False,
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
+    pool_timeout=25,
+    pool_recycle=1800,
     poolclass=NullPool if _use_null_pool else None,
+)
+_ca = _engine_connect_args()
+if _ca:
+    _engine_kwargs["connect_args"] = _ca
+
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    **_engine_kwargs,
 )
 
 # 创建会话工厂

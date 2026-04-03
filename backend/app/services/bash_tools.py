@@ -5,16 +5,15 @@ Bash/Shell 执行工具（OpenClaw exec 能力迁移）。
 from __future__ import annotations
 
 import logging
-import os
 import re
 import subprocess
-import sys
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
+from app.services.sandbox_service import run_shell_sync
 
 logger = logging.getLogger(__name__)
 
@@ -113,94 +112,6 @@ def _resolve_workdir(workdir: Optional[str]) -> Path:
     return DEFAULT_WORKDIR
 
 
-def _run_with_pty(command: str, cwd: Path, timeout: int, env: Optional[Dict[str, str]] = None) -> tuple[int, str]:
-    """在 Unix 下用 PTY 执行命令，返回 (returncode, output)。Windows 下回退为普通 subprocess。"""
-    env = env or {}
-    if sys.platform == "win32":
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-            env={**os.environ, **env},
-        )
-        out = (result.stdout or "") + (result.stderr or "")
-        return (result.returncode, out.strip())
-    try:
-        import pty
-        import select
-
-        master, slave = pty.openpty()
-        try:
-            p = subprocess.Popen(
-                command,
-                shell=True,
-                cwd=str(cwd),
-                stdin=slave,
-                stdout=slave,
-                stderr=slave,
-                env={**os.environ, **env},
-                start_new_session=True,
-            )
-            os.close(slave)
-            slave = None
-            output_chunks: List[str] = []
-            deadline = time.monotonic() + timeout
-            while p.poll() is None and time.monotonic() < deadline:
-                r, _, _ = select.select([master], [], [], 0.5)
-                if r:
-                    try:
-                        data = os.read(master, 4096).decode("utf-8", errors="replace")
-                        if data:
-                            output_chunks.append(data)
-                    except (OSError, UnicodeDecodeError):
-                        break
-            if p.poll() is None:
-                p.kill()
-                p.wait()
-            remaining = b""
-            while True:
-                r, _, _ = select.select([master], [], [], 0.1)
-                if not r:
-                    break
-                try:
-                    remaining += os.read(master, 4096)
-                except OSError:
-                    break
-            output_chunks.append(remaining.decode("utf-8", errors="replace"))
-            os.close(master)
-            return (p.returncode or -1, "".join(output_chunks).strip())
-        finally:
-            if slave is not None:
-                try:
-                    os.close(slave)
-                except OSError:
-                    pass
-            try:
-                os.close(master)
-            except OSError:
-                pass
-    except Exception as e:
-        logger.warning("PTY 执行失败，回退普通 subprocess: %s", e)
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-            env={**os.environ, **env},
-        )
-        out = (result.stdout or "") + (result.stderr or "")
-        return (result.returncode, out.strip())
-
-
 def run_bash(
     command: str,
     workdir: Optional[str] = None,
@@ -226,22 +137,8 @@ def run_bash(
         return f"错误: {err}"
 
     try:
-        if use_pty and sys.platform != "win32":
-            returncode, out = _run_with_pty(command, cwd, timeout)
-        else:
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                encoding="utf-8",
-                errors="replace",
-            )
-            returncode = result.returncode
-            out = (result.stdout or "") + (result.stderr or "")
-            out = out.strip()
+        returncode, out = run_shell_sync(command, cwd, timeout, use_pty)
+        out = out.strip()
         if len(out) > max_chars:
             out = out[:max_chars] + "\n\n[输出过长已截断]"
         exit_info = f"\n[exit_code={returncode}]"

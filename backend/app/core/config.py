@@ -191,6 +191,13 @@ class Settings(BaseSettings):
     BASH_APPROVAL_EXPIRE_SEC: int = 300  # 审批请求过期时间（秒）
     BASH_USE_PTY: bool = False  # 是否使用 PTY（交互式 CLI，仅 Unix 有效；Windows 忽略）
 
+    # 沙箱：bash / 技能 invoke 子进程默认剥离敏感环境变量；可选 Docker 隔离（需本机 docker 与镜像）
+    SANDBOX_ENABLED: bool = True  # False 时子进程继承完整 os.environ（调试用）
+    SANDBOX_MODE: str = "process"  # process=仅净化环境；docker=在容器内执行（需 SANDBOX_DOCKER_IMAGE）
+    SANDBOX_DOCKER_IMAGE: str = ""  # 例如 debian:bookworm-slim，须含 bash 与技能所需 CLI；为空则不启用 docker 路径
+    SANDBOX_DOCKER_NETWORK: str = ""  # 非空则传给 docker run --network（默认 bridge，留空不追加参数）
+    SANDBOX_DOCKER_EXTRA_ARGS: str = ""  # 追加到 docker run，如 --memory=512m（shell 分词）
+
     # 文档门户 REST（skills/confluence，见该目录 SKILL.md）；变量名沿用 CONFLUENCE_* 以兼容现有部署
     # 自建：BASE=站点根，用户名+密码；云租户：BASE+邮箱+API Token（按实际环境）
     CONFLUENCE_BASE_URL: str = ""  # 站点根，如 https://docs.example.com
