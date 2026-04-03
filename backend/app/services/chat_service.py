@@ -1575,6 +1575,8 @@ class ChatService:
             return True
         if "/wiki/" in low:
             return True
+        if "/display/" in low:
+            return True
         if re.search(r"/pages/\d+", low):
             return True
         return False
@@ -1603,7 +1605,7 @@ class ChatService:
     def _extract_confluence_url_and_credentials(message: str) -> tuple[str | None, str | None, str | None]:
         """
         从用户输入中提取：
-        - Confluence 页面链接（包含 viewpage.action 且有 pageId=）
+        - Confluence 页面链接（包含 viewpage.action/pageId、/pages/数字、/display/空间/页面）
         - 账号（Liqu.li）
         - 密码（Driver）
         仅使用用户输入，不读取 env/配置。
@@ -1614,7 +1616,7 @@ class ChatService:
 
         url = None
         m_url = re.search(
-            r"(https?://[^\s)]+?(?:viewpage\.action\?pageId=\d+|/pages/\d+[^\s)]*))",
+            r"(https?://[^\s)]+?(?:viewpage\.action\?pageId=\d+|/pages/\d+[^\s)]*|/display/[^/\s)]+/[^\s)]+))",
             text,
             re.IGNORECASE,
         )
@@ -2369,6 +2371,26 @@ class ChatService:
             web_retrieved_context,
             web_sources_list,
         ) = out
+        # 硬约束：门户外链类问题若未拿到可核验正文，禁止进入最终 LLM 生成，直接返回失败说明，避免幻觉编造链接/需求。
+        q_l = (message or "").strip().lower()
+        if ("viewpage.action" in q_l or "pageid=" in q_l or "/pages/" in q_l or "/display/" in q_l):
+            if not self._has_usable_page_content(full_context):
+                fail_msg = (
+                    "未获取到该页面的可核验正文，无法给出可靠总结或需求列表。\n"
+                    "请先确认 Confluence 登录态与页面权限，再重试。"
+                )
+                return (
+                    fail_msg,
+                    rag_confidence,
+                    max_confidence_context,
+                    selected_chunks,
+                    rag_scored_chunks,
+                    tools_used,
+                    web_retrieved_context,
+                    web_sources_list,
+                    trace_events,
+                    thinking_seconds,
+                )
         try:
             assistant_content = await llm_chat(
                 user_content=user_content_llm,
@@ -2621,6 +2643,13 @@ class ChatService:
                 "- 若完全不需要工具，只回复一句：不需要调用工具。\n"
                 "若需要工具，请用 tool_calls；可多轮调用直到信息足够。"
             )
+            # 门户外链强约束：必须执行正文获取类工具，避免只调用 skill_load 文档说明。
+            ql = (message or "").strip().lower()
+            if ("viewpage.action" in ql or "pageid=" in ql or "/pages/" in ql or "/display/" in ql):
+                system_tool += (
+                    "\n【强约束】当前问题包含门户页面链接。请直接调用正文获取工具（skill_invoke 或 web_fetch）。"
+                    "禁止只调用 skill_load。若仅调用 skill_load，该轮视为无效。"
+                )
         else:
             system_tool = (
                 prior_block

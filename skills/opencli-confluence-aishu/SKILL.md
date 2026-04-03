@@ -72,6 +72,61 @@ description: "Use OpenCLI to operate and CLI-ify https://confluence.aishu.cn for
 
 说明：当前环境下 `spaces` 与 `search` 能跑通，但可能返回空数组（与登录态/权限相关）；`page` 需要可访问页面的真实 `pageId`。
 
+## skill_invoke 动作（已扩展）
+
+`skill_id`：`opencli-confluence-aishu`
+
+- `{"action":"get_page","url":"..."}`  
+  通用取页。支持 `viewpage.action?pageId=`、`/pages/数字`、`/display/...`（会自动回退浏览器抓正文）。
+- `{"action":"get_display_page","url":"https://confluence.aishu.cn/display/..."}`  
+  强制走浏览器抓取，适合不带 `pageId` 的 URL。
+- `{"action":"extract_links","url":"...","limit":100}`  
+  提取页面可见链接（文本+URL）。
+- `{"action":"list_demands","url":"..."}` / `{"action":"version_demands","url":"..."}`  
+  从版本页正文中识别需求条目（需求号+标题+推导链接）。
+- `{"action":"oracle_demands","url":"..."}`  
+  从已识别需求中筛出 Oracle 相关条目并给链接。
+- `{"action":"demands_with_filter","url":"...","keywords":["oracle","mysql"]}`  
+  按关键词筛选需求（支持字符串或数组）。
+- `{"action":"demands_json","url":"..."}`  
+  以 JSON 返回需求列表（id/title/url）。
+- `{"action":"oracle_demands_json","url":"..."}`  
+  以 JSON 返回 Oracle 相关需求。
+- `{"action":"group_demands_by_db","url":"..."}`  
+  按数据库类型分组返回需求（oracle/mysql/sqlserver/kingbase/goldendb/oceanbase/dameng/other）。
+- `{"action":"dedupe_by_id","url":"..."}` / `{"action":"dedupe_by_id","urls":["...","..."]}`  
+  对单页或多页需求按需求号去重后返回文本列表。
+- `{"action":"export_csv","url":"..."}` / `{"action":"export_csv","urls":["...","..."]}`  
+  导出 CSV（id,title,url）。
+- `{"action":"follow_links","url":"...","limit":5}`  
+  自动跟进前 N 条需求链接，抓取每条页面摘要（用于补充状态/细节）。
+- `{"action":"validate_links","url":"...","limit":10}`  
+  校验需求链接可访问性（返回 JSON：ok/not_found_or_no_permission/fetch_failed）。
+- `{"action":"export_markdown","url":"...","title":"Zeus-M7 需求清单"}`  
+  导出 Markdown 汇报格式；也支持 `urls` 多页合并导出。
+- `{"action":"debug_page","url":"..."}`  
+  输出 open/result/current_url/title/text_head，用于排障。
+- `{"action":"search","query":"RAG","limit":10}`
+- `{"action":"spaces","limit":20}`
+- `{"action":"check_auth"}`
+
+### 典型调用（版本需求页）
+
+- 列全量需求：  
+  `{"action":"list_demands","url":"https://confluence.aishu.cn/display/DMS/Zeus-M7-8.0.9.0"}`
+- 列 Oracle 需求：  
+  `{"action":"oracle_demands","url":"https://confluence.aishu.cn/display/DMS/Zeus-M7-8.0.9.0"}`
+- 列 Oracle + MySQL（关键词过滤）：  
+  `{"action":"demands_with_filter","url":"https://confluence.aishu.cn/display/DMS/Zeus-M7-8.0.9.0","keywords":["oracle","mysql"]}`
+- 导出 CSV：  
+  `{"action":"export_csv","url":"https://confluence.aishu.cn/display/DMS/Zeus-M7-8.0.9.0"}`
+- 跟进前 3 条需求链接：  
+  `{"action":"follow_links","url":"https://confluence.aishu.cn/display/DMS/Zeus-M7-8.0.9.0","limit":3}`
+- 校验前 10 条需求链接可访问性：  
+  `{"action":"validate_links","url":"https://confluence.aishu.cn/display/DMS/Zeus-M7-8.0.9.0","limit":10}`
+- 导出 Markdown 汇总：  
+  `{"action":"export_markdown","url":"https://confluence.aishu.cn/display/DMS/Zeus-M7-8.0.9.0","title":"Zeus-M7-8.0.9.0 需求清单"}`
+
 ## 推荐目标命令（优先沉淀）
 
 - 搜索知识页（按关键词）
