@@ -48,6 +48,7 @@ def check_and_incr_upload(user_id: int) -> tuple[bool, int, int]:
         n = r.incr(key)
         if n == 1:
             r.expire(key, 86400 * 2)
+        logger.debug("rate upload user_id=%s count=%s limit=%s allowed=%s", user_id, n, limit, n <= limit)
         return (n <= limit, n, limit)
     except Exception as e:
         logger.warning("限流 Redis 操作失败: %s", e)
@@ -69,6 +70,7 @@ def check_and_incr_conversation(user_id: int) -> tuple[bool, int, int]:
         n = r.incr(key)
         if n == 1:
             r.expire(key, 86400 * 2)
+        logger.debug("rate conversation user_id=%s count=%s limit=%s allowed=%s", user_id, n, limit, n <= limit)
         return (n <= limit, n, limit)
     except Exception as e:
         logger.warning("限流 Redis 操作失败: %s", e)
@@ -90,6 +92,7 @@ def check_and_incr_search_qps(user_id: int) -> tuple[bool, int, float]:
         n = r.incr(key)
         if n == 1:
             r.expire(key, 2)
+        logger.debug("rate search_qps user_id=%s count=%s limit=%s allowed=%s", user_id, n, limit_qps, n <= limit)
         return (n <= limit, n, limit_qps)
     except Exception as e:
         logger.warning("限流 Redis 操作失败: %s", e)
@@ -115,7 +118,7 @@ def get_usage_snapshot(user_id: int) -> dict:
             search_count = int(r.get(search_key) or 0)
         except Exception:
             pass
-    return {
+    out = {
         "upload_today": upload_count,
         "upload_limit_per_day": getattr(settings, "RATE_LIMIT_UPLOAD_PER_DAY", 500),
         "conversation_today": chat_count,
@@ -123,3 +126,5 @@ def get_usage_snapshot(user_id: int) -> dict:
         "search_current_second": search_count,
         "search_qps_limit": getattr(settings, "RATE_LIMIT_SEARCH_QPS", 10.0),
     }
+    logger.debug("rate snapshot user_id=%s data=%s", user_id, out)
+    return out

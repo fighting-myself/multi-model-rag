@@ -2,6 +2,7 @@
 向量存储服务：支持 Zilliz Cloud / Qdrant
 """
 import hashlib
+import logging
 from typing import List, Optional, Dict, Any
 
 # ========== 兼容性修复：必须在导入 pymilvus 之前执行 ==========
@@ -45,6 +46,8 @@ except ImportError:
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 def chunk_id_to_vector_id(chunk_id: int) -> str:
     """由 chunk_id 得到确定性向量 id（与插入时一致，跨进程不变）。"""
@@ -68,6 +71,7 @@ def get_vector_client():
             _vector_client_cache = ZillizVectorStore()
         else:
             _vector_client_cache = QdrantVectorStore()
+        logger.debug("vector client initialized type=%s", settings.VECTOR_DB_TYPE)
     return _vector_client_cache
 
 
@@ -113,29 +117,29 @@ class ZillizVectorStore:
         Args:
             actual_dim: 实际的向量维度（如果提供，优先使用此维度；否则使用配置的维度）
         """
-        import logging
         try:
             if self.client.has_collection(self._collection):
+                logger.debug("zilliz collection exists name=%s", self._collection)
                 return
             # 使用实际维度或配置维度
             dim_to_use = actual_dim if actual_dim is not None else self._dim
-            logging.info(f"创建集合 {self._collection}，维度: {dim_to_use}")
+            logger.info("创建集合 %s，维度: %s", self._collection, dim_to_use)
             # MilvusClient.create_collection 的参数格式
             self.client.create_collection(
                 collection_name=self._collection,
                 dimension=dim_to_use,
                 metric_type="COSINE",
             )
-            logging.info(f"集合 {self._collection} 创建成功")
+            logger.info("集合 %s 创建成功", self._collection)
         except Exception as e:
-            logging.warning(f"创建集合 {self._collection} 失败: {e}")
+            logger.warning("创建集合 %s 失败: %s", self._collection, e)
             # 如果创建失败，再次检查是否已存在（可能是并发创建或其他进程已创建）
             try:
                 if self.client.has_collection(self._collection):
-                    logging.info(f"集合 {self._collection} 已存在（可能是并发创建）")
+                    logger.info("集合 %s 已存在（可能是并发创建）", self._collection)
                     return
             except Exception as e2:
-                logging.error(f"检查集合存在性时出错: {e2}")
+                logger.error("检查集合存在性时出错: %s", e2)
             # 如果集合仍然不存在，抛出异常
             raise ValueError(f"无法创建集合 {self._collection}，请检查 Zilliz 配置和权限")
 
@@ -175,6 +179,7 @@ class ZillizVectorStore:
                         row[key] = str(value)
             data.append(row)
         self.client.insert(collection_name=self._collection, data=data)
+        logger.debug("zilliz insert done collection=%s rows=%s", self._collection, len(data))
 
     def search(
         self,
@@ -187,18 +192,18 @@ class ZillizVectorStore:
         注意：集合应该在创建知识库时通过 ensure_collection() 创建，
         检索时如果集合不存在，直接返回空结果，不尝试创建。
         """
-        import logging
         # 检查集合是否存在（不创建，只检查）
         try:
             if not self.client.has_collection(self._collection):
-                logging.warning(f"集合 {self._collection} 不存在，返回空结果（集合应在创建知识库时创建）")
+                logger.warning("集合 %s 不存在，返回空结果（集合应在创建知识库时创建）", self._collection)
                 return []
         except Exception as e:
-            logging.warning(f"检查集合存在性时出错: {e}，返回空结果")
+            logger.warning("检查集合存在性时出错: %s，返回空结果", e)
             return []
         
         search_params = {"metric_type": "COSINE", "params": {}}
         try:
+            logger.debug("zilliz search start top_k=%s filter=%s", top_k, filter_expr or "")
             res = self.client.search(
                 collection_name=self._collection,
                 data=[query_vector],
@@ -207,12 +212,13 @@ class ZillizVectorStore:
                 search_params=search_params,
             )
             if res and len(res) > 0:
+                logger.debug("zilliz search done hits=%s", len(res[0]))
                 return res[0]  # 单条 query 返回 List[dict]，每项含 id, distance, entity
         except Exception as e:
-            logging.error(f"向量搜索失败: {e}")
+            logger.error("向量搜索失败: %s", e)
             # 如果是集合不存在的错误，返回空结果而不是抛出异常
             if "collection not found" in str(e).lower() or "code=100" in str(e):
-                logging.warning(f"集合 {self._collection} 不存在，返回空结果")
+                logger.warning("集合 %s 不存在，返回空结果", self._collection)
                 return []
             raise
         return []
@@ -227,9 +233,9 @@ class ZillizVectorStore:
                 collection_name=self._collection,
                 ids=ids_expr,
             )
+            logger.debug("zilliz delete done collection=%s chunk_ids=%s", self._collection, len(chunk_ids))
         except Exception as e:
-            import logging
-            logging.warning(f"向量删除失败: {e}")
+            logger.warning("向量删除失败: %s", e)
 
 
 class QdrantVectorStore:

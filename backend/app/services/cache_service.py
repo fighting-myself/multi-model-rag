@@ -46,7 +46,9 @@ def get(key: str) -> Optional[Any]:
     try:
         raw = r.get(_key(key))
         if raw is None:
+            logger.debug("缓存 miss key=%s", key)
             return None
+        logger.debug("缓存 hit key=%s", key)
         return json.loads(raw)
     except Exception as e:
         logger.debug("缓存 get 失败 %s: %s", key, e)
@@ -69,6 +71,7 @@ def set(key: str, value: Any, ttl: Optional[int] = None) -> bool:
             r.set(k, payload)  # 不设过期（慎用）
         else:
             r.setex(k, ttl, payload)
+        logger.debug("缓存 set key=%s ttl=%s", key, ttl)
         return True
     except Exception as e:
         logger.debug("缓存 set 失败 %s: %s", key, e)
@@ -84,6 +87,7 @@ def delete(key: str) -> bool:
         return False
     try:
         r.delete(_key(key))
+        logger.debug("缓存 delete key=%s", key)
         return True
     except Exception as e:
         logger.debug("缓存 delete 失败 %s: %s", key, e)
@@ -103,6 +107,7 @@ def delete_by_prefix(prefix: str) -> int:
         for k in r.scan_iter(match=f"{full_prefix}*"):
             r.delete(k)
             count += 1
+        logger.debug("缓存 delete_by_prefix prefix=%s deleted=%s", prefix, count)
         return count
     except Exception as e:
         logger.debug("缓存 delete_by_prefix 失败 %s: %s", prefix, e)

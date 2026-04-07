@@ -1,11 +1,14 @@
 """
 数据库配置和连接
 """
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _engine_connect_args() -> dict:
@@ -58,10 +61,12 @@ Base = declarative_base()
 async def get_db() -> AsyncSession:
     """获取数据库会话"""
     async with AsyncSessionLocal() as session:
+        logger.debug("db session open id=%s", id(session))
         try:
             yield session
         finally:
             await session.close()
+            logger.debug("db session closed id=%s", id(session))
 
 
 def create_async_engine_and_session_for_celery():

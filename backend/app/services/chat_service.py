@@ -67,6 +67,9 @@ _RAG_TRACE_STREAM_END = object()
 CHAT_FILE_CONTENT_MAX_CHARS = 80000
 
 
+logger = logging.getLogger(__name__)
+
+
 class ChatService:
     """问答服务类"""
     _mcp_tools_cache_lock: asyncio.Lock = asyncio.Lock()
@@ -114,6 +117,7 @@ class ChatService:
         注意：memory_service 为同步 sqlite，必须丢到线程池以免阻塞事件循环。
         """
         if not self._is_chat_memory_enabled():
+            logger.debug("chat_memory disabled user_id=%s", user_id)
             return ""
         q = (query or "").strip()
         min_len = int(getattr(settings, "CHAT_MEMORY_QUERY_MIN_LEN", 1))
@@ -123,6 +127,13 @@ class ChatService:
         # 注意：这里不做任何“特定词”判断。
         is_short_query = (len(q) <= 8 and " " not in q)
         use_query = q if (len(q) >= min_len and not is_short_query) else ""
+        logger.debug(
+            "chat_memory search plan user_id=%s query_len=%s short=%s use_query=%s",
+            user_id,
+            len(q),
+            is_short_query,
+            bool(use_query),
+        )
         try:
             from app.services.memory_service import search_memory
 
@@ -137,11 +148,12 @@ class ChatService:
                 ),
             )
         except Exception:
-            logging.getLogger(__name__).debug("chat memory search failed", exc_info=True)
+            logger.debug("chat memory search failed user_id=%s", user_id, exc_info=True)
             return ""
 
         # 回退：关键词检索为空时，自动退化为“最近记忆回放”
         if not rows and use_query:
+            logger.debug("chat_memory fallback to recent replay user_id=%s query=%s", user_id, q[:80])
             try:
                 from app.services.memory_service import search_memory
                 rows = await asyncio.to_thread(
@@ -156,6 +168,7 @@ class ChatService:
                 )
             except Exception:
                 rows = []
+        logger.debug("chat_memory rows fetched user_id=%s count=%s", user_id, len(rows))
 
         if not rows:
             return ""
@@ -183,6 +196,14 @@ class ChatService:
         picked.extend([("短期记忆", r) for r in short_rows[: max(0, short_k)]])
         if temp_k > 0:
             picked.extend([("临时记忆", r) for r in temp_rows[: max(0, temp_k)]])
+        logger.debug(
+            "chat_memory level split user_id=%s long=%s short=%s temp=%s picked=%s",
+            user_id,
+            len(long_rows),
+            len(short_rows),
+            len(temp_rows),
+            len(picked),
+        )
 
         lines: List[str] = ["【跨会话记忆（供参考）】"]
         used = 0
@@ -198,7 +219,9 @@ class ChatService:
             lines.append(item)
             used += len(item) + 1
         if len(lines) <= 1:
+            logger.debug("chat_memory context empty after trim user_id=%s", user_id)
             return ""
+        logger.debug("chat_memory context built user_id=%s chars=%s", user_id, len("\n".join(lines)))
         return "\n".join(lines).strip()
 
     async def _write_chat_memory_turn(
@@ -211,6 +234,7 @@ class ChatService:
     ) -> None:
         """将本轮问答写入 memory.db（脱敏 + 截断），失败不影响主流程。"""
         if not (self._is_chat_memory_enabled() and bool(getattr(settings, "CHAT_MEMORY_WRITE_ENABLED", True))):
+            logger.debug("chat_memory write skipped user_id=%s enabled=%s", user_id, self._is_chat_memory_enabled())
             return
         try:
             from app.services.memory_service import add_memory
@@ -229,9 +253,15 @@ class ChatService:
                 metadata={"source": "chat", "conversation_id": str(conversation_id)},
                 related_task_id=str(conversation_id),
             )
+            logger.debug(
+                "chat_memory short_term written user_id=%s conv_id=%s chars=%s",
+                user_id,
+                conversation_id,
+                len(content),
+            )
             await self._maybe_upgrade_chat_memory(user_id=user_id)
         except Exception:
-            logging.getLogger(__name__).debug("chat memory write failed", exc_info=True)
+            logger.debug("chat memory write failed user_id=%s conv_id=%s", user_id, conversation_id, exc_info=True)
             return
 
     async def _maybe_upgrade_chat_memory(self, *, user_id: int) -> None:
@@ -241,6 +271,7 @@ class ChatService:
         - 再写一条归档标记，避免重复升级同一批短期记忆。
         """
         if not bool(getattr(settings, "CHAT_MEMORY_UPGRADE_ENABLED", True)):
+            logger.debug("chat_memory upgrade disabled user_id=%s", user_id)
             return
         try:
             from app.services.memory_service import add_memory, list_memories
@@ -263,6 +294,7 @@ class ChatService:
             if markers:
                 md = self._parse_json_dict(markers[0].get("metadata"))
                 last_archived_id = int(md.get("last_short_term_id") or 0)
+            logger.debug("chat_memory upgrade marker user_id=%s last_archived_id=%s", user_id, last_archived_id)
 
             short_rows = await asyncio.to_thread(
                 list_memories,
@@ -272,6 +304,12 @@ class ChatService:
                 min_id_exclusive=last_archived_id if last_archived_id > 0 else None,
             )
             if len(short_rows) < min_short:
+                logger.debug(
+                    "chat_memory upgrade skip user_id=%s short_rows=%s min_short=%s",
+                    user_id,
+                    len(short_rows),
+                    min_short,
+                )
                 return
 
             # 由近到远排列，升级时按时间正序拼接以保留演进语义
@@ -285,6 +323,7 @@ class ChatService:
                 if txt:
                     snippets.append(f"- {txt}")
             if not snippets:
+                logger.debug("chat_memory upgrade skip empty snippets user_id=%s", user_id)
                 return
 
             merged = "\n".join(snippets)
@@ -305,6 +344,12 @@ class ChatService:
             summary = summarize_text_for_audit(summary, max_chars=max_chars)
             if not summary:
                 return
+            logger.debug(
+                "chat_memory upgrade summary ready user_id=%s source_count=%s summary_chars=%s",
+                user_id,
+                len(source_ids),
+                len(summary),
+            )
 
             await asyncio.to_thread(
                 add_memory,
@@ -326,8 +371,13 @@ class ChatService:
                 metadata={"last_short_term_id": max(source_ids)},
                 related_task_id="memory_upgrade",
             )
+            logger.debug(
+                "chat_memory upgrade committed user_id=%s archived_to_id=%s",
+                user_id,
+                max(source_ids),
+            )
         except Exception:
-            logging.getLogger(__name__).debug("chat memory upgrade failed", exc_info=True)
+            logger.debug("chat memory upgrade failed user_id=%s", user_id, exc_info=True)
             return
 
     async def _ensure_mcp_tools_cache(self, force_refresh: bool = False) -> List[Dict[str, Any]]:

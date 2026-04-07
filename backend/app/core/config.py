@@ -188,7 +188,7 @@ class Settings(BaseSettings):
     RAG_ITERATIVE_MAX_ROUNDS: int = 5  # 渐进检索最多轮次（命中即停）
 
     # 日志配置
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = "DEBUG"
     LOG_FILE: Path = PROJECT_ROOT / "logs" / "app.log"
 
     # 本地记忆（OpenClaw 风格：用户指令/执行结果/偏好，支持断点续做）

@@ -18,11 +18,14 @@ async def get_embedding_for_image(image_bytes: bytes, image_format: str = "jpeg"
         default_dim = getattr(settings, "ZILLIZ_DIM", 1536)
         return [0.0] * default_dim
     fmt = (image_format or "jpeg").lower().replace("jpg", "jpeg")
+    logger.debug("embedding image start bytes=%s format=%s", len(image_bytes), fmt)
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     image_data = f"data:image/{fmt};base64,{b64}"
     embeddings = await _get_multimodal_embeddings(contents=[{"image": image_data}])
     default_dim = getattr(settings, "ZILLIZ_DIM", 1536)
-    return embeddings[0] if embeddings else [0.0] * default_dim
+    out = embeddings[0] if embeddings else [0.0] * default_dim
+    logger.debug("embedding image done dim=%s", len(out))
+    return out
 
 
 async def get_embedding(text: str) -> List[float]:
@@ -32,8 +35,11 @@ async def get_embedding(text: str) -> List[float]:
         default_dim = getattr(settings, "ZILLIZ_DIM", 1536)
         return [0.0] * default_dim
     
+    logger.debug("embedding text start chars=%s", len(text or ""))
     embeddings = await get_embeddings([text])
-    return embeddings[0] if embeddings else [0.0] * getattr(settings, "ZILLIZ_DIM", 1536)
+    out = embeddings[0] if embeddings else [0.0] * getattr(settings, "ZILLIZ_DIM", 1536)
+    logger.debug("embedding text done dim=%s", len(out))
+    return out
 
 
 async def _request_multimodal_embeddings(contents: list, default_dim: int) -> List[List[float]]:
@@ -51,6 +57,7 @@ async def _request_multimodal_embeddings(contents: list, default_dim: int) -> Li
         pool=5.0,
     )
     extra = max(0, int(getattr(settings, "EMBEDDING_HTTP_RETRIES", 1)))
+    logger.debug("embedding request start items=%s retries=%s", len(contents or []), extra)
     for attempt in range(extra + 1):
         try:
             async with httpx.AsyncClient(timeout=t) as client:
@@ -72,10 +79,12 @@ async def _request_multimodal_embeddings(contents: list, default_dim: int) -> Li
             raise ValueError(f"DashScope API 调用失败: {e}") from e
     out = result.get("output", {})
     embeddings_list = out.get("embeddings", [])
-    return [
+    vectors = [
         emb_data["embedding"] if "embedding" in emb_data else [0.0] * default_dim
         for emb_data in embeddings_list
     ]
+    logger.debug("embedding request done vectors=%s dim=%s", len(vectors), len(vectors[0]) if vectors else default_dim)
+    return vectors
 
 
 async def _get_multimodal_embeddings(contents: list) -> List[List[float]]:
@@ -94,6 +103,7 @@ async def get_embeddings(texts: List[str]) -> List[List[float]]:
     """
     if not texts:
         return []
+    logger.debug("embedding batch start size=%s", len(texts))
     default_dim = getattr(settings, "ZILLIZ_DIM", 1536)
     inputs = [t.strip()[:8192] if t and t.strip() else " " for t in texts]
     batch_size = 20
@@ -109,4 +119,5 @@ async def get_embeddings(texts: List[str]) -> List[List[float]]:
     result = []
     for i in range(len(texts)):
         result.append(all_embeddings[i] if i < len(all_embeddings) else [0.0] * dim)
+    logger.debug("embedding batch done vectors=%s dim=%s", len(result), len(result[0]) if result else default_dim)
     return result

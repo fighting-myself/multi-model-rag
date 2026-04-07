@@ -64,6 +64,7 @@ def add_memory(
     db_path: Optional[Path] = None,
 ) -> int:
     """写入一条记忆。memory_type 建议: task_context / user_preference / execution_record。返回 id。"""
+    logger.debug("memory add start user_id=%s type=%s related_task_id=%s", user_id, memory_type, related_task_id)
     conn = _get_connection(db_path)
     try:
         ensure_schema(conn)
@@ -74,7 +75,9 @@ def add_memory(
             (user_id, memory_type, content or "", meta_json, related_task_id, now),
         )
         conn.commit()
-        return cur.lastrowid or 0
+        mid = cur.lastrowid or 0
+        logger.debug("memory add done user_id=%s id=%s type=%s", user_id, mid, memory_type)
+        return mid
     finally:
         conn.close()
 
@@ -90,6 +93,13 @@ def search_memory(
     关键词检索：在 content 中做 LIKE 匹配（简单分词或整词），按时间倒序。
     返回列表，每项含 id, user_id, memory_type, content, metadata, related_task_id, created_at。
     """
+    logger.debug(
+        "memory search start user_id=%s query_len=%s types=%s max_results=%s",
+        user_id,
+        len((query or "").strip()),
+        memory_types,
+        max_results,
+    )
     conn = _get_connection(db_path)
     try:
         ensure_schema(conn)
@@ -118,7 +128,9 @@ def search_memory(
             params.extend([f"%{t}%" for t in terms])
             params.append(max_results)
             rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        logger.debug("memory search done user_id=%s returned=%s", user_id, len(out))
+        return out
     finally:
         conn.close()
 
@@ -130,6 +142,7 @@ def get_memory(
     db_path: Optional[Path] = None,
 ) -> Optional[Dict[str, Any]]:
     """按 id 取单条；或按 user_id + related_task_id 取一条。"""
+    logger.debug("memory get start memory_id=%s user_id=%s related_task_id=%s", memory_id, user_id, related_task_id)
     conn = _get_connection(db_path)
     try:
         ensure_schema(conn)
@@ -145,7 +158,9 @@ def get_memory(
             ).fetchone()
         else:
             return None
-        return dict(row) if row else None
+        out = dict(row) if row else None
+        logger.debug("memory get done found=%s", bool(out))
+        return out
     finally:
         conn.close()
 
@@ -158,6 +173,13 @@ def list_memories(
     db_path: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
     """按时间倒序列出记忆，可按类型和最小 id 过滤。"""
+    logger.debug(
+        "memory list start user_id=%s types=%s max_results=%s min_id_exclusive=%s",
+        user_id,
+        memory_types,
+        max_results,
+        min_id_exclusive,
+    )
     conn = _get_connection(db_path)
     try:
         ensure_schema(conn)
@@ -176,7 +198,9 @@ def list_memories(
         )
         params.append(max(1, int(max_results)))
         rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        logger.debug("memory list done user_id=%s returned=%s", user_id, len(out))
+        return out
     finally:
         conn.close()
 

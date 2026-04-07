@@ -30,6 +30,7 @@ except ImportError:
     pass
 
 import uuid
+import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -46,6 +47,8 @@ from app.api.v1 import api_router
 from app.core.logging import setup_logging
 from app.core.health import check_db, check_redis, check_vector, check_minio
 from app.services.chat_service import warmup_mcp_tools_cache
+
+logger = logging.getLogger(__name__)
 
 
 def _asyncio_exception_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
@@ -158,10 +161,27 @@ async def request_id_middleware(request: Request, call_next):
     request.state.request_id = rid
     trace = (request.headers.get("X-Trace-Id") or rid).strip() or rid
     tok = set_trace_id(trace)
+    t0 = time.perf_counter()
+    logger.debug(
+        "request start method=%s path=%s request_id=%s trace_id=%s",
+        request.method,
+        request.url.path,
+        rid,
+        trace,
+    )
     try:
         response = await call_next(request)
         response.headers["X-Request-ID"] = rid
         response.headers["X-Trace-Id"] = trace
+        ms = (time.perf_counter() - t0) * 1000.0
+        logger.debug(
+            "request end method=%s path=%s status=%s duration_ms=%.1f request_id=%s",
+            request.method,
+            request.url.path,
+            getattr(response, "status_code", "-"),
+            ms,
+            rid,
+        )
         return response
     finally:
         reset_trace_id(tok)
@@ -194,6 +214,13 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         detail = "<binary>"
     else:
         detail = str(detail) if detail is not None else ""
+    logger.debug(
+        "http exception path=%s status=%s detail=%s request_id=%s",
+        request.url.path,
+        exc.status_code,
+        detail[:200],
+        rid,
+    )
     return JSONResponse(
         status_code=exc.status_code,
         content=_make_json_serializable(_error_response(detail=detail, status_code=exc.status_code, request_id=rid)),
@@ -210,6 +237,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         detail = "<binary>"
     else:
         detail = str(detail) if detail is not None else "请求参数校验失败"
+    logger.debug(
+        "validation exception path=%s detail=%s request_id=%s",
+        request.url.path,
+        detail[:200],
+        rid,
+    )
     body = _error_response(detail=detail, status_code=422, request_id=rid)
     body["errors"] = _make_json_serializable(errs)
     return JSONResponse(status_code=422, content=_make_json_serializable(body))
@@ -219,6 +252,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """未捕获异常统一格式"""
     rid = getattr(request.state, "request_id", None)
+    logger.exception("unhandled exception path=%s request_id=%s", request.url.path, rid)
     return JSONResponse(
         status_code=500,
         content=_error_response(

@@ -4,9 +4,12 @@ LLM 服务：调用 OpenAI 兼容接口生成回答
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 import httpx
+import logging
 from openai import AsyncOpenAI
 from app.core.config import settings
 from app.services.time_context import get_system_time_context
+
+logger = logging.getLogger(__name__)
 
 
 def _client() -> AsyncOpenAI:
@@ -56,6 +59,12 @@ async def chat_completion_stream(
         system_parts.append("\n请基于以上信息回答用户问题，保持对话连贯性。")
         system_content = "".join(system_parts)
     client = _client()
+    logger.debug(
+        "llm stream start model=%s context_len=%s user_content_type=%s",
+        settings.LLM_MODEL,
+        len(context or ""),
+        type(user_content).__name__,
+    )
     user_msg = {"role": "user", "content": _user_message_content(user_content)}
     stream = await client.chat.completions.create(
         model=settings.LLM_MODEL,
@@ -103,6 +112,12 @@ async def chat_completion(
         system_content = "".join(system_parts)
     system_content = system_content.rstrip() + "\n\n" + get_system_time_context()
     client = _client()
+    logger.debug(
+        "llm completion start model=%s context_len=%s user_content_type=%s",
+        settings.LLM_MODEL,
+        len(context or ""),
+        type(user_content).__name__,
+    )
     user_msg = {"role": "user", "content": _user_message_content(user_content)}
     resp = await client.chat.completions.create(
         model=settings.LLM_MODEL,
@@ -112,7 +127,9 @@ async def chat_completion(
         ],
         max_tokens=2048,
     )
-    return (resp.choices[0].message.content or "").strip()
+    out = (resp.choices[0].message.content or "").strip()
+    logger.debug("llm completion done output_len=%s", len(out))
+    return out
 
 
 async def chat_completion_simple(
@@ -124,6 +141,7 @@ async def chat_completion_simple(
 ) -> str:
     """单次对话，不附加时间上下文，用于超能模式路由/意图等（与主模型相同 LLM_MODEL）。"""
     client = _client()
+    logger.debug("llm simple completion start model=%s max_tokens=%s temperature=%s", settings.LLM_MODEL, max_tokens, temperature)
     resp = await client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[
@@ -133,7 +151,9 @@ async def chat_completion_simple(
         max_tokens=max_tokens,
         temperature=temperature,
     )
-    return (resp.choices[0].message.content or "").strip()
+    out = (resp.choices[0].message.content or "").strip()
+    logger.debug("llm simple completion done output_len=%s", len(out))
+    return out
 
 
 async def chat_completion_with_tools(
@@ -152,6 +172,13 @@ async def chat_completion_with_tools(
     """
     client = _client()
     use_model = model or settings.LLM_MODEL
+    logger.debug(
+        "llm with_tools start model=%s messages=%s tools=%s max_tokens=%s",
+        use_model,
+        len(messages or []),
+        len(tools or []),
+        max_tokens,
+    )
     kwargs = {
         "model": use_model,
         "messages": messages,
@@ -184,6 +211,11 @@ async def chat_completion_with_tools(
                     "name": tc_name,
                     "arguments": args,
                 })
+    logger.debug(
+        "llm with_tools done content_len=%s tool_calls=%s",
+        len(content or ""),
+        len(tool_calls),
+    )
     return (content, tool_calls)
 
 

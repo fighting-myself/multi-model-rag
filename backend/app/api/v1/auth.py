@@ -1,6 +1,7 @@
 """
 认证相关API
 """
+import logging
 from fastapi import APIRouter, Depends, Form, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from app.services.user_service import UserService
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+logger = logging.getLogger(__name__)
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -23,11 +25,14 @@ async def register(
     db: AsyncSession = Depends(get_db)
 ):
     """用户注册"""
+    logger.debug("auth register attempt username=%s", user_data.username)
     auth_service = AuthService(db)
     try:
         user = await auth_service.register_user(user_data)
+        logger.debug("auth register success user_id=%s username=%s", user.id, user.username)
         return user
     except ValueError as e:
+        logger.debug("auth register failed username=%s reason=%s", user_data.username, str(e))
         msg = str(e)
         if "用户名" in msg:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg)
@@ -43,10 +48,12 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     """用户登录（使用 Form 避免 FastAPI 0.104 + Pydantic v2 下 OAuth2PasswordRequestForm 的 field_info.in_ 兼容问题）"""
+    logger.debug("auth login attempt username=%s", username)
     auth_service = AuthService(db)
     user = await auth_service.authenticate_user(username, password)
     
     if not user:
+        logger.debug("auth login failed username=%s", username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
@@ -58,6 +65,7 @@ async def login(
     await db.execute(update(User).where(User.id == user.id).values(last_login_at=func.now()))
     await db.commit()
     await db.refresh(user)
+    logger.debug("auth login success user_id=%s username=%s", user.id, user.username)
 
     access_token_expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth_service.create_access_token(
@@ -77,8 +85,10 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db)
 ) -> UserResponse:
     """获取当前用户信息"""
+    logger.debug("auth get_current_user called token_len=%s", len(token) if token else 0)
     auth_service = AuthService(db)
     user = await auth_service.get_current_user(token)
+    logger.debug("auth get_current_user success user_id=%s", user.id)
     return UserResponse.model_validate(user)
 
 
