@@ -1,8 +1,12 @@
 """
 MCP 客户端服务：连接外部 MCP 服务、列出工具、执行工具调用
-支持阿里云 DashScope MCP（SSE）：url + api_key_env 鉴权
+支持阿里云 DashScope MCP：url + api_key_env 鉴权
 支持 Cursor 格式：{ "mcpServers": { "type": "sse", "url": "...", "headers": { "Authorization": "Bearer ${DASHSCOPE_API_KEY}" } } }
 headers 中的 ${VAR} 会从环境变量或 .env 中读取并替换
+
+兼容性策略（Windows/Linux）：
+- 按配置优先使用对应 transport（sse / streamable_http）
+- 若 sse 遇到 Content-Type 非 text/event-stream，则自动回退到 streamable_http 重试一次
 """
 import json
 import logging
@@ -226,6 +230,67 @@ def _parse_config(config_json: str) -> Dict[str, Any]:
         return {}
 
 
+def _should_retry_with_streamable_http(exc: BaseException) -> bool:
+    """判断是否应从 SSE 自动回退到 streamable_http。"""
+    msg = _format_exception(exc)
+    msg_l = msg.lower()
+    # 典型报错：Expected response header Content-Type to contain 'text/event-stream'
+    return ("content-type" in msg_l and "text/event-stream" in msg_l) or ("sseerror" in msg_l)
+
+
+def _is_dashscope_mcp_url(url: str) -> bool:
+    """判断是否为 DashScope MCP 端点（该类端点通常应走 streamable_http）。"""
+    u = (url or "").lower()
+    return "dashscope.aliyuncs.com" in u and "/mcps/" in u and "/mcp" in u
+
+
+async def _list_tools_once(transport_type: str, config_json: str) -> List[Dict[str, Any]]:
+    """单次列举工具，不做重试。"""
+    config = _parse_config(config_json)
+    async with _session_for_server(transport_type, config) as streams:
+        read_stream, write_stream = streams[0], streams[1]
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            result = await session.list_tools()
+            tools = []
+            for t in result.tools:
+                tools.append({
+                    "name": t.name,
+                    "description": t.description or "",
+                    "inputSchema": (t.inputSchema or {}),
+                })
+            return tools
+
+
+async def _call_tool_once(
+    transport_type: str,
+    config_json: str,
+    tool_name: str,
+    arguments: Optional[Dict[str, Any]] = None,
+) -> str:
+    """单次工具调用，不做重试。"""
+    config = _parse_config(config_json)
+    async with _session_for_server(transport_type, config) as streams:
+        read_stream, write_stream = streams[0], streams[1]
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments or {})
+            if result.isError:
+                return f"[MCP 工具错误] {getattr(result, 'content', result) or '未知错误'}"
+            content = getattr(result, "content", None)
+            if isinstance(content, list):
+                texts = []
+                for c in content:
+                    if hasattr(c, "text"):
+                        texts.append(c.text)
+                    elif isinstance(c, dict) and c.get("type") == "text":
+                        texts.append(c.get("text", ""))
+                return "\n".join(texts) if texts else ""
+            if isinstance(content, str):
+                return content
+            return str(content) if content is not None else ""
+
+
 def _session_for_server(transport_type: str, config: Dict[str, Any]):
     """根据 transport_type 和 config 创建 (read_stream, write_stream)，用于 ClientSession。配置为通用 JSON，支持 mcpServers/url/baseUrl 等。返回 async context manager，需 async with 使用。"""
     if not MCP_AVAILABLE:
@@ -261,9 +326,10 @@ def _session_for_server(transport_type: str, config: Dict[str, Any]):
                 timeout_sec = float(timeout_sec)
             except (TypeError, ValueError):
                 timeout_sec = None
-        # mcp 1.0 有 streamable_http_client；mcp 1.1+ 仅保留 sse_client，且仅用于 type=sse（GET + text/event-stream）
-        # streamable_http 为 POST 协议，不可用 sse_client 替代
-        if streamable_http_client is not None:
+        # DashScope 等云 MCP 端点应优先使用 streamable_http（POST），避免误走 SSE(GET) 导致 Content-Type 错误
+        prefer_streamable_http = _is_dashscope_mcp_url(url) or transport_type in ("streamable_http", "streamableHttp")
+        # mcp 1.15+ 提供 streamable_http_client；若缺失则无法正确访问 streamable_http 端点
+        if streamable_http_client is not None and prefer_streamable_http:
             http_client = _create_http_client_with_content_type_fix(timeout_sec)
             if http_client is None and create_mcp_http_client:
                 http_client = create_mcp_http_client()
@@ -272,6 +338,11 @@ def _session_for_server(transport_type: str, config: Dict[str, Any]):
             if http_client:
                 http_client.headers["Accept-Encoding"] = "identity"  # 防止服务端返回异常压缩导致 decompress Error -3
             return streamable_http_client(url, http_client=http_client)
+        if streamable_http_client is None and prefer_streamable_http:
+            raise ValueError(
+                "当前 MCP SDK 不支持 streamable_http_client（请安装/升级 mcp>=1.15.0）。"
+                "DashScope MCP 端点需要 streamable_http 传输，不能使用 SSE。"
+            )
         if transport_type in ("sse", "streamableHttp") and _sse_client is not None:
             # 仅对 sse 使用 sse_client；streamable_http 在无 streamable_http_client 时不兼容
             timeout_float = float(timeout_sec) if timeout_sec is not None else 120.0
@@ -291,21 +362,19 @@ async def list_tools_from_server(transport_type: str, config_json: str) -> List[
     连接 MCP 服务并返回工具列表。
     返回格式: [ {"name": str, "description": str, "inputSchema": dict}, ... ]
     """
-    config = _parse_config(config_json)
-    async with _session_for_server(transport_type, config) as streams:
-        # SDK 可能 yield (read_stream, write_stream) 或 (read_stream, write_stream, get_session_id)，只取前两个
-        read_stream, write_stream = streams[0], streams[1]
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            result = await session.list_tools()
-            tools = []
-            for t in result.tools:
-                tools.append({
-                    "name": t.name,
-                    "description": t.description or "",
-                    "inputSchema": (t.inputSchema or {}),
-                })
-            return tools
+    try:
+        return await _list_tools_once(transport_type, config_json)
+    except Exception as e:
+        normalized_transport, _ = _normalize_mcp_config(_parse_config(config_json))
+        # 跨平台兼容：SSE 端点若实际为 streamable_http（常见于云 MCP），自动回退重试一次
+        if (
+            streamable_http_client is not None
+            and normalized_transport in ("sse", "streamableHttp")
+            and _should_retry_with_streamable_http(e)
+        ):
+            logger.warning("MCP SSE 握手失败，自动回退为 streamable_http 重试: %s", _format_exception(e))
+            return await _list_tools_once("streamable_http", config_json)
+        raise
 
 
 async def call_tool_on_server(
@@ -319,28 +388,19 @@ async def call_tool_on_server(
     若调用失败返回错误信息字符串（不抛异常），便于对话继续。
     """
     try:
-        config = _parse_config(config_json)
-        async with _session_for_server(transport_type, config) as streams:
-            read_stream, write_stream = streams[0], streams[1]
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments or {})
-                if result.isError:
-                    return f"[MCP 工具错误] {getattr(result, 'content', result) or '未知错误'}"
-                # content 可能是 list of Content (text/image)
-                content = getattr(result, "content", None)
-                if isinstance(content, list):
-                    texts = []
-                    for c in content:
-                        if hasattr(c, "text"):
-                            texts.append(c.text)
-                        elif isinstance(c, dict) and c.get("type") == "text":
-                            texts.append(c.get("text", ""))
-                    return "\n".join(texts) if texts else ""
-                if isinstance(content, str):
-                    return content
-                return str(content) if content is not None else ""
+        return await _call_tool_once(transport_type, config_json, tool_name, arguments)
     except Exception as e:
+        try:
+            normalized_transport, _ = _normalize_mcp_config(_parse_config(config_json))
+            if (
+                streamable_http_client is not None
+                and normalized_transport in ("sse", "streamableHttp")
+                and _should_retry_with_streamable_http(e)
+            ):
+                logger.warning("MCP SSE 调用失败，自动回退为 streamable_http 重试: %s", _format_exception(e))
+                return await _call_tool_once("streamable_http", config_json, tool_name, arguments)
+        except Exception:
+            pass
         msg = _format_exception(e)
         logger.warning("MCP 工具调用失败 %s: %s", tool_name, msg, exc_info=True)
         return f"[MCP 工具调用失败] {msg}"

@@ -23,6 +23,7 @@
   --app-text-primary: #e8eef6;
   --app-text-secondary: #9ca8b8;
   --app-text-muted: #6b7a8f;
+  --app-text-tertiary: #7f8ea3;
   /* 玻璃与边框：柔和青紫，不刺眼 */
   --app-glass: rgba(14, 20, 36, 0.7);
   --app-glass-border: rgba(0, 245, 255, 0.14);
@@ -63,6 +64,7 @@
   --app-text-primary: #0f172a;
   --app-text-secondary: #475569;
   --app-text-muted: #64748b;
+  --app-text-tertiary: #64748b;
   /* 边框与玻璃：浅色系，消息框可见 */
   --app-glass: rgba(255, 255, 255, 0.8);
   --app-glass-border: rgba(13, 148, 136, 0.22);

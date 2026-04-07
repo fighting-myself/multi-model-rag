@@ -107,7 +107,7 @@ export default function ComputerSteward() {
                         <li key={i} style={{ marginBottom: 12 }}>
                           <Text strong>{s.tool}</Text>
                           {Object.keys(s.args).length > 0 && (
-                            <div style={{ color: '#666', fontSize: 12 }}>{JSON.stringify(s.args)}</div>
+                            <div style={{ color: 'var(--app-text-muted)', fontSize: 12 }}>{JSON.stringify(s.args)}</div>
                           )}
                           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{s.result}</div>
                         </li>

@@ -6,18 +6,18 @@ import App from './App'
 import { useThemeStore, type ThemeState } from './stores/themeStore'
 import './index.css'
 
-// 首屏前恢复主题，避免闪烁（默认科技风深色）
+// 首屏前恢复主题，避免闪烁（默认日间亮色）
 try {
   const raw = localStorage.getItem('app-theme')
   if (raw) {
     const parsed = JSON.parse(raw) as { state?: { theme?: string } }
-    const t = parsed?.state?.theme ?? 'dark'
+    const t = parsed?.state?.theme ?? 'light'
     document.documentElement.setAttribute('data-theme', t)
   } else {
-    document.documentElement.setAttribute('data-theme', 'dark')
+    document.documentElement.setAttribute('data-theme', 'light')
   }
 } catch {
-  document.documentElement.setAttribute('data-theme', 'dark')
+  document.documentElement.setAttribute('data-theme', 'light')
 }
 
 /* 科技风：霓虹青为主色，深色基底 */

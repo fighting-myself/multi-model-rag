@@ -911,11 +911,14 @@ class ChatService:
                 return True, False, False, False, "无需检索与外部工具，可直接依据用户表述与对话历史作答。"
             return False, enabled_rag, enabled_mcp, enabled_skills, "当前无可用上下文。"
 
-        # 兜底启发式：当外部门户技能已提取到可核验正文时，基本可直接生成总结
-        # 避免二次 LLM 评估误判导致超能模式循环到上限。
+        # 兜底启发式：仅当 Skills 已提取到可核验正文时，基本可直接生成总结。
+        # 注意不能对 MCP 结果做该放行，否则参数校验报错等长文本会被误判为“正文充分”。
         ctx = context or ""
         q_l = (question or "").strip().lower()
-        if self._has_usable_page_content(ctx):
+        skills_ctx = ""
+        if "【Skills】" in ctx:
+            skills_ctx = ctx.split("【Skills】", 1)[1]
+        if skills_ctx and self._has_usable_page_content(skills_ctx):
             return True, enabled_rag, enabled_mcp, enabled_skills, "上下文已包含可核验正文（可直接总结）。"
         # 门户外链场景：Skills 已返回明确失败信息时，不应再错误切换到 RAG（外链未入库时必然无效）。
         # 直接结束补充循环，进入最终回答并向用户说明失败原因与排障建议。
@@ -1919,6 +1922,14 @@ class ChatService:
             "无正文",
             "权限不足",
             "未安装",
+            "validation error",
+            "validation errors",
+            "missing required argument",
+            "missing_argument",
+            "mcp 工具错误",
+            "工具执行错误",
+            "[mcp 工具调用失败]",
+            "pydantic",
             "error:",
         )
         if any(m in s for m in bad_markers) or any(m in low for m in bad_markers):

@@ -453,7 +453,7 @@ export default function ImageSearch() {
                               style={{
                                 padding: 12,
                                 height: RESULT_CARD_COVER_HEIGHT,
-                                background: '#fafafa',
+                                background: 'var(--app-bg-muted)',
                                 borderRadius: '4px 4px 0 0',
                                 display: 'flex',
                                 alignItems: 'flex-start',

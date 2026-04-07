@@ -720,7 +720,7 @@ export default function KnowledgeBases() {
                   <Space align="start" style={{ width: '100%' }}>
                     <span style={{ width: 24, display: 'inline-flex', justifyContent: 'center' }}>
                       {item.status === 'pending' && <LoadingOutlined spin style={{ color: '#bfbfbf' }} />}
-                      {item.status === 'processing' && <LoadingOutlined spin style={{ color: '#1890ff' }} />}
+                      {item.status === 'processing' && <LoadingOutlined spin style={{ color: 'var(--app-accent)' }} />}
                       {item.status === 'done' && <CheckCircleOutlined style={{ color: '#52c41a' }} />}
                       {item.status === 'skip' && <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
                     </span>
@@ -866,9 +866,9 @@ export default function KnowledgeBases() {
                 style={{
                   marginBottom: 16,
                   padding: 12,
-                  background: '#fafafa',
+                  background: 'var(--app-bg-muted)',
                   borderRadius: 4,
-                  border: '1px solid #f0f0f0',
+                  border: '1px solid var(--app-border-subtle)',
                 }}
               >
                 <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--app-text-muted)' }}>分块 #{c.chunk_index + 1}</div>

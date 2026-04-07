@@ -470,7 +470,7 @@ export default function AdvancedRAGMetrics() {
                         }]}
                       />
                     )}
-                    <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--app-text-muted)' }}>
                       {Object.entries(latencyStandards).map(([k, v]) => (
                         <div key={k}>{v}</div>
                       ))}

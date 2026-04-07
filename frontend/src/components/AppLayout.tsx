@@ -161,7 +161,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           size="small"
           icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
           onClick={toggleTheme}
-          style={{ color: 'rgba(255,255,255,0.85)' }}
+          style={{ color: 'var(--app-text-primary)' }}
           title={theme === 'dark' ? '切换为亮色' : '切换为暗色'}
         />
           <Dropdown
@@ -175,7 +175,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               display: 'flex',
               alignItems: 'center',
               gap: siderCollapsed ? 0 : 8,
-              color: 'rgba(255,255,255,0.85)',
+              color: 'var(--app-text-primary)',
               padding: siderCollapsed ? '4px' : '4px 8px',
               width: siderCollapsed ? '100%' : 'auto',
               justifyContent: siderCollapsed ? 'center' : 'flex-start',

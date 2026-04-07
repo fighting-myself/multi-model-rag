@@ -7,6 +7,8 @@ export default defineConfig({
   server: {
     // 监听 0.0.0.0，便于用局域网 IP 打开前端；仅 localhost 时代理仍转发到本机 127.0.0.1:8000
     host: true,
+    // 远程开发域名白名单（Linux/云主机转发访问）
+    allowedHosts: ['u786977-9a5b-b4c69fe0.westc.seetacloud.com'],
     port: 6006,
     proxy: {
       '/api': {

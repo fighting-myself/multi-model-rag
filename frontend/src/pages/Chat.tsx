@@ -1263,7 +1263,7 @@ export default function Chat() {
                         {/* 本回复调用的 MCP 工具 */}
                         {item.role === 'assistant' && item.tools_used && item.tools_used.length > 0 && (
                           <div style={{ marginTop: 8, marginBottom: 4, fontSize: 12, color: 'var(--app-text-muted)' }}>
-                            <span style={{ color: '#1890ff', fontWeight: 500 }}>调用了以下工具：</span>{' '}
+                            <span style={{ color: 'var(--app-accent)', fontWeight: 500 }}>调用了以下工具：</span>{' '}
                             {item.tools_used.join('、')}
                           </div>
                         )}
@@ -1282,7 +1282,7 @@ export default function Chat() {
                             color: 'var(--app-text-muted)',
                             WebkitOverflowScrolling: 'touch'
                           }}>
-                            <div style={{ fontWeight: 500, marginBottom: 8, color: '#1890ff', flexShrink: 0 }}>
+                            <div style={{ fontWeight: 500, marginBottom: 8, color: 'var(--app-accent)', flexShrink: 0 }}>
                               最高置信度上下文
                               {item.confidence !== undefined && item.confidence !== null && (
                                 <>（置信度: {(item.confidence * 100).toFixed(1)}%）</>
@@ -1300,7 +1300,7 @@ export default function Chat() {
                             marginTop: 12,
                             padding: 12,
                             backgroundColor: 'var(--app-bg-subtle)',
-                            border: '1px solid #d9d9d9',
+                            border: '1px solid var(--app-border-subtle)',
                             borderRadius: 4,
                             maxHeight: '300px',
                             overflowY: 'auto',
