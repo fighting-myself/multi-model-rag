@@ -13,6 +13,7 @@ import {
   Select,
   Collapse,
   Table,
+  Tooltip,
 } from 'antd'
 import { ThunderboltOutlined, LinkOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -23,11 +24,13 @@ import type {
   RAGMetricItem,
   KnowledgeBaseListResponse,
   KnowledgeBaseItem,
+  RAGMetricsPrecheckResponse,
 } from '../types/api'
 
 const { Title, Paragraph, Text } = Typography
 
 type MetricId = 'accuracy' | 'recall' | 'precision' | 'latency' | 'hallucination' | 'qps'
+type EvalMode = 'normal' | 'super'
 
 interface AccuracyDetail {
   query: string
@@ -40,6 +43,7 @@ interface RecallDetail {
   retrieved_ids: number[]
   relevant_ids: number[]
   recall_at_k: Record<number, number>
+  precision_at_k?: Record<number, number>
   hit_at_k?: Record<number, number>
   mrr?: number
 }
@@ -83,6 +87,16 @@ export default function AdvancedRAGMetrics() {
   const [selectedKbId, setSelectedKbId] = useState<number | null>(null)
   const [runningMetric, setRunningMetric] = useState<MetricId | null>(null)
   const [lastResult, setLastResult] = useState<LastResult>({})
+  const [precheckLoading, setPrecheckLoading] = useState(false)
+  const [precheck, setPrecheck] = useState<RAGMetricsPrecheckResponse | null>(null)
+  const [metricModes, setMetricModes] = useState<Record<MetricId, EvalMode>>({
+    accuracy: 'super',
+    recall: 'normal',
+    precision: 'normal',
+    latency: 'normal',
+    hallucination: 'super',
+    qps: 'normal',
+  })
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -106,13 +120,36 @@ export default function AdvancedRAGMetrics() {
     fetch()
   }, [])
 
+  const refreshPrecheck = async () => {
+    setPrecheckLoading(true)
+    try {
+      const res = await api.get<RAGMetricsPrecheckResponse>('/evaluation/rag-metrics/precheck', {
+        params: {
+          knowledge_base_id: selectedKbId ?? undefined,
+          eval_mode: 'normal',
+        },
+      })
+      setPrecheck(res)
+    } catch {
+      message.error('获取评测前诊断失败')
+    } finally {
+      setPrecheckLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshPrecheck()
+  }, [selectedKbId])
+
   const runMetric = async (metricId: MetricId) => {
     setRunningMetric(metricId)
+    const eval_mode = metricModes[metricId]
     try {
       if (metricId === 'accuracy') {
         const res = await api.post<LastResult['accuracy']>('/evaluation/rag-metrics/run-accuracy', {
           knowledge_base_id: selectedKbId ?? undefined,
           knowledge_base_ids: selectedKbId ? [selectedKbId] : undefined,
+          eval_mode,
         }, { timeout: 300000 })
         setLastResult((r) => ({ ...r, accuracy: res }))
         message.success(`准确率评测完成：${res.accuracy_pct}%`)
@@ -123,6 +160,7 @@ export default function AdvancedRAGMetrics() {
         }
         const res = await api.post<LastResult['recall']>('/evaluation/rag-metrics/run-recall', {
           knowledge_base_id: selectedKbId,
+          eval_mode,
         }, { timeout: 300000 })
         setLastResult((r) => ({ ...r, recall: res }))
         message.success('召回率评测完成')
@@ -133,12 +171,14 @@ export default function AdvancedRAGMetrics() {
         }
         const res = await api.post<LastResult['precision']>('/evaluation/rag-metrics/run-precision', {
           knowledge_base_id: selectedKbId,
+          eval_mode,
         }, { timeout: 300000 })
         setLastResult((r) => ({ ...r, precision: res }))
         message.success('精准度评测完成')
       } else if (metricId === 'latency') {
         const res = await api.post<LastResult['latency']>('/evaluation/rag-metrics/run-latency', {
           num_samples: 3,
+          eval_mode,
         }, { timeout: 120000 })
         setLastResult((r) => ({ ...r, latency: res }))
         message.success('延迟评测完成')
@@ -146,6 +186,7 @@ export default function AdvancedRAGMetrics() {
         const res = await api.post<LastResult['hallucination']>('/evaluation/rag-metrics/run-hallucination', {
           knowledge_base_id: selectedKbId ?? undefined,
           knowledge_base_ids: selectedKbId ? [selectedKbId] : undefined,
+          eval_mode,
         }, { timeout: 300000 })
         setLastResult((r) => ({ ...r, hallucination: res }))
         message.success(`幻觉率评测完成：${res.hallucination_rate_pct}%`)
@@ -153,6 +194,7 @@ export default function AdvancedRAGMetrics() {
         const res = await api.post<LastResult['qps']>('/evaluation/rag-metrics/run-qps', {
           concurrency: 5,
           requests_per_worker: 2,
+          eval_mode,
         }, { timeout: 120000 })
         setLastResult((r) => ({ ...r, qps: res }))
         message.success('QPS 评测完成')
@@ -195,6 +237,32 @@ export default function AdvancedRAGMetrics() {
         </Space>
       </Card>
 
+      <Card
+        size="small"
+        className="app-card-3d app-animate-in"
+        style={{ marginBottom: 24 }}
+        title="评测前诊断面板"
+        extra={
+          <Button size="small" loading={precheckLoading} onClick={refreshPrecheck}>
+            刷新诊断
+          </Button>
+        }
+      >
+        {precheck ? (
+          <Space direction="vertical" size={6} style={{ width: '100%' }}>
+            <Text>样本来源：{precheck.sample_source === 'adaptive_kb' ? '知识库自适应样本' : '默认内置样本'}</Text>
+            <Text>知识库：{precheck.knowledge_base_name || '未选择'}</Text>
+            <Text>Chunk 数：{precheck.chunk_count}，平均长度：{precheck.avg_chunk_chars} 字符</Text>
+            <Text>评测链路：禁用记忆注入 = {precheck.memory_context_disabled_for_eval ? '是' : '否'}</Text>
+            {precheck.warnings?.map((w, i) => (
+              <Alert key={i} type="info" showIcon message={w} />
+            ))}
+          </Space>
+        ) : (
+          <Text type="secondary">暂无诊断信息</Text>
+        )}
+      </Card>
+
       <Row gutter={[16, 16]}>
         {metrics.map((m: RAGMetricItem) => {
           const isRunning = runningMetric === m.id
@@ -231,6 +299,21 @@ export default function AdvancedRAGMetrics() {
                 <Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 13 }}>
                   {m.description}
                 </Paragraph>
+                <Space size={8} style={{ marginBottom: 8 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>模式</Text>
+                  <Select<EvalMode>
+                    size="small"
+                    style={{ width: 150 }}
+                    value={metricModes[m.id as MetricId]}
+                    onChange={(v) =>
+                      setMetricModes((prev) => ({ ...prev, [m.id as MetricId]: v }))
+                    }
+                    options={[
+                      { label: '普通模式（normal）', value: 'normal' },
+                      { label: '超能模式（super）', value: 'super' },
+                    ]}
+                  />
+                </Space>
                 {m.tip && (
                   <Alert
                     message={m.tip}
@@ -257,8 +340,8 @@ export default function AdvancedRAGMetrics() {
                               dataSource={(result as LastResult['accuracy'])!.details}
                               rowKey={(_, i) => String(i)}
                               columns={[
-                                { title: '问题', dataIndex: 'query', width: 120, ellipsis: true, render: (t: string) => t?.slice(0, 30) + (t?.length > 30 ? '…' : '') },
-                                { title: '期望答案', dataIndex: 'expected', width: 140, ellipsis: true },
+                                { title: '问题', dataIndex: 'query', width: 120, ellipsis: true, render: (t: string) => <Tooltip title={t}>{t?.slice(0, 30) + (t?.length > 30 ? '…' : '')}</Tooltip> },
+                                { title: '期望答案', dataIndex: 'expected', width: 140, ellipsis: true, render: (t: string) => <Tooltip title={t}>{t?.slice(0, 42) + (t?.length > 42 ? '…' : '')}</Tooltip> },
                                 { title: '模型回答', dataIndex: 'answer', ellipsis: true, render: (t: string) => t?.slice(0, 80) + (t?.length > 80 ? '…' : '') },
                                 { title: '得分', dataIndex: 'score', width: 64, render: (s: number) => (s * 100).toFixed(0) + '%' },
                               ]}
@@ -297,7 +380,7 @@ export default function AdvancedRAGMetrics() {
                               dataSource={(result as LastResult['recall'])!.details}
                               rowKey={(_, i) => String(i)}
                               columns={[
-                                { title: '问题', dataIndex: 'query', width: 100, ellipsis: true },
+                                { title: '问题', dataIndex: 'query', width: 100, ellipsis: true, render: (t: string) => <Tooltip title={t}>{t}</Tooltip> },
                                 { title: '检索到ID(前5)', dataIndex: 'retrieved_ids', width: 120, render: (ids: number[]) => (ids?.slice(0, 5) || []).join(', ') },
                                 { title: '标准答案ID', dataIndex: 'relevant_ids', width: 100, render: (ids: number[]) => (ids || []).join(', ') },
                                 { title: 'Recall@5', key: 'r5', width: 72, render: (_: unknown, row: RecallDetail) => ((row.recall_at_k?.[5] ?? 0) * 100).toFixed(0) + '%' },
@@ -337,10 +420,10 @@ export default function AdvancedRAGMetrics() {
                               dataSource={(result as LastResult['precision'])!.details}
                               rowKey={(_, i) => String(i)}
                               columns={[
-                                { title: '问题', dataIndex: 'query', width: 100, ellipsis: true },
+                                { title: '问题', dataIndex: 'query', width: 100, ellipsis: true, render: (t: string) => <Tooltip title={t}>{t}</Tooltip> },
                                 { title: '检索到ID(前5)', dataIndex: 'retrieved_ids', width: 120, render: (ids: number[]) => (ids?.slice(0, 5) || []).join(', ') },
                                 { title: '标准答案ID', dataIndex: 'relevant_ids', width: 90, render: (ids: number[]) => (ids || []).join(', ') },
-                                { title: 'Recall@5', key: 'r5', width: 72, render: (_: unknown, row: RecallDetail) => ((row.recall_at_k?.[5] ?? 0) * 100).toFixed(0) + '%' },
+                                { title: 'P@5', key: 'p5', width: 72, render: (_: unknown, row: RecallDetail) => ((row.precision_at_k?.[5] ?? 0) * 100).toFixed(0) + '%' },
                               ]}
                             />
                           ),
@@ -478,20 +561,19 @@ export default function AdvancedRAGMetrics() {
         })}
       </Row>
 
-      <Card className="app-card-3d app-animate-in" style={{ marginTop: 24 }} title="企业标准速查">
+      <Card className="app-card-3d app-animate-in" style={{ marginTop: 24 }} title="指标说明（概念）">
         <Row gutter={[24, 16]}>
           <Col span={24}>
-            <Title level={5}>延迟（2026 通用）</Title>
+            <Title level={5}>延迟</Title>
             <ul>
-              <li>内网/内部工具：≤ 1~2 秒</li>
-              <li>ToC 产品/对话助手：≤ 800ms~1s</li>
-              <li>搜索类：≤ 500ms</li>
-              <li>召回、准确率再高，慢到 3s+ 直接不能上线</li>
+              <li>TTFT：从发起请求到收到首个 token 的时间。</li>
+              <li>E2E：从发起请求到完整回答结束的总耗时。</li>
+              <li>该指标主要衡量交互速度与系统响应体验。</li>
             </ul>
           </Col>
           <Col span={24}>
             <Title level={5}>幻觉率</Title>
-            <p>金融、法律、医疗：必须 &lt; 1%。</p>
+            <p>表示回答中无依据、与事实冲突或错误推断的比例，越低越好。</p>
           </Col>
         </Row>
       </Card>

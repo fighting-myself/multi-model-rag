@@ -205,6 +205,31 @@ def list_memories(
         conn.close()
 
 
+def clear_memories(
+    user_id: str,
+    memory_types: Optional[List[str]] = None,
+    db_path: Optional[Path] = None,
+) -> int:
+    """清空指定用户记忆；可按类型过滤。返回删除条数。"""
+    logger.debug("memory clear start user_id=%s types=%s", user_id, memory_types)
+    conn = _get_connection(db_path)
+    try:
+        ensure_schema(conn)
+        params: List[Any] = [user_id]
+        sql = "DELETE FROM memory WHERE user_id = ?"
+        if memory_types:
+            placeholders = ",".join("?" * len(memory_types))
+            sql += f" AND memory_type IN ({placeholders})"
+            params.extend(memory_types)
+        cur = conn.execute(sql, params)
+        conn.commit()
+        deleted = int(cur.rowcount or 0)
+        logger.debug("memory clear done user_id=%s deleted=%s", user_id, deleted)
+        return deleted
+    finally:
+        conn.close()
+
+
 def is_memory_enabled() -> bool:
     """是否启用记忆（由配置决定）。"""
     return getattr(settings, "MEMORY_ENABLED", True)

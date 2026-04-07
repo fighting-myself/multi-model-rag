@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.database import get_db
+from app.models.chunk import Chunk
+from app.models.knowledge_base import KnowledgeBase
 from app.schemas.evaluation import (
     RecallRunRequest,
     RecallRunResponse,
@@ -52,7 +54,7 @@ RAG_METRICS_DEFINITIONS = [
         name="答案准确率 / 正确率",
         name_en="Accuracy / Answer Correctness",
         description="看模型回答对不对、有没有幻觉。企业最关心能不能用、敢不敢给客户用。",
-        tip="面试常说：我们重点评估答案准确率、幻觉率、事实一致性。",
+        tip="评估答案与事实、上下文、问题意图的一致性。",
         link=None,
         unit="%",
     ),
@@ -62,7 +64,7 @@ RAG_METRICS_DEFINITIONS = [
         name="检索召回率 Recall",
         name_en="Recall@1 / @3 / @5 / @10",
         description="RAG 效果的根，召回差则答案必错。看正确的文档块有没有被检索出来。",
-        tip="企业做 RAG 优化，90% 时间都在提召回。",
+        tip="衡量正确文档块是否被检索系统找回。",
         link="/recall-evaluation",
         unit="%",
     ),
@@ -72,7 +74,7 @@ RAG_METRICS_DEFINITIONS = [
         name="检索精准度 Precision",
         name_en="Precision",
         description="看检索回来的内容有没有用。召回高但精准低 → 给模型喂一堆垃圾 → 答案乱。",
-        tip="需与召回平衡，避免噪声过多。",
+        tip="衡量返回结果中有效信息占比，需与召回平衡。",
         link=None,
         unit="%",
     ),
@@ -82,7 +84,7 @@ RAG_METRICS_DEFINITIONS = [
         name="首包延迟 / 首字延迟",
         name_en="TTFT & E2E Latency",
         description="首字延迟 TTFT（Time To First Token）、端到端延迟 E2E。用户体验生命线。",
-        tip="召回、准确率再高，慢到 3s+ 直接不能上线。",
+        tip="衡量交互响应速度与端到端时延。",
         link=None,
         unit="ms",
     ),
@@ -92,7 +94,7 @@ RAG_METRICS_DEFINITIONS = [
         name="幻觉率 Hallucination Rate",
         name_en="Hallucination Rate",
         description="看模型瞎编、捏造、引用错误的比例。企业风控红线。",
-        tip="金融、法律、医疗：必须 < 1%。",
+        tip="衡量回答中捏造、错误引用、无依据推断的比例。",
         link=None,
         unit="%",
     ),
@@ -102,7 +104,7 @@ RAG_METRICS_DEFINITIONS = [
         name="并发能力 QPS",
         name_en="QPS / Concurrency",
         description="看系统能不能扛量。如 10/20/50 并发下的延迟、失败率。",
-        tip="压测与容量规划必备。",
+        tip="衡量系统在并发场景下的吞吐与稳定性。",
         link=None,
         unit="req/s",
     ),
@@ -132,6 +134,78 @@ async def get_rag_metrics_defaults(
     return get_default_benchmarks()
 
 
+@router.get("/rag-metrics/precheck")
+async def get_rag_metrics_precheck(
+    knowledge_base_id: Optional[int] = Query(None),
+    eval_mode: str = Query("normal"),
+    metric_id: Optional[str] = Query(None),
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """评测前诊断：返回样本来源、知识库 chunk 情况、模式与关键提醒。"""
+    mode = (eval_mode or "normal").strip().lower()
+    if mode not in ("normal", "super"):
+        mode = "normal"
+    metric = (metric_id or "").strip().lower()
+    kb_name = None
+    chunk_count = 0
+    avg_chunk_chars = 0
+    has_access = True
+    if knowledge_base_id:
+        kb_q = await db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == knowledge_base_id,
+                KnowledgeBase.user_id == current_user.id,
+            )
+        )
+        kb = kb_q.scalar_one_or_none()
+        if not kb:
+            has_access = False
+        else:
+            kb_name = kb.name
+            cc_q = await db.execute(
+                select(
+                    func.count(Chunk.id),
+                    func.avg(func.length(Chunk.content)),
+                ).where(
+                    Chunk.knowledge_base_id == knowledge_base_id,
+                    Chunk.content != "",
+                )
+            )
+            c, avg_len = cc_q.one()
+            chunk_count = int(c or 0)
+            avg_chunk_chars = int(avg_len or 0)
+    sample_source = "default_seed"
+    if knowledge_base_id and chunk_count > 0:
+        sample_source = "adaptive_kb"
+    warnings = []
+    if knowledge_base_id and not has_access:
+        warnings.append("所选知识库不存在或无权限访问，将回退为默认评测集。")
+    if metric in ("recall", "precision") and not knowledge_base_id:
+        warnings.append("召回率/精准度未选择知识库时，结果参考意义较弱。")
+    if sample_source == "default_seed":
+        warnings.append("当前将使用内置默认样本，若知识库主题不一致可能导致分数偏低。")
+    if chunk_count == 0 and knowledge_base_id:
+        warnings.append("当前知识库暂无可用 chunk，评测结果可能为 0。")
+    if mode == "normal":
+        warnings.append("普通模式评测已禁用跨会话记忆注入，优先反映基础检索与响应性能。")
+    else:
+        warnings.append("超能模式会启用多阶段编排，更贴近真实问答效果。")
+    if metric in ("recall", "precision"):
+        warnings.append("召回率采用归一化口径：Recall@k = 命中数 / min(相关数, k)。")
+    return {
+        "knowledge_base_id": knowledge_base_id,
+        "knowledge_base_name": kb_name,
+        "eval_mode": mode,
+        "metric_id": metric or None,
+        "chunk_count": chunk_count,
+        "avg_chunk_chars": avg_chunk_chars,
+        "sample_source": sample_source,
+        "memory_context_disabled_for_eval": True,
+        "warnings": warnings,
+    }
+
+
 @router.post("/rag-metrics/run-accuracy")
 async def run_rag_accuracy(
     body: RunAccuracyRequest,
@@ -145,6 +219,7 @@ async def run_rag_accuracy(
             user_id=current_user.id,
             knowledge_base_id=body.knowledge_base_id,
             knowledge_base_ids=body.knowledge_base_ids,
+            eval_mode=body.eval_mode,
         )
     except Exception as e:
         logger.exception("准确率评测失败")
@@ -163,6 +238,7 @@ async def run_rag_recall(
             db=db,
             user_id=current_user.id,
             knowledge_base_id=body.knowledge_base_id,
+            eval_mode=body.eval_mode,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -183,6 +259,7 @@ async def run_rag_precision(
             db=db,
             user_id=current_user.id,
             knowledge_base_id=body.knowledge_base_id,
+            eval_mode=body.eval_mode,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -203,6 +280,7 @@ async def run_rag_latency(
             db=db,
             user_id=current_user.id,
             num_samples=body.num_samples,
+            eval_mode=body.eval_mode,
         )
     except Exception as e:
         logger.exception("延迟评测失败")
@@ -222,6 +300,7 @@ async def run_rag_hallucination(
             user_id=current_user.id,
             knowledge_base_id=body.knowledge_base_id,
             knowledge_base_ids=body.knowledge_base_ids,
+            eval_mode=body.eval_mode,
         )
     except Exception as e:
         logger.exception("幻觉率评测失败")
@@ -241,6 +320,7 @@ async def run_rag_qps(
             user_id=current_user.id,
             concurrency=body.concurrency,
             requests_per_worker=body.requests_per_worker,
+            eval_mode=body.eval_mode,
         )
     except Exception as e:
         logger.exception("QPS 评测失败")

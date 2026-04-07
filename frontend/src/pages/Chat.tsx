@@ -95,6 +95,15 @@ const CHAT_CONTENT_MAX_WIDTH = 1024
 
 type AgentTraceItem = { step?: string; title?: string; text?: string; data?: unknown }
 
+function prettyTraceData(data: unknown): string {
+  if (data == null) return ''
+  try {
+    return JSON.stringify(data, null, 2)
+  } catch {
+    return String(data)
+  }
+}
+
 function mergeAgentTrace(items: AgentTraceItem[]): AgentTraceItem[] {
   const out: AgentTraceItem[] = []
   for (const cur of items || []) {
@@ -153,6 +162,9 @@ export default function Chat() {
   const [conversationDrawerVisible, setConversationDrawerVisible] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [sourcePreview, setSourcePreview] = useState<SourceItem | null>(null)
+  const [memoryDrawerVisible, setMemoryDrawerVisible] = useState(false)
+  const [memoryItems, setMemoryItems] = useState<Array<{ id: number; memory_type: string; content: string; created_at: string }>>([])
+  const [memoryLoading, setMemoryLoading] = useState(false)
   /** 关闭：普通问答；开启：超能模式（内部 RAG → MCP → Skills 依次补上下文） */
   const [superMode, setSuperMode] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -364,6 +376,33 @@ export default function Chat() {
   const handleSelectConversation = (convId: number) => {
     setCurrentConvId(convId)
     setConversationDrawerVisible(false)
+  }
+
+  const loadMemories = async () => {
+    setMemoryLoading(true)
+    try {
+      const res = await api.get<{ items: Array<{ id: number; memory_type: string; content: string; created_at: string }> }>('/chat/memory?limit=100')
+      setMemoryItems(res.items || [])
+    } catch {
+      message.error('加载记忆失败')
+    } finally {
+      setMemoryLoading(false)
+    }
+  }
+
+  const handleOpenMemories = async () => {
+    setMemoryDrawerVisible(true)
+    await loadMemories()
+  }
+
+  const handleClearMemories = async () => {
+    try {
+      const res = await api.delete<{ deleted: number }>('/chat/memory')
+      message.success(`已清空记忆（${res.deleted ?? 0} 条）`)
+      setMemoryItems([])
+    } catch {
+      message.error('清空记忆失败')
+    }
   }
 
   const handleDeleteConversation = async (convId: number, e?: React.MouseEvent) => {
@@ -860,6 +899,10 @@ export default function Chat() {
         />
         <span style={{ color: 'var(--app-text-muted)', fontSize: 13, whiteSpace: 'nowrap' }}>超能模式</span>
         <Switch checked={superMode} onChange={setSuperMode} />
+        <Button onClick={handleOpenMemories}>记忆内容</Button>
+        <Popconfirm title="确认清空所有记忆？" onConfirm={handleClearMemories}>
+          <Button danger>一键清空记忆</Button>
+        </Popconfirm>
       </Space>
     </div>
 
@@ -1135,6 +1178,26 @@ export default function Chat() {
                                                   </>
                                                 ) : (
                                                   t.text || '…'
+                                                )}
+                                                {t.data != null && (
+                                                  <pre
+                                                    style={{
+                                                      marginTop: 8,
+                                                      marginBottom: 0,
+                                                      padding: 10,
+                                                      borderRadius: 8,
+                                                      border: '1px solid var(--app-border-subtle)',
+                                                      background: 'var(--app-bg-subtle)',
+                                                      color: 'var(--app-text-secondary)',
+                                                      fontSize: 12,
+                                                      lineHeight: 1.6,
+                                                      whiteSpace: 'pre-wrap',
+                                                      wordBreak: 'break-word',
+                                                      overflowX: 'auto',
+                                                    }}
+                                                  >
+                                                    {prettyTraceData(t.data)}
+                                                  </pre>
                                                 )}
                                               </p>
                                             ))}
@@ -1639,6 +1702,32 @@ export default function Chat() {
         <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--app-text-secondary)', fontSize: 13, overflowY: 'auto', maxHeight: '100%' }}>
           {fileDrawerContent}
         </div>
+      </Drawer>
+      <Drawer
+        title="记忆内容"
+        placement="right"
+        width={520}
+        open={memoryDrawerVisible}
+        onClose={() => setMemoryDrawerVisible(false)}
+        extra={<Button size="small" loading={memoryLoading} onClick={loadMemories}>刷新</Button>}
+      >
+        <List
+          loading={memoryLoading}
+          dataSource={memoryItems}
+          locale={{ emptyText: '暂无记忆' }}
+          renderItem={(m) => (
+            <List.Item key={m.id}>
+              <Card size="small" style={{ width: '100%' }}>
+                <div style={{ fontSize: 12, color: 'var(--app-text-muted)', marginBottom: 8 }}>
+                  #{m.id} · {m.memory_type} · {new Date(m.created_at).toLocaleString('zh-CN')}
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13 }}>
+                  {m.content}
+                </div>
+              </Card>
+            </List.Item>
+          )}
+        />
       </Drawer>
     </>
   )

@@ -23,6 +23,7 @@ from app.services.audit_service import log_audit
 from app.services.knowledge_base_service import KnowledgeBaseService
 from app.services.ocr_service import extract_text_from_image
 from app.services.video_extract_service import extract_text_from_video
+from app.services.memory_service import list_memories, clear_memories
 
 router = APIRouter()
 
@@ -39,6 +40,26 @@ async def get_chat_attachment_settings(
         "file_extensions": getattr(settings, "chat_attachment_file_extensions_list", ["pdf", "doc", "docx", "txt", "xlsx", "xls", "pptx", "ppt", "md"]),
         "video_extensions": getattr(settings, "chat_attachment_video_extensions_list", ["mp4", "webm", "mov"]),
     }
+
+
+@router.get("/memory")
+async def get_chat_memories(
+    limit: int = 50,
+    current_user: UserResponse = Depends(get_current_active_user),
+):
+    rows = list_memories(
+        user_id=str(current_user.id),
+        max_results=max(1, min(int(limit), 200)),
+    )
+    return {"items": rows}
+
+
+@router.delete("/memory")
+async def clear_chat_memories(
+    current_user: UserResponse = Depends(get_current_active_user),
+):
+    deleted = clear_memories(user_id=str(current_user.id))
+    return {"deleted": deleted}
 
 
 @router.post("/completions", response_model=ChatResponse)

@@ -383,11 +383,14 @@ class ChatService:
     async def _ensure_mcp_tools_cache(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """加载 MCP 工具缓存：服务名/工具名/参数 schema/调用配置。"""
         if not MCP_AVAILABLE or not list_tools_from_server:
+            logger.debug("mcp cache skip: MCP unavailable or list_tools_from_server missing")
             return []
         if self.__class__._mcp_tools_cache_ready and not force_refresh:
+            logger.debug("mcp cache hit rows=%s", len(self.__class__._mcp_tools_cache))
             return list(self.__class__._mcp_tools_cache)
         async with self.__class__._mcp_tools_cache_lock:
             if self.__class__._mcp_tools_cache_ready and not force_refresh:
+                logger.debug("mcp cache hit(in lock) rows=%s", len(self.__class__._mcp_tools_cache))
                 return list(self.__class__._mcp_tools_cache)
             try:
                 mcp_result = await self.db.execute(
@@ -396,14 +399,18 @@ class ChatService:
                     )
                 )
                 servers = mcp_result.all()
+                logger.debug("mcp cache load servers=%s", len(servers))
             except Exception:
+                logger.debug("mcp cache load servers failed", exc_info=True)
                 servers = []
             rows: List[Dict[str, Any]] = []
             for _sid, sname, transport_type, config in servers:
                 try:
                     cfg_str = config if isinstance(config, str) else _json.dumps(config or {}, ensure_ascii=False)
                     tools = await list_tools_from_server(transport_type, cfg_str)
+                    logger.debug("mcp tools listed server=%s count=%s", sname, len(tools or []))
                 except Exception:
+                    logger.warning("mcp tools list failed server=%s", sname, exc_info=True)
                     continue
                 for t in tools or []:
                     tname = str(t.get("name") or "").strip()
@@ -421,8 +428,9 @@ class ChatService:
                     )
             self.__class__._mcp_tools_cache = rows
             self.__class__._mcp_tools_cache_ready = True
+            logger.debug("mcp cache ready rows=%s", len(rows))
             return list(rows)
-    
+
     def _rrf_score(self, rank: int, k: int = 60) -> float:
         """RRF 单项贡献（实现见 `infrastructure.rag.hybrid_ops`）。"""
         from app.infrastructure.rag.hybrid_ops import rrf_score as _rrf
@@ -893,6 +901,7 @@ class ChatService:
         enabled_rag: bool,
         enabled_mcp: bool,
         enabled_skills: bool,
+        round_diagnosis: str = "",
     ) -> tuple[bool, bool, bool, bool, str]:
         """评估当前上下文是否足够回答，并给出下一轮建议能力开关。"""
         if not (context or "").strip():
@@ -930,6 +939,7 @@ class ChatService:
         user = (
             f"用户问题：\n{question}\n\n"
             f"当前能力：RAG={enabled_rag}, MCP={enabled_mcp}, Skills={enabled_skills}\n\n"
+            f"本轮复盘（系统整理）：\n{(round_diagnosis or '（无）')[:2000]}\n\n"
             f"当前累计上下文：\n{(context or '')[:7000]}"
         )
         try:
@@ -946,6 +956,55 @@ class ChatService:
             return sufficient, nr, nm, ns, reason
         except Exception:
             return False, enabled_rag, enabled_mcp, enabled_skills, "评估失败，保持当前策略。"
+
+    def _build_round_diagnosis(
+        self,
+        message: str,
+        need_rag: bool,
+        need_mcp: bool,
+        need_skills: bool,
+        retrieved_context_original: str,
+        mcp_results: str,
+        mcp_tools: List[str],
+        skill_results: str,
+        skill_tools: List[str],
+    ) -> str:
+        """构建每轮复盘：总结当前结果、失败点、缺口与下一轮建议（不依赖领域关键词）。"""
+        def _has_error(text: str) -> bool:
+            t = (text or "").lower()
+            return any(k in t for k in ("[工具执行错误]", "[mcp 工具调用失败]", "获取页面失败", "技能执行失败", "unknown error", "timeout"))
+
+        rag_ok = bool((retrieved_context_original or "").strip()) and not str(retrieved_context_original).strip().startswith("[系统提示：")
+        mcp_ok = bool((mcp_results or "").strip()) and not _has_error(mcp_results)
+        skills_ok = bool((skill_results or "").strip()) and not _has_error(skill_results)
+
+        gaps: List[str] = []
+        if need_rag and not rag_ok:
+            gaps.append("RAG 未获得可用片段")
+        if need_mcp and not mcp_ok:
+            gaps.append("MCP 未获得有效结果")
+        if need_skills and not skills_ok:
+            gaps.append("Skills 未获得有效结果")
+        if not gaps and not (rag_ok or mcp_ok or skills_ok):
+            gaps.append("当前轮未形成可用于回答的外部上下文")
+
+        suggested: List[str] = []
+        if not rag_ok:
+            suggested.append("RAG")
+        if not mcp_ok:
+            suggested.append("MCP")
+        if not skills_ok:
+            suggested.append("Skills")
+        if not suggested:
+            suggested = ["保持当前能力组合，直接进入作答评估"]
+
+        return (
+            f"问题：{(message or '').strip()[:120]}\n"
+            f"结果概览：RAG={'OK' if rag_ok else 'MISS'}，MCP={'OK' if mcp_ok else 'MISS'}，Skills={'OK' if skills_ok else 'MISS'}\n"
+            f"调用概览：MCP工具={','.join(mcp_tools or []) or '无'}；Skills工具={','.join(skill_tools or []) or '无'}\n"
+            f"缺口诊断：{'; '.join(gaps)}\n"
+            f"建议下一步：{', '.join(suggested)}"
+        )
 
     async def _filter_external_context_relevance(
         self,
@@ -1577,6 +1636,257 @@ class ChatService:
             return True, True, True, "（意图 JSON 解析失败，已启用完整管线）", [], []
 
     @staticmethod
+    def _extract_json_object(raw: str) -> Dict[str, Any]:
+        text = (raw or "").strip()
+        if not text:
+            return {}
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            text = m.group(0)
+        try:
+            obj = _json.loads(text)
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+
+    async def _build_staged_mcp_tool_calls(
+        self,
+        *,
+        message: str,
+        mcp_rows: List[Dict[str, Any]],
+        mcp_call_map: Dict[str, tuple],
+        preferred_mcp_tools: Optional[List[str]] = None,
+        preferred_mcp_tool_plans: Optional[List[Dict[str, Any]]] = None,
+        trace_logs: Optional[List[str]] = None,
+        trace_data_events: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """MCP 分层编排：服务名清单 -> 服务内工具清单 -> 参数 schema -> 参数抽取。"""
+        if not mcp_rows or not mcp_call_map:
+            return []
+        by_server: Dict[str, List[Dict[str, Any]]] = {}
+        for r in mcp_rows:
+            by_server.setdefault(str(r.get("server_name") or "unknown"), []).append(r)
+        server_names = list(by_server.keys())
+        if not server_names:
+            return []
+        if trace_logs is not None:
+            trace_logs.append(f"分层规划(MCP)-阶段1：可用服务={', '.join(server_names[:8])}")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "service_catalog",
+                "service_names": server_names,
+            })
+
+        # 优先吃路由阶段已有计划
+        if preferred_mcp_tool_plans:
+            for p in preferred_mcp_tool_plans:
+                if not isinstance(p, dict):
+                    continue
+                tname = str(p.get("tool") or "").strip().lower()
+                targs = p.get("args") if isinstance(p.get("args"), dict) else {}
+                if not tname:
+                    continue
+                for openai_name, (_tt, _cfg, mcp_tool_name) in mcp_call_map.items():
+                    mt = str(mcp_tool_name or "").strip().lower()
+                    oa = str(openai_name or "").strip().lower()
+                    if tname == mt or tname == oa:
+                        if trace_logs is not None:
+                            trace_logs.append(f"分层规划(MCP)-命中路由计划：{mcp_tool_name or openai_name}")
+                        if trace_data_events is not None:
+                            trace_data_events.append({
+                                "stage": "route_plan_hit",
+                                "tool": mcp_tool_name or openai_name,
+                                "args": targs,
+                            })
+                        return [{"id": "staged-mcp-1", "name": openai_name, "arguments": targs}]
+
+        # 阶段1：从服务名选择候选服务
+        selected_servers = server_names[:2]
+        if len(server_names) > 1:
+            prompt = (
+                "你是工具路由器。根据用户问题，从服务名中选择最可能相关的 1-2 个服务。\n"
+                "只输出 JSON：{\"servers\":[\"服务名\"]}\n"
+                f"服务列表：{_json.dumps(server_names, ensure_ascii=False)}\n"
+                f"用户问题：{message}"
+            )
+            obj = self._extract_json_object(await llm_chat_simple("只输出 JSON，不要解释。", prompt, max_tokens=120, temperature=0.1))
+            picks = obj.get("servers") if isinstance(obj.get("servers"), list) else []
+            selected_servers = [str(x) for x in picks if str(x) in by_server][:2] or selected_servers
+        if trace_logs is not None:
+            trace_logs.append(f"分层规划(MCP)-阶段1结果：目标服务={', '.join(selected_servers)}")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "service_selected",
+                "selected_servers": selected_servers,
+            })
+
+        # 阶段2：在目标服务内选具体工具
+        tool_pool: List[Dict[str, Any]] = []
+        for s in selected_servers:
+            tool_pool.extend(by_server.get(s, []))
+        if not tool_pool:
+            tool_pool = mcp_rows[:]
+        tool_briefs = []
+        for t in tool_pool[:30]:
+            tname = str(t.get("tool_name") or "")
+            desc = str(t.get("description") or "")[:120]
+            tool_briefs.append({"tool": tname, "desc": desc, "server": str(t.get("server_name") or "")})
+        prompt2 = (
+            "你是工具路由器。请从候选工具中选出最相关的 1 个工具名。\n"
+            "只输出 JSON：{\"tool\":\"工具名\"}\n"
+            f"候选工具：{_json.dumps(tool_briefs, ensure_ascii=False)}\n"
+            f"用户问题：{message}"
+        )
+        obj2 = self._extract_json_object(await llm_chat_simple("只输出 JSON，不要解释。", prompt2, max_tokens=140, temperature=0.1))
+        selected_tool = str(obj2.get("tool") or "").strip()
+        if not selected_tool and preferred_mcp_tools:
+            selected_tool = str(preferred_mcp_tools[0] or "").strip()
+        if not selected_tool and tool_pool:
+            selected_tool = str((tool_pool[0] or {}).get("tool_name") or "").strip()
+        if trace_logs is not None:
+            trace_logs.append(f"分层规划(MCP)-阶段2结果：目标工具={selected_tool or '未选中'}")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "tool_selected",
+                "tool": selected_tool or "",
+                "candidates": tool_briefs[:10],
+            })
+        if not selected_tool:
+            return []
+
+        # 找 openai tool name + schema
+        openai_pick = ""
+        schema_obj: Dict[str, Any] = {"type": "object", "properties": {}}
+        for openai_name, (_tt, _cfg, mcp_tool_name) in mcp_call_map.items():
+            mt = str(mcp_tool_name or "").strip().lower()
+            if mt == selected_tool.lower() or openai_name.lower() == selected_tool.lower():
+                openai_pick = openai_name
+                break
+        if not openai_pick:
+            for openai_name, (_tt, _cfg, mcp_tool_name) in mcp_call_map.items():
+                mt = str(mcp_tool_name or "").strip().lower()
+                if selected_tool.lower() in mt or selected_tool.lower() in openai_name.lower():
+                    openai_pick = openai_name
+                    break
+        for t in tool_pool:
+            if str(t.get("tool_name") or "").strip().lower() == selected_tool.lower():
+                schema_obj = t.get("input_schema") if isinstance(t.get("input_schema"), dict) else schema_obj
+                break
+        if not openai_pick:
+            return []
+
+        # 阶段3+4：读取 schema 并抽取参数
+        if trace_logs is not None:
+            trace_logs.append("分层规划(MCP)-阶段3：已读取目标工具参数 schema，开始参数抽取。")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "schema_loaded",
+                "tool": selected_tool,
+                "schema": schema_obj,
+            })
+        prompt3 = (
+            "你是参数抽取器。根据用户问题与工具参数 schema，提取调用参数。\n"
+            "只输出 JSON：{\"args\":{...}}。未知参数不要编造，可省略。\n"
+            f"工具名：{selected_tool}\n"
+            f"参数 schema：{_json.dumps(schema_obj, ensure_ascii=False)}\n"
+            f"用户问题：{message}"
+        )
+        obj3 = self._extract_json_object(await llm_chat_simple("只输出 JSON，不要解释。", prompt3, max_tokens=220, temperature=0.0))
+        args = obj3.get("args") if isinstance(obj3.get("args"), dict) else {}
+        if trace_logs is not None:
+            trace_logs.append(f"分层规划(MCP)-阶段4结果：参数键={list(args.keys())[:8]}")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "args_extracted",
+                "tool": selected_tool,
+                "args": args,
+            })
+        return [{"id": "staged-mcp-1", "name": openai_pick, "arguments": args}]
+
+    async def _build_staged_skills_tool_calls(
+        self,
+        *,
+        message: str,
+        trace_logs: Optional[List[str]] = None,
+        trace_data_events: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Skills 分层编排：技能名清单 -> 读取 SKILL.md -> 参数抽取 -> 调用。"""
+        try:
+            from app.services.skill_loader import SKILLS_DIR, is_valid_skill_id, load_skill_documentation
+        except Exception:
+            return []
+        if not SKILLS_DIR.is_dir():
+            return []
+        skill_ids: List[str] = []
+        for d in sorted(SKILLS_DIR.iterdir()):
+            if d.is_dir() and is_valid_skill_id(d.name) and (d / "SKILL.md").is_file():
+                skill_ids.append(d.name)
+        if not skill_ids:
+            return []
+        if trace_logs is not None:
+            trace_logs.append(f"分层规划(Skills)-阶段1：可用 skill_id={', '.join(skill_ids[:10])}")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "skill_catalog",
+                "skill_ids": skill_ids,
+            })
+
+        # 阶段1：先从技能名列表选技能
+        pick_prompt = (
+            "你是技能路由器。根据用户问题，从 skill_id 列表中选择最相关的 1 个。\n"
+            "只输出 JSON：{\"skill_id\":\"...\"}\n"
+            f"skill_id 列表：{_json.dumps(skill_ids, ensure_ascii=False)}\n"
+            f"用户问题：{message}"
+        )
+        pick_obj = self._extract_json_object(await llm_chat_simple("只输出 JSON，不要解释。", pick_prompt, max_tokens=100, temperature=0.1))
+        skill_id = str(pick_obj.get("skill_id") or "").strip()
+        if skill_id not in skill_ids:
+            skill_id = skill_ids[0]
+        if trace_logs is not None:
+            trace_logs.append(f"分层规划(Skills)-阶段1结果：目标技能={skill_id}")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "skill_selected",
+                "skill_id": skill_id,
+            })
+
+        # 阶段2：加载 SKILL.md 用法
+        skill_doc = (load_skill_documentation(skill_id) or "")[:6000]
+        if trace_logs is not None:
+            trace_logs.append("分层规划(Skills)-阶段2：已读取 SKILL.md。")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "skill_doc_loaded",
+                "skill_id": skill_id,
+                "doc_preview": skill_doc[:500],
+            })
+
+        # 阶段3：按文档抽取 skill_args
+        args_prompt = (
+            "你是技能参数抽取器。请依据 SKILL.md 用法，从用户问题中提取 skill_invoke 所需参数。\n"
+            "只输出 JSON：{\"skill_args\":{...}}；不确定参数可省略。\n"
+            f"skill_id: {skill_id}\n"
+            f"SKILL.md:\n{skill_doc}\n\n"
+            f"用户问题：{message}"
+        )
+        args_obj = self._extract_json_object(await llm_chat_simple("只输出 JSON，不要解释。", args_prompt, max_tokens=220, temperature=0.0))
+        skill_args = args_obj.get("skill_args") if isinstance(args_obj.get("skill_args"), dict) else {}
+        if trace_logs is not None:
+            trace_logs.append(f"分层规划(Skills)-阶段3结果：参数键={list(skill_args.keys())[:8]}")
+        if trace_data_events is not None:
+            trace_data_events.append({
+                "stage": "skill_args_extracted",
+                "skill_id": skill_id,
+                "skill_args": skill_args,
+            })
+
+        # 阶段4：先 load 再 invoke（显式流程化）
+        return [
+            {"id": "staged-skill-load", "name": "skill_load", "arguments": {"skill_id": skill_id}},
+            {"id": "staged-skill-invoke", "name": "skill_invoke", "arguments": {"skill_id": skill_id, "skill_args": skill_args}},
+        ]
+
+    @staticmethod
     def _message_indicates_portal_style_page_link(message: str) -> bool:
         """问题中是否出现典型「门户/文档站点页面」链接形态（正文通常未向量化，不宜单靠 RAG）。"""
         m = (message or "").strip()
@@ -1851,7 +2161,24 @@ class ChatService:
         need_rag, need_mcp, need_skills, reason = self._adjust_super_mode_intent_for_portal_links(
             message, need_rag, need_mcp, need_skills, reason
         )
-        _ = mcp_enabled_names
+        # 通用仲裁：当模型判断需要 Skills，且当前确有可用 MCP 工具时，首轮同时打开 MCP，
+        # 由后续阶段按“先 MCP、后 Skills 回退”执行，避免为每个领域写关键词规则。
+        if need_skills and not need_mcp:
+            cached_tools = await self._ensure_mcp_tools_cache(force_refresh=False)
+            if cached_tools:
+                need_mcp = True
+                extra = "检测到可用 MCP 工具，启用通用仲裁：首轮先尝试 MCP，失败再回退 Skills。"
+                reason = (reason + "；" + extra) if (reason or "").strip() else extra
+        logger.debug(
+            "super route result need_rag=%s need_mcp=%s need_skills=%s mcp_enabled_count=%s mcp_enabled_names=%s route_reason=%s mcp_tools=%s",
+            need_rag,
+            need_mcp,
+            need_skills,
+            mcp_enabled_count,
+            ",".join(mcp_enabled_names),
+            reason,
+            ",".join(mcp_tools or []),
+        )
         return need_rag, need_mcp, need_skills, reason, mcp_tools, mcp_tool_plans
 
     async def _iter_super_mode_phases(
@@ -2024,6 +2351,7 @@ class ChatService:
 
             if need_mcp and not (mcp_results or "").strip():
                 mcp_trace_logs: List[str] = []
+                mcp_trace_data_events: List[Dict[str, Any]] = []
                 yield (
                     "trace",
                     {"step": "mcp", "title": "MCP 工具编排", "text": f"第 {round_idx} 轮：开始尝试调用 MCP 工具补充上下文…"},
@@ -2037,9 +2365,21 @@ class ChatService:
                     preferred_mcp_tools=route_mcp_tools,
                     preferred_mcp_tool_plans=route_mcp_tool_plans,
                     trace_logs=mcp_trace_logs,
+                    trace_data_events=mcp_trace_data_events,
+                    stop_after_first_success=True,
                 )
                 for tl in mcp_trace_logs:
                     yield ("trace", {"step": "mcp", "title": "MCP 工具编排", "text": tl})
+                for td in mcp_trace_data_events:
+                    yield (
+                        "trace",
+                        {
+                            "step": "mcp",
+                            "title": "MCP 工具编排（结构化）",
+                            "text": f"分层阶段：{td.get('stage', 'unknown')}",
+                            "data": td,
+                        },
+                    )
                 mcp_tools_before_filter = list(mcp_tools)
                 if mcp_results and mcp_results.strip():
                     rel, kept = await self._filter_external_context_relevance(message, mcp_results, "MCP")
@@ -2081,8 +2421,11 @@ class ChatService:
             if mcp_results:
                 prior_mcp += f"\n【MCP 工具结果】\n{mcp_results}\n"
 
-            if need_skills and not (skill_results or "").strip():
+            # 通用执行顺序：若本轮已规划 MCP+Skills，先尝试 MCP；仅当 MCP 未产出可用上下文时再执行 Skills。
+            should_try_skills = need_skills and not (skill_results or "").strip() and (not need_mcp or not (mcp_results or "").strip())
+            if should_try_skills:
                 skill_trace_logs: List[str] = []
+                skill_trace_data_events: List[Dict[str, Any]] = []
                 yield (
                     "trace",
                     {"step": "skills", "title": "Skills 工具编排", "text": f"第 {round_idx} 轮：开始尝试调用 Skills 工具补充上下文…"},
@@ -2102,10 +2445,21 @@ class ChatService:
                         enable_skills_tools=True,
                         prior_context=prior_mcp,
                         trace_logs=skill_trace_logs,
+                        trace_data_events=skill_trace_data_events,
                         stop_after_first_success=True,
                     )
                     for tl in skill_trace_logs:
                         yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": tl})
+                    for td in skill_trace_data_events:
+                        yield (
+                            "trace",
+                            {
+                                "step": "skills",
+                                "title": "Skills 工具编排（结构化）",
+                                "text": f"分层阶段：{td.get('stage', 'unknown')}",
+                                "data": td,
+                            },
+                        )
 
                 # 实际发起过的工具名（过滤/校验后会清空 skill_tools，不能用它判断“是否调用过”）
                 skill_tools_invoked = list(skill_tools or [])
@@ -2151,6 +2505,15 @@ class ChatService:
                             raw.replace("\n", "\\n"),
                         )
                 yield ("trace", {"step": "skills", "title": "Skills 工具编排", "text": skill_txt})
+            elif need_skills and need_mcp and (mcp_results or "").strip():
+                yield (
+                    "trace",
+                    {
+                        "step": "skills",
+                        "title": "Skills 工具编排",
+                        "text": f"第 {round_idx} 轮：跳过（MCP 已获得可用上下文，本轮不再重复调用 Skills）。",
+                    },
+                )
             elif need_skills:
                 yield (
                     "trace",
@@ -2179,8 +2542,28 @@ class ChatService:
                 eval_ctx += f"【MCP】\n{mcp_results[:2500]}\n\n"
             if (skill_results or "").strip():
                 eval_ctx += f"【Skills】\n{skill_results[:2500]}\n\n"
+            round_diag = self._build_round_diagnosis(
+                message=message,
+                need_rag=need_rag,
+                need_mcp=need_mcp,
+                need_skills=need_skills,
+                retrieved_context_original=retrieved_context_original or "",
+                mcp_results=mcp_results or "",
+                mcp_tools=mcp_tools or [],
+                skill_results=skill_results or "",
+                skill_tools=skill_tools or [],
+            )
+            logger.debug("round diagnosis: %s", round_diag.replace("\n", " | "))
+            yield (
+                "trace",
+                {
+                    "step": "context_loop",
+                    "title": f"第 {round_idx} 轮复盘",
+                    "text": round_diag,
+                },
+            )
             sufficient_now, next_rag, next_mcp, next_skills, assess_reason = await self._assess_context_and_next_actions(
-                message, eval_ctx, need_rag, need_mcp, need_skills
+                message, eval_ctx, need_rag, need_mcp, need_skills, round_diag
             )
             # 门户外链场景下，若 Skills 已返回明确失败信息，不再切换到 RAG（外链通常未入库，继续 RAG 只会空转）。
             msg_l = (message or "").strip().lower()
@@ -2441,6 +2824,7 @@ class ChatService:
         attachments: Optional[List[Dict[str, Any]]] = None,
         *,
         rag_only: bool = False,
+        disable_memory_context: bool = False,
     ) -> ChatResponse:
         """发送消息：普通模式为纯 LLM+历史；超能模式为 RAG→MCP→Skill（见 _super_mode_run_sequential）。rag_only 仅供内部评测。"""
         import logging
@@ -2486,6 +2870,7 @@ class ChatService:
                 enable_skills_tools=enable_skills_tools,
                 enable_rag=enable_rag,
                 super_mode=super_mode,
+                disable_memory_context=disable_memory_context,
             )
         except Exception:
             logging.exception("聊天处理失败")
@@ -2525,6 +2910,7 @@ class ChatService:
         preferred_mcp_tools: Optional[List[str]] = None,
         preferred_mcp_tool_plans: Optional[List[Dict[str, Any]]] = None,
         trace_logs: Optional[List[str]] = None,
+        trace_data_events: Optional[List[Dict[str, Any]]] = None,
         stop_after_first_success: bool = False,
     ) -> tuple[str, List[str]]:
         """先判断工具库中是否有能用上的工具：让模型决定是否调用，若调用则执行并返回 (工具结果文本, 调用的工具名列表)；否则返回 ("", [])。
@@ -2646,6 +3032,7 @@ class ChatService:
             system_tool = (
                 prior_block
                 + "你是「MCP 工具编排」阶段（超能模式第二步），仅可调用 MCP 相关工具，不要调用 Skills。\n"
+                "- 采用三级决策：先看 MCP 总服务名（不要先猜参数）→ 再定位目标服务下的具体工具 → 最后依据工具参数 schema 从用户问题提取参数并调用。\n"
                 "- 可先 mcp_list_tools 查看已接入的 MCP 能力，再按需调用具体 MCP 工具。\n"
                 "- 若完全不需要 MCP，只回复一句：不需要调用工具。\n"
                 "若需要工具，请用 tool_calls；可多轮调用直到信息足够。"
@@ -2656,6 +3043,7 @@ class ChatService:
                 + "你是「Skills 工具编排」阶段（超能模式第三步），仅可调用 Skills 与下列联网/本地辅助工具，不要调用 MCP。\n\n"
                 f"{catalog}\n\n"
                 "【Skills】skills 子目录名即 skill_id（[a-z0-9][a-z0-9_-]*）。\n"
+                "- 采用三级决策：先从 skill 名称中定位候选 skill_id → 再 skill_load(skill_id) 读取 SKILL.md 用法 → 最后从用户问题提取参数并 skill_invoke。\n"
                 "- 先 skill_load(skill_id) 仅用于读取用法文档；当需要“网页正文/摘要/内容提取”时，必须继续调用 skill_invoke 获取正文。\n"
                 "- 严禁只调用 skill_load 就结束：skill_load 不等于已获得外部正文上下文。\n"
                 "- Confluence/文档门户链接优先：先 skill_invoke(\"confluence\", {\"action\":\"get_page\", \"url\":\"...\", \"connection_name\":\"域名\"})；仅专用技能失败时再用 web_fetch。\n"
@@ -2676,6 +3064,7 @@ class ChatService:
                 + "你是智能问答的「工具编排」阶段，仅负责按需调用工具，不要输出面向最终用户的冗长回答。\n\n"
                 f"{catalog}\n\n"
                 "【Skills】skills 子目录名即 skill_id（[a-z0-9][a-z0-9_-]*，与 OpenClaw 目录风格一致）。\n"
+                "- MCP 与 Skills 都按三级决策：先定位服务/技能名称，再读取工具/文档，再提取参数调用。\n"
                 "- 需要某技能时：先 skill_load(skill_id) 阅读 SKILL.md，再 skill_invoke(skill_id, skill_args) 传入文档约定的 JSON；不要编造 skill_id。\n"
                 "- 若文档要求 shell：在已提供 bash 工具时可调用 bash（受 BASH_SAFE_BINS / 审批策略约束）。\n"
                 "- Confluence/文档门户链接优先用 confluence 技能获取正文；仅失败时再走 web_fetch。\n"
@@ -2775,18 +3164,55 @@ class ChatService:
                         trace_logs.append(f"快路径调用失败：{str(e)}，回退到常规工具编排。")
 
         import time as _time
+        staged_planned_tool_calls: List[Dict[str, Any]] = []
+        staged_planner_used = False
+        if require_tool_call:
+            try:
+                if enable_mcp_tools and not enable_skills_tools:
+                    staged_planned_tool_calls = await self._build_staged_mcp_tool_calls(
+                        message=message,
+                        mcp_rows=cached if (enable_mcp_tools and MCP_AVAILABLE and call_tool_on_server and mcp_tool_to_openai_function) else [],
+                        mcp_call_map=mcp_call_map,
+                        preferred_mcp_tools=preferred_mcp_tools,
+                        preferred_mcp_tool_plans=preferred_mcp_tool_plans,
+                        trace_logs=trace_logs,
+                        trace_data_events=trace_data_events,
+                    )
+                elif enable_skills_tools and not enable_mcp_tools:
+                    staged_planned_tool_calls = await self._build_staged_skills_tool_calls(
+                        message=message,
+                        trace_logs=trace_logs,
+                        trace_data_events=trace_data_events,
+                    )
+            except Exception:
+                if trace_logs is not None:
+                    trace_logs.append("分层规划器执行失败，回退到常规工具编排。")
+                logger.debug("staged planner failed", exc_info=True)
         for _round in range(max_tool_rounds):
             rno = _round + 1
             if trace_logs is not None:
                 trace_logs.append(f"第 {rno} 轮：开始工具决策。")
-            t_llm_0 = _time.perf_counter()
-            content, tool_calls = await chat_completion_with_tools(messages, tools=openai_tools)
-            t_llm_ms = round((_time.perf_counter() - t_llm_0) * 1000, 0)
-            if trace_logs is not None:
-                trace_logs.append(f"第 {rno} 轮：工具决策完成，耗时 {int(t_llm_ms)}ms，tool_calls={len(tool_calls)}。")
+            if _round == 0 and staged_planned_tool_calls:
+                staged_planner_used = True
+                content, tool_calls = None, list(staged_planned_tool_calls)
+                if trace_logs is not None:
+                    trace_logs.append(
+                        f"第 {rno} 轮：采用分层规划器结果直连执行，tool_calls={len(tool_calls)}。"
+                    )
+            else:
+                t_llm_0 = _time.perf_counter()
+                content, tool_calls = await chat_completion_with_tools(messages, tools=openai_tools)
+                t_llm_ms = round((_time.perf_counter() - t_llm_0) * 1000, 0)
+                if trace_logs is not None:
+                    trace_logs.append(f"第 {rno} 轮：工具决策完成，耗时 {int(t_llm_ms)}ms，tool_calls={len(tool_calls)}。")
             if not tool_calls:
                 if trace_logs is not None:
                     trace_logs.append(f"第 {rno} 轮：未新增工具调用，进入结果整理。")
+                # 已有有效工具结果时立即收敛，避免进入后续“强约束重试”造成额外轮次与重复调用。
+                if any((r or "").strip() for r in results):
+                    if trace_logs is not None:
+                        trace_logs.append("已有有效工具结果，结束当前阶段工具编排。")
+                    break
                 if require_tool_call:
                     # 严格模式：不“盲调”任意工具。
                     # 若这是 MCP-only 阶段，优先走“路由命中工具”分支，避免先做一次通用重试导致额外 LLM 往返。
@@ -2873,6 +3299,11 @@ class ChatService:
                             if trace_logs is not None:
                                 trace_logs.append("MCP-only 兜底：调用 mcp_list_tools。")
                         else:
+                            # 分层规划首轮若未产出有效调用，立即回退一次常规 LLM 编排，避免空转。
+                            if staged_planner_used and rno == 1:
+                                staged_planner_used = False
+                                staged_planned_tool_calls = []
+                                continue
                             break
                     else:
                         break
@@ -3068,6 +3499,7 @@ class ChatService:
         enable_rag: bool = True,
         super_mode: bool = False,
         attachments: Optional[List[Dict[str, Any]]] = None,
+        disable_memory_context: bool = False,
     ) -> ChatResponse:
         """在已添加用户消息后执行：普通模式为纯 LLM+对话历史（可选附件文本）；超能模式见 _super_mode_run_sequential（RAG→MCP→Skill）。"""
         if super_mode:
@@ -3135,10 +3567,11 @@ class ChatService:
             if history_context:
                 full_context += f"【对话历史】\n{history_context}\n\n"
 
-            memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
-            if memory_ctx:
-                full_context = (memory_ctx + "\n\n" + full_context).strip() + "\n\n"
-                logging.info("chat_memory injected(non-stream) user_id=%s conv_id=%s", conv.user_id, conv.id)
+            if not disable_memory_context:
+                memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
+                if memory_ctx:
+                    full_context = (memory_ctx + "\n\n" + full_context).strip() + "\n\n"
+                    logging.info("chat_memory injected(non-stream) user_id=%s conv_id=%s", conv.user_id, conv.id)
 
             # 普通模式不自动公网检索；联网由超能模式 Skills 阶段按需触发
 
@@ -3378,6 +3811,7 @@ class ChatService:
         content_for_save: Optional[str] = None,
         *,
         rag_only: bool = False,
+        disable_memory_context: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources、ttft_ms、e2e_ms）；支持多选知识库 knowledge_base_ids。"""
         import logging
@@ -3466,10 +3900,11 @@ class ChatService:
                             web_retrieved_context,
                             web_sources_list,
                         ) = data
-                        memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
-                        if memory_ctx:
-                            full_context = (memory_ctx + "\n\n" + (full_context or "")).strip()
-                            logging.info("chat_memory injected(stream super) user_id=%s conv_id=%s", conv.user_id, conv.id)
+                        if not disable_memory_context:
+                            memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
+                            if memory_ctx:
+                                full_context = (memory_ctx + "\n\n" + (full_context or "")).strip()
+                                logging.info("chat_memory injected(stream super) user_id=%s conv_id=%s", conv.user_id, conv.id)
             except Exception:
                 logging.exception("超能模式（流式）失败")
                 assistant_content = "抱歉，超能模式处理失败，请稍后重试。"
@@ -3610,10 +4045,11 @@ class ChatService:
                 full_context += f"【知识库上下文】\n{rag_context}\n\n"
         if history_context:
             full_context += f"【对话历史】\n{history_context}\n\n"
-        memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
-        if memory_ctx:
-            full_context = (memory_ctx + "\n\n" + full_context).strip() + "\n\n"
-            logging.info("chat_memory injected(stream normal) user_id=%s conv_id=%s", conv.user_id, conv.id)
+        if not disable_memory_context:
+            memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
+            if memory_ctx:
+                full_context = (memory_ctx + "\n\n" + full_context).strip() + "\n\n"
+                logging.info("chat_memory injected(stream normal) user_id=%s conv_id=%s", conv.user_id, conv.id)
 
         user_content_llm = self._build_user_content_for_llm(message, attachments)
         full_content: List[str] = []

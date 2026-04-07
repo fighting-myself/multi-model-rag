@@ -47,6 +47,7 @@ from app.api.v1 import api_router
 from app.core.logging import setup_logging
 from app.core.health import check_db, check_redis, check_vector, check_minio
 from app.services.chat_service import warmup_mcp_tools_cache
+from app.services.rag_metrics_defaults import sync_default_benchmarks
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,10 @@ async def lifespan(app: FastAPI):
         await warmup_mcp_tools_cache()
     except Exception as e:
         logging.getLogger(__name__).warning("MCP 缓存预热异常: %s", e)
+    try:
+        sync_default_benchmarks()
+    except Exception as e:
+        logging.getLogger(__name__).warning("默认评测集同步异常: %s", e)
     # 创建数据库表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

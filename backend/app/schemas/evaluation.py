@@ -118,30 +118,36 @@ class RunAccuracyRequest(BaseModel):
     """答案准确率一键评测"""
     knowledge_base_id: Optional[int] = None
     knowledge_base_ids: Optional[List[int]] = None
+    eval_mode: str = Field(default="super", description="评测模式：normal(普通) | super(超能)")
 
 
 class RunRecallRequest(BaseModel):
     """召回率一键评测"""
     knowledge_base_id: int = Field(..., description="知识库 ID")
+    eval_mode: str = Field(default="normal", description="评测模式：normal(普通) | super(超能)")
 
 
 class RunPrecisionRequest(BaseModel):
     """精准度一键评测"""
     knowledge_base_id: int = Field(..., description="知识库 ID")
+    eval_mode: str = Field(default="normal", description="评测模式：normal(普通) | super(超能)")
 
 
 class RunLatencyRequest(BaseModel):
     """延迟一键评测"""
     num_samples: int = Field(default=3, ge=1, le=10)
+    eval_mode: str = Field(default="normal", description="评测模式：normal(普通) | super(超能)")
 
 
 class RunHallucinationRequest(BaseModel):
     """幻觉率一键评测"""
     knowledge_base_id: Optional[int] = None
     knowledge_base_ids: Optional[List[int]] = None
+    eval_mode: str = Field(default="super", description="评测模式：normal(普通) | super(超能)")
 
 
 class RunQPSRequest(BaseModel):
     """QPS 一键评测"""
     concurrency: int = Field(default=5, ge=1, le=20)
     requests_per_worker: int = Field(default=2, ge=1, le=5)
+    eval_mode: str = Field(default="normal", description="评测模式：normal(普通) | super(超能)")

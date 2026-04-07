@@ -382,3 +382,15 @@ export interface RAGMetricsResponse {
   metrics: RAGMetricItem[]
   latency_standards: Record<string, string>
 }
+
+export interface RAGMetricsPrecheckResponse {
+  knowledge_base_id?: number | null
+  knowledge_base_name?: string | null
+  eval_mode: 'normal' | 'super'
+  metric_id?: string | null
+  chunk_count: number
+  avg_chunk_chars: number
+  sample_source: 'default_seed' | 'adaptive_kb'
+  memory_context_disabled_for_eval: boolean
+  warnings: string[]
+}

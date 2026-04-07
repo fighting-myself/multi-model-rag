@@ -48,12 +48,13 @@ async def _resolve_relevant_ids_by_keywords(
 
 
 def compute_recall_at_k(retrieved_ids: List[int], relevant_ids: List[int], k: int) -> float:
-    """Recall@k = |retrieved[:k] ∩ relevant| / |relevant|，relevant 为空时返回 0"""
+    """归一化 Recall@k = |retrieved[:k] ∩ relevant| / min(|relevant|, k)，relevant 为空时返回 0。"""
     if not relevant_ids:
         return 0.0
     rel_set = set(relevant_ids)
     hit = len(rel_set & set(retrieved_ids[:k]))
-    return hit / len(rel_set)
+    denom = min(len(rel_set), max(1, int(k)))
+    return hit / denom if denom > 0 else 0.0
 
 
 def compute_hit_at_k(retrieved_ids: List[int], relevant_ids: List[int], k: int) -> int:
@@ -82,6 +83,7 @@ async def run_recall_evaluation(
     benchmark_items: List[Dict[str, Any]],
     retrieval_config: Dict[str, Any],
     top_k_list: Optional[List[int]] = None,
+    eval_mode: str = "normal",
 ) -> Dict[str, Any]:
     """
     运行召回率评测。
@@ -111,10 +113,12 @@ async def run_recall_evaluation(
     retrieval_mode = retrieval_config.get("retrieval_mode") or "hybrid"
     use_rerank = retrieval_config.get("use_rerank", True)
     use_query_expand = retrieval_config.get("use_query_expand", False)
+    mode = (eval_mode or "normal").strip().lower()
     config_snapshot = {
         "retrieval_mode": retrieval_mode,
         "use_rerank": use_rerank,
         "use_query_expand": use_query_expand,
+        "eval_mode": mode,
         "top_k_list": top_k_list,
     }
     # 校验知识库归属
@@ -147,15 +151,59 @@ async def run_recall_evaluation(
     async def retrieve_one(it: Dict[str, Any]) -> tuple:
         query = it["query"]
         try:
-            ids = await chat_svc.retrieve_ordered_chunk_ids(
-                query=query,
-                knowledge_base_id=knowledge_base_id,
-                top_k=max_k,
-                retrieval_mode=retrieval_mode,
-                use_rerank=use_rerank,
-                use_query_expand=use_query_expand,
-                user_id=user_id,
-            )
+            if mode == "super":
+                # 超能评测：允许多次检索（先常规，再 query_expand，再兜底 hybrid）并合并去重
+                merged: List[int] = []
+                seen = set()
+                async def _merge(fetch_ids: List[int]) -> None:
+                    for cid in fetch_ids:
+                        if cid in seen:
+                            continue
+                        seen.add(cid)
+                        merged.append(cid)
+                ids1 = await chat_svc.retrieve_ordered_chunk_ids(
+                    query=query,
+                    knowledge_base_id=knowledge_base_id,
+                    top_k=max_k,
+                    retrieval_mode=retrieval_mode,
+                    use_rerank=use_rerank,
+                    use_query_expand=False,
+                    user_id=user_id,
+                )
+                await _merge(ids1)
+                if len(merged) < max_k:
+                    ids2 = await chat_svc.retrieve_ordered_chunk_ids(
+                        query=query,
+                        knowledge_base_id=knowledge_base_id,
+                        top_k=max_k,
+                        retrieval_mode=retrieval_mode,
+                        use_rerank=use_rerank,
+                        use_query_expand=True,
+                        user_id=user_id,
+                    )
+                    await _merge(ids2)
+                if len(merged) < max_k and retrieval_mode != "hybrid":
+                    ids3 = await chat_svc.retrieve_ordered_chunk_ids(
+                        query=query,
+                        knowledge_base_id=knowledge_base_id,
+                        top_k=max_k,
+                        retrieval_mode="hybrid",
+                        use_rerank=use_rerank,
+                        use_query_expand=True,
+                        user_id=user_id,
+                    )
+                    await _merge(ids3)
+                ids = merged[:max_k]
+            else:
+                ids = await chat_svc.retrieve_ordered_chunk_ids(
+                    query=query,
+                    knowledge_base_id=knowledge_base_id,
+                    top_k=max_k,
+                    retrieval_mode=retrieval_mode,
+                    use_rerank=use_rerank,
+                    use_query_expand=use_query_expand,
+                    user_id=user_id,
+                )
             return (it["query"], it["relevant_ids"], ids)
         except Exception as e:
             logger.warning("单条评测检索失败 query=%s: %s", query[:50], e)
