@@ -39,7 +39,7 @@ from app.schemas.knowledge_base import (
 from app.schemas.auth import UserResponse
 from app.schemas.tasks import TaskEnqueueResponse
 from app.api.v1.auth import get_current_active_user
-from app.api.deps import require_upload_rate_limit, get_client_ip
+from app.api.deps import require_upload_rate_limit, get_client_ip, trace_id_from_request
 from app.services.knowledge_base_service import KnowledgeBaseService
 from app.services.audit_service import log_audit
 from app.services import cache_service
@@ -58,7 +58,7 @@ async def create_knowledge_base(
     """创建知识库"""
     kb_service = KnowledgeBaseService(db)
     kb = await kb_service.create_knowledge_base(kb_data, current_user.id)
-    await log_audit(db, current_user.id, "create_kb", "knowledge_base", str(kb.id), {"name": kb.name}, get_client_ip(request), getattr(request.state, "request_id", None))
+    await log_audit(db, current_user.id, "create_kb", "knowledge_base", str(kb.id), {"name": kb.name}, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_kb_list(current_user.id))
     await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
     return kb
@@ -119,7 +119,7 @@ async def update_knowledge_base(
     kb = await kb_service.update_knowledge_base(kb_id, kb_data, current_user.id)
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
-    await log_audit(db, current_user.id, "update_kb", "knowledge_base", str(kb_id), {"name": kb.name}, get_client_ip(request), getattr(request.state, "request_id", None))
+    await log_audit(db, current_user.id, "update_kb", "knowledge_base", str(kb_id), {"name": kb.name}, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete, cache_service.key_kb_detail(kb_id))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_kb_list(current_user.id))
     return kb
@@ -135,7 +135,7 @@ async def delete_knowledge_base(
     """删除知识库"""
     kb_service = KnowledgeBaseService(db)
     await kb_service.delete_knowledge_base(kb_id, current_user.id)
-    await log_audit(db, current_user.id, "delete_kb", "knowledge_base", str(kb_id), None, get_client_ip(request), getattr(request.state, "request_id", None))
+    await log_audit(db, current_user.id, "delete_kb", "knowledge_base", str(kb_id), None, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete, cache_service.key_kb_detail(kb_id))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_kb_list(current_user.id))
     await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
@@ -281,7 +281,7 @@ async def remove_file_from_knowledge_base(
         await kb_service.remove_file_from_knowledge_base(kb_id, file_id, current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    await log_audit(db, current_user.id, "remove_file_from_kb", "knowledge_base", str(kb_id), {"file_id": file_id}, get_client_ip(request), getattr(request.state, "request_id", None))
+    await log_audit(db, current_user.id, "remove_file_from_kb", "knowledge_base", str(kb_id), {"file_id": file_id}, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete, cache_service.key_kb_detail(kb_id))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_kb_list(current_user.id))
     return None

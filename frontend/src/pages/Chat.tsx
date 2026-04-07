@@ -231,22 +231,52 @@ export default function Chat() {
     return () => clearInterval(id)
   }, [loading, streamingAssistantId])
 
+  /** 附件配置默认值（与后端 settings/chat-attachment 一致，避免单独请求失败时无配置） */
+  const defaultAttachmentConfig: ChatAttachmentConfig = {
+    max_count: 10,
+    max_size_bytes: 20 * 1024 * 1024,
+    image_types: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    file_extensions: ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md'],
+  }
+
   useEffect(() => {
-    api.get<KnowledgeBaseListResponse>('/knowledge-bases?page_size=100')
-      .then((res: KnowledgeBaseListResponse) => setKnowledgeBases(res?.knowledge_bases ?? []))
-      .catch(() => {})
-    api.get<ChatAttachmentConfig>('/chat/settings/chat-attachment')
-      .then((res: ChatAttachmentConfig) => setAttachmentConfig(res))
-      .catch(() => setAttachmentConfig({ max_count: 10, max_size_bytes: 20 * 1024 * 1024, image_types: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], file_extensions: ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'xls', 'pptx', 'ppt', 'md'] }))
-    // 防止后端/代理挂起导致永远不结束 loading（如 Redis 阻塞时）
-    let safetyCleared = false
-    const safety = window.setTimeout(() => {
-      safetyCleared = true
-      setPageLoading(false)
-    }, 15000)
-    loadConversations().finally(() => {
-      if (!safetyCleared) window.clearTimeout(safety)
-    })
+    let cancelled = false
+    // 任意一步卡住都不应无限骨架屏：最多约 4s 必出界面，数据后台补齐
+    const forceUi = window.setTimeout(() => {
+      if (!cancelled) setPageLoading(false)
+    }, 4000)
+
+    const bootstrap = async () => {
+      try {
+        const [kbSettled, attSettled] = await Promise.allSettled([
+          api.get<KnowledgeBaseListResponse>('/knowledge-bases?page_size=100'),
+          api.get<ChatAttachmentConfig>('/chat/settings/chat-attachment'),
+        ])
+        if (cancelled) return
+        if (kbSettled.status === 'fulfilled') {
+          setKnowledgeBases(kbSettled.value?.knowledge_bases ?? [])
+        }
+        if (attSettled.status === 'fulfilled') {
+          setAttachmentConfig(attSettled.value)
+        } else {
+          setAttachmentConfig(defaultAttachmentConfig)
+        }
+        await loadConversations()
+      } catch {
+        // loadConversations 内部已吞错
+      } finally {
+        if (!cancelled) {
+          window.clearTimeout(forceUi)
+          setPageLoading(false)
+        }
+      }
+    }
+
+    void bootstrap()
+    return () => {
+      cancelled = true
+      window.clearTimeout(forceUi)
+    }
   }, [])
 
   useEffect(() => {
@@ -271,8 +301,6 @@ export default function Chat() {
       }
     } catch {
       setConversations([])
-    } finally {
-      setPageLoading(false)
     }
   }
 

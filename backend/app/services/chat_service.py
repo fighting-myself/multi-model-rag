@@ -7,7 +7,7 @@ import json as _json
 import logging
 import re
 
-from typing import Optional, AsyncGenerator, List, Any, Dict, Tuple, Callable, Awaitable
+from typing import Optional, AsyncGenerator, List, Any, Dict, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timezone
@@ -56,19 +56,8 @@ from app.services.external_connections_service import (
 )
 from app.services.bash_tools import BASH_TOOL, is_bash_enabled
 from app.services.knowledge_base_service import KnowledgeBaseService
-
-# 超能模式思考区：检索子步骤实时推送（可选回调）
-RagProgressCb = Optional[Callable[[str], Awaitable[None]]]
-
-
-async def _rag_progress_call(cb: RagProgressCb, text: str) -> None:
-    if not cb or not (text or "").strip():
-        return
-    try:
-        await cb(text.strip())
-    except Exception:
-        pass
-
+from app.services.knowledge_access import sanitize_kb_scope_for_user
+from app.infrastructure.rag.progress import RagProgressCb, rag_progress_call as _rag_progress_call
 
 # 超能模式流式思考：子步骤与主协程之间用 Queue 传递，此对象作为结束标记
 _RAG_TRACE_STREAM_END = object()
@@ -130,16 +119,10 @@ class ChatService:
             return list(rows)
     
     def _rrf_score(self, rank: int, k: int = 60) -> float:
-        """计算 RRF（Reciprocal Rank Fusion）分数。
-        
-        Args:
-            rank: 文档在排名列表中的位置（从 1 开始）
-            k: RRF 常数（默认 60）
-        
-        Returns:
-            RRF 分数
-        """
-        return 1.0 / (k + rank)
+        """RRF 单项贡献（实现见 `infrastructure.rag.hybrid_ops`）。"""
+        from app.infrastructure.rag.hybrid_ops import rrf_score as _rrf
+
+        return _rrf(rank, k)
 
     async def _expand_chunks_with_window(self, chunks: List[Chunk], window: int) -> List[Chunk]:
         """检索到的 chunk 向左右各扩展 window 个相邻块（同 file），合并去重后按 file_id、chunk_index 排序。"""
@@ -257,12 +240,18 @@ class ChatService:
         retrieval_mode: str = "hybrid",
         use_rerank: bool = True,
         use_query_expand: bool = False,
+        *,
+        user_id: Optional[int] = None,
     ) -> List[int]:
         """供召回率评测使用：按指定检索方式返回有序的 chunk id 列表。
         
         retrieval_mode: "vector" 仅向量 | "fulltext" 仅全文(BM25) | "hybrid" 向量+全文 RRF 融合
         """
         import logging
+        if user_id is not None:
+            ok, _ = await sanitize_kb_scope_for_user(self.db, user_id, knowledge_base_id, None)
+            if ok is None:
+                return []
         queries = [query]
         if use_query_expand and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
             try:
@@ -345,169 +334,18 @@ class ChatService:
         optional_queries: Optional[List[str]] = None,
         rag_progress: RagProgressCb = None,
     ) -> tuple[str, float, Optional[str], List[Chunk], List[Tuple[Chunk, float]]]:
-        """根据用户问题在知识库中检索最相关上下文；使用向量检索+全文匹配+RRF+rerank。
-        
-        optional_queries: 若提供则直接用作多查询列表（Advanced RAG 由 LlamaIndex 生成），否则用 query_expand。
-        Returns:
-            (context, confidence, max_confidence_context, selected_chunks, scored_chunks_for_llm):
-            最后一项为进入 LLM 正文的片段及各自分数（已含窗口扩展，顺序与正文拼接一致）。
-        """
-        import logging
-        
-        # 多查询：优先使用 Advanced RAG 传入的 optional_queries，否则原问 + 改写/子问题
-        if optional_queries:
-            queries = list(optional_queries)
-        else:
-            queries = [message]
-            if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
-                try:
-                    await _rag_progress_call(rag_progress, "正在生成查询扩展（query_expand），用于多路召回…")
-                    extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
-                    queries.extend(extra)
-                except Exception:
-                    pass
-        
-        await _rag_progress_call(
-            rag_progress,
-            f"单库检索：共 {len(queries)} 条子查询；阶段 1/4 向量检索（Embedding → 向量库）…",
+        """根据用户问题在知识库中检索最相关上下文；实现位于 `HybridRetrievalPipeline.rag_context_single_kb`。"""
+        from app.infrastructure.rag.hybrid_retrieval_pipeline import HybridRetrievalPipeline
+
+        return await HybridRetrievalPipeline(self).rag_context_single_kb(
+            message,
+            knowledge_base_id,
+            top_k=top_k,
+            use_rerank=use_rerank,
+            use_hybrid=use_hybrid,
+            optional_queries=optional_queries,
+            rag_progress=rag_progress,
         )
-        k = settings.RRF_K
-        chunk_rrf_scores: Dict[int, float] = {}
-        vector_chunk_map: Dict[int, Chunk] = {}
-        
-        # 1. 向量检索（多查询合并 RRF）
-        for qi, q in enumerate(queries):
-            try:
-                await _rag_progress_call(
-                    rag_progress,
-                    f"· 子查询 {qi + 1}/{len(queries)}：正在向量化并检索…",
-                )
-                query_vec = await get_embedding(q)
-                vs = get_vector_client()
-                hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
-                vector_ids = []
-                vector_id_to_rank = {}
-                for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
-                    if not isinstance(h, dict):
-                        continue
-                    vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id") if isinstance(h.get("entity"), dict) else None
-                    if vid is not None:
-                        vid_str = str(vid)
-                        vector_ids.append(vid_str)
-                        vector_id_to_rank[vid_str] = rank
-                if vector_ids:
-                    result = await self.db.execute(
-                        select(Chunk).where(
-                            Chunk.vector_id.in_(vector_ids),
-                            Chunk.knowledge_base_id == knowledge_base_id,
-                        )
-                    )
-                    mapped = 0
-                    for c in result.scalars().all():
-                        vector_chunk_map[c.id] = c
-                        mapped += 1
-                        rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
-                        chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
-                    await _rag_progress_call(
-                        rag_progress,
-                        f"· 子查询 {qi + 1}/{len(queries)}：向量库返回 {len(hits)} 条命中，已映射 {mapped} 条片段到当前知识库。",
-                    )
-                else:
-                    await _rag_progress_call(
-                        rag_progress,
-                        f"· 子查询 {qi + 1}/{len(queries)}：向量检索无可用向量 id（与本库未对齐或库中无对应 chunk）。",
-                    )
-            except Exception as e:
-                logging.warning(f"向量检索失败: {e}")
-        
-        await _rag_progress_call(
-            rag_progress,
-            f"向量阶段合并后，候选片段数：{len(chunk_rrf_scores)}。",
-        )
-        # 2. 全文匹配（多查询合并 RRF），知识库未启用混合检索时跳过
-        if use_hybrid:
-            await _rag_progress_call(rag_progress, "阶段 2/4：全文 / BM25 关键词检索（混合召回）…")
-            for q in queries:
-                try:
-                    fulltext_results = await self._full_text_search(q, knowledge_base_id, top_k=top_k * 3)
-                    for chunk, rank in fulltext_results:
-                        vector_chunk_map[chunk.id] = chunk
-                        chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
-                except Exception as e:
-                    logging.warning(f"全文匹配失败: {e}")
-        
-        # 如果没有检索到任何结果，走兜底逻辑
-        if not chunk_rrf_scores:
-            result = await self.db.execute(
-                select(Chunk).where(
-                    Chunk.knowledge_base_id == knowledge_base_id,
-                    Chunk.content != "",
-                ).order_by(Chunk.id).limit(top_k * 2)
-            )
-            all_chunks = result.scalars().all()
-            if all_chunks:
-                context = "\n\n".join(c.content for c in all_chunks if c.content)[:8000]
-                max_conf_context = all_chunks[0].content if all_chunks else None
-                scored_llm = await self._scored_chunks_for_llm_prompt([(c, 0.5) for c in all_chunks])
-                return (context, 0.5, max_conf_context, all_chunks, scored_llm)
-            return ("", 0.0, None, [], [])
-        
-        # 按 RRF 分数排序，取前 top_k * 2 作为 rerank 候选
-        candidate_chunks = sorted(
-            [(vector_chunk_map[chunk_id], score) for chunk_id, score in chunk_rrf_scores.items()],
-            key=lambda x: x[1],
-            reverse=True
-        )[:top_k * 2]
-        
-        if not candidate_chunks:
-            return ("", 0.0, None, [], [])
-        
-        await _rag_progress_call(
-            rag_progress,
-            f"阶段 3/4：Rerank 重排序（候选 {len(candidate_chunks)} 条 → 取 Top {min(top_k, len(candidate_chunks))}）…",
-        )
-        # 4. Rerank 重排序（知识库未启用 rerank 时直接用 RRF 排序）
-        if use_rerank:
-            try:
-                documents = [chunk.content for chunk, _ in candidate_chunks]
-                reranked = await rerank(query=message, documents=documents, top_n=min(top_k, len(documents)))
-                final_chunks = []
-                for item in reranked:
-                    idx = item["index"]
-                    if idx < len(candidate_chunks):
-                        chunk, rrf_score = candidate_chunks[idx]
-                        relevance_score = item.get("relevance_score", 0.0)
-                        final_chunks.append((chunk, relevance_score, rrf_score))
-                if not final_chunks:
-                    final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
-            except Exception as e:
-                logging.warning(f"Rerank 失败: {e}，使用 RRF 排序结果")
-                final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
-        else:
-            final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
-        
-        await _rag_progress_call(rag_progress, "Rerank 完成。阶段 4/4：拼接上下文与邻段扩展（若启用窗口）…")
-        selected_chunks = final_chunks[:top_k]
-        if not selected_chunks:
-            return ("", 0.0, None, [], [])
-        chunk_list = [c for c, _, _ in selected_chunks]
-        window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
-        chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
-        context = "\n\n".join(c.content for c in chunks_for_context if c.content)[:8000]
-        max_conf = max((rel_score for _, rel_score, _ in selected_chunks), default=0.0)
-        if max_conf == 0.0:
-            max_rrf = max((rrf_score for _, _, rrf_score in selected_chunks), default=0.0)
-            if max_rrf > 0:
-                max_conf = min(1.0, max_rrf * k)
-        max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
-        max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        scored_pairs = [(c, float(rel)) for c, rel, _ in selected_chunks]
-        scored_for_llm = await self._scored_chunks_for_llm_prompt(scored_pairs)
-        await _rag_progress_call(
-            rag_progress,
-            f"检索完成：综合置信度约 {max_conf:.2f}，已拼接约 {len(context)} 字上下文（进入回答阶段前）。",
-        )
-        return (context, max_conf, max_conf_context, chunk_list, scored_for_llm)
 
     async def get_rag_context_for_eval(
         self,
@@ -518,6 +356,9 @@ class ChatService:
         top_k: int = 10,
     ) -> str:
         """供评测使用：仅返回单条 query 的 RAG 检索上下文，不调用 LLM。"""
+        knowledge_base_id, knowledge_base_ids = await sanitize_kb_scope_for_user(
+            self.db, user_id, knowledge_base_id, knowledge_base_ids
+        )
         no_kb = not knowledge_base_id and not (knowledge_base_ids and len(knowledge_base_ids))
         if no_kb:
             return ""
@@ -987,158 +828,17 @@ class ChatService:
         optional_queries: Optional[List[str]] = None,
         rag_progress: RagProgressCb = None,
     ) -> tuple[str, float, Optional[str], List[Chunk], List[Tuple[Chunk, float]]]:
-        """在指定的多个知识库中检索最相关上下文；逻辑同 _rag_context_all_kbs，仅 kb_ids 由调用方传入。
-        optional_queries: 若提供则直接用作多查询列表（Advanced RAG 由 LlamaIndex 生成）。"""
-        if not kb_ids:
-            return ("", 0.0, None, [], [])
-        import logging
-        if optional_queries:
-            queries = list(optional_queries)
-        else:
-            queries = [message]
-            if getattr(settings, "RAG_QUERY_EXPAND", False) and getattr(settings, "RAG_QUERY_EXPAND_COUNT", 0):
-                try:
-                    await _rag_progress_call(rag_progress, "正在生成查询扩展（query_expand）…")
-                    extra = await query_expand(message, settings.RAG_QUERY_EXPAND_COUNT)
-                    queries.extend(extra)
-                except Exception:
-                    pass
-        await _rag_progress_call(
-            rag_progress,
-            f"多库检索（{len(kb_ids)} 个知识库）：共 {len(queries)} 条子查询；阶段 1/4 向量检索…",
+        """在指定的多个知识库中检索；实现位于 `HybridRetrievalPipeline.rag_context_multi_kb`。"""
+        from app.infrastructure.rag.hybrid_retrieval_pipeline import HybridRetrievalPipeline
+
+        return await HybridRetrievalPipeline(self).rag_context_multi_kb(
+            message,
+            kb_ids,
+            user_id,
+            top_k=top_k,
+            optional_queries=optional_queries,
+            rag_progress=rag_progress,
         )
-        k = settings.RRF_K
-        chunk_rrf_scores: Dict[int, float] = {}
-        vector_chunk_map: Dict[int, Chunk] = {}
-        for qi, q in enumerate(queries):
-            try:
-                await _rag_progress_call(
-                    rag_progress,
-                    f"· 子查询 {qi + 1}/{len(queries)}：向量化与向量库检索中…",
-                )
-                query_vec = await get_embedding(q)
-                vs = get_vector_client()
-                hits = vs.search(query_vector=query_vec, top_k=top_k * 3, filter_expr=None) or []
-                vector_ids = []
-                vector_id_to_rank = {}
-                for rank, h in enumerate(hits if isinstance(hits, list) else [], 1):
-                    if not isinstance(h, dict):
-                        continue
-                    vid = h.get("id") or (h.get("entity") or h.get("payload") or {}).get("id") if isinstance(h.get("entity"), dict) else None
-                    if vid is not None:
-                        vid_str = str(vid)
-                        vector_ids.append(vid_str)
-                        vector_id_to_rank[vid_str] = rank
-                if vector_ids:
-                    result = await self.db.execute(
-                        select(Chunk).where(
-                            Chunk.vector_id.in_(vector_ids),
-                            Chunk.knowledge_base_id.in_(kb_ids),
-                        )
-                    )
-                    mapped = 0
-                    for c in result.scalars().all():
-                        vector_chunk_map[c.id] = c
-                        mapped += 1
-                        rk = vector_id_to_rank.get(str(c.vector_id or ""), 99)
-                        chunk_rrf_scores[c.id] = chunk_rrf_scores.get(c.id, 0.0) + self._rrf_score(rk, k)
-                    await _rag_progress_call(
-                        rag_progress,
-                        f"· 子查询 {qi + 1}/{len(queries)}：命中 {len(hits)} 条向量结果，映射 {mapped} 条片段到所选知识库。",
-                    )
-                else:
-                    await _rag_progress_call(
-                        rag_progress,
-                        f"· 子查询 {qi + 1}/{len(queries)}：无可用向量 id 映射到片段。",
-                    )
-            except Exception as e:
-                logging.warning(f"向量检索失败: {e}")
-        await _rag_progress_call(rag_progress, f"向量阶段合并后候选片段数：{len(chunk_rrf_scores)}。")
-        await _rag_progress_call(rag_progress, "阶段 2/4：全文 / BM25 检索…")
-        for q in queries:
-            try:
-                import re
-                keywords = [w.strip() for w in re.split(r'[，。！？\s]+', q) if len(w.strip()) > 1]
-                if not keywords:
-                    keywords = [q]
-                conditions = [Chunk.content.like(f"%{kw}%") for kw in keywords[:8]]
-                if conditions:
-                    result = await self.db.execute(
-                        select(Chunk)
-                        .where(
-                            Chunk.knowledge_base_id.in_(kb_ids),
-                            Chunk.content != "",
-                            or_(*conditions)
-                        )
-                        .limit(top_k * 4)
-                    )
-                    chunks = result.scalars().all()
-                    if chunks:
-                        if settings.RAG_USE_BM25:
-                            chunk_content = [(c, c.content or "") for c in chunks]
-                            scored = bm25_score(q, chunk_content)
-                            scored = [(c, s) for c, s in scored if s > 0]
-                            local_ft = [(chunk, idx + 1) for idx, (chunk, _) in enumerate(scored[:top_k * 3])]
-                        else:
-                            chunk_scores = []
-                            for chunk in chunks:
-                                score = sum(1 for kw in keywords if kw.lower() in (chunk.content or "").lower())
-                                if score > 0:
-                                    chunk_scores.append((chunk, score))
-                            chunk_scores.sort(key=lambda x: x[1], reverse=True)
-                            local_ft = [(chunk, idx + 1) for idx, (chunk, _) in enumerate(chunk_scores[:top_k * 3])]
-                    else:
-                        local_ft = []
-                    for chunk, rank in local_ft:
-                        vector_chunk_map[chunk.id] = chunk
-                        chunk_rrf_scores[chunk.id] = chunk_rrf_scores.get(chunk.id, 0.0) + self._rrf_score(rank, k)
-            except Exception as e:
-                logging.warning(f"全文匹配失败: {e}")
-        if not chunk_rrf_scores:
-            return ("", 0.0, None, [], [])
-        candidate_chunks = sorted(
-            [(vector_chunk_map[chunk_id], score) for chunk_id, score in chunk_rrf_scores.items()],
-            key=lambda x: x[1],
-            reverse=True
-        )[:top_k * 2]
-        if not candidate_chunks:
-            return ("", 0.0, None, [], [])
-        await _rag_progress_call(
-            rag_progress,
-            f"阶段 3/4：Rerank（候选 {len(candidate_chunks)} 条）…",
-        )
-        try:
-            documents = [chunk.content for chunk, _ in candidate_chunks]
-            reranked = await rerank(query=message, documents=documents, top_n=min(top_k, len(documents)))
-            final_chunks = []
-            for item in reranked:
-                idx = item["index"]
-                if idx < len(candidate_chunks):
-                    chunk, rrf_score = candidate_chunks[idx]
-                    relevance_score = item.get("relevance_score", 0.0)
-                    final_chunks.append((chunk, relevance_score, rrf_score))
-            if not final_chunks:
-                final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
-        except Exception as e:
-            logging.warning(f"Rerank 失败: {e}，使用 RRF 排序结果")
-            final_chunks = [(chunk, 0.5, rrf_score) for chunk, rrf_score in candidate_chunks[:top_k]]
-        selected_chunks = final_chunks[:top_k]
-        if not selected_chunks:
-            return ("", 0.0, None, [], [])
-        chunk_list = [c for c, _, _ in selected_chunks]
-        window = getattr(settings, "RAG_CONTEXT_WINDOW_EXPAND", 0) or 0
-        chunks_for_context = await self._expand_chunks_with_window(chunk_list, window) if window > 0 else chunk_list
-        context = "\n\n".join(c.content for c in chunks_for_context if c.content)[:8000]
-        max_conf = max((rel_score for _, rel_score, _ in selected_chunks), default=0.0)
-        if max_conf == 0.0:
-            max_rrf = max((rrf_score for _, _, rrf_score in selected_chunks), default=0.0)
-            if max_rrf > 0:
-                max_conf = min(1.0, max_rrf * k)
-        max_conf_chunk = max(selected_chunks, key=lambda x: x[1], default=None)
-        max_conf_context = max_conf_chunk[0].content if max_conf_chunk else None
-        scored_pairs = [(c, float(rel)) for c, rel, _ in selected_chunks]
-        scored_for_llm = await self._scored_chunks_for_llm_prompt(scored_pairs)
-        return (context, max_conf, max_conf_context, chunk_list, scored_for_llm)
 
     async def _load_conversation_history(self, conversation_id: int, max_messages: int = None) -> List[Message]:
         """加载对话历史消息（最近 N 条）"""
@@ -1404,6 +1104,10 @@ class ChatService:
         if not enable_rag:
             return rag_context, rag_confidence, max_confidence_context, selected_chunks, retrieved_context_original, low_confidence_warning, rag_scored_chunks
 
+        knowledge_base_id, knowledge_base_ids = await sanitize_kb_scope_for_user(
+            self.db, conv.user_id, knowledge_base_id, knowledge_base_ids
+        )
+
         await _rag_progress_call(rag_progress, "已进入检索管线，后续步骤将实时显示。")
         no_kb_selected = not knowledge_base_id and not (knowledge_base_ids and len(knowledge_base_ids))
         skip_rag_when_no_kb = getattr(settings, "RAG_SKIP_WHEN_NO_KB_SELECTED", True)
@@ -1487,7 +1191,12 @@ class ChatService:
                 rag_context, rag_confidence, max_confidence_context, selected_chunks = "", 0.0, None, []
                 rag_scored_chunks = []
         elif knowledge_base_id:
-            kb_result = await self.db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
+            kb_result = await self.db.execute(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.id == knowledge_base_id,
+                    KnowledgeBase.user_id == conv.user_id,
+                )
+            )
             kb = kb_result.scalar_one_or_none()
             use_rerank = getattr(kb, "enable_rerank", True) if kb else True
             use_hybrid = getattr(kb, "enable_hybrid", True) if kb else True
@@ -2427,6 +2136,9 @@ class ChatService:
     ) -> ChatResponse:
         """发送消息：普通模式为纯 LLM+历史；超能模式为 RAG→MCP→Skill（见 _super_mode_run_sequential）。rag_only 仅供内部评测。"""
         import logging
+        knowledge_base_id, knowledge_base_ids = await sanitize_kb_scope_for_user(
+            self.db, user_id, knowledge_base_id, knowledge_base_ids
+        )
         enable_mcp_tools, enable_skills_tools, enable_rag = self._normalize_chat_capabilities(
             super_mode, rag_only=rag_only
         )
@@ -3350,6 +3062,9 @@ class ChatService:
         """流式发送消息：先 yield token 事件，最后 yield done（含 conversation_id、confidence、sources、ttft_ms、e2e_ms）；支持多选知识库 knowledge_base_ids。"""
         import logging
         import time
+        knowledge_base_id, knowledge_base_ids = await sanitize_kb_scope_for_user(
+            self.db, user_id, knowledge_base_id, knowledge_base_ids
+        )
         t_start = time.perf_counter()
         first_token_time: Optional[float] = None
         # 多选时用第一个作为会话展示用

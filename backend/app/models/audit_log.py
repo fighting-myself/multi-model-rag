@@ -17,5 +17,6 @@ class AuditLog(Base):
     resource_id = Column(String(64), nullable=True)  # 可选，如 kb_id、file_id
     detail = Column(Text, nullable=True)  # JSON 或简短描述
     ip = Column(String(64), nullable=True)
-    request_id = Column(String(64), nullable=True, index=True)  # 链路追踪，与 X-Request-ID 一致
+    request_id = Column(String(64), nullable=True, index=True)  # 与 X-Request-ID / request.state 一致
+    trace_id = Column(String(64), nullable=True, index=True)  # 与 X-Trace-Id、门面日志对齐
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -30,7 +30,20 @@ class Settings(BaseSettings):
     
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379/0"
-    
+    # Redis 客户端超时（秒）：避免不可达时阻塞事件循环过久（改造 D-1）
+    REDIS_SOCKET_CONNECT_TIMEOUT_SEC: float = 2.5
+    REDIS_SOCKET_TIMEOUT_SEC: float = 3.0
+
+    # 外部 HTTP 依赖超时（秒）：LLM / Embedding / Rerank / 向量 SDK（改造 D-1）
+    HTTP_CONNECT_TIMEOUT_SEC: float = 10.0
+    LLM_HTTP_READ_TIMEOUT_SEC: float = 300.0  # 含流式首包等待
+    LLM_HTTP_WRITE_TIMEOUT_SEC: float = 120.0
+    LLM_HTTP_MAX_RETRIES: int = 2  # OpenAI SDK 对可重试错误的重试次数
+    EMBEDDING_HTTP_TIMEOUT_SEC: float = 90.0
+    EMBEDDING_HTTP_RETRIES: int = 1  # 超时/连接错误时额外重试次数（幂等安全）
+    RERANK_HTTP_TIMEOUT_SEC: float = 60.0
+    VECTOR_DB_TIMEOUT_SEC: float = 30.0  # Zilliz / Qdrant 查询类调用
+
     # 缓存配置（使用同一 Redis，key 前缀区分）
     CACHE_ENABLED: bool = True
     CACHE_KEY_PREFIX: str = "cache:"
@@ -101,6 +114,8 @@ class Settings(BaseSettings):
     SENSITIVE_MASK_ENABLED: bool = True
     # 操作审计：是否记录关键操作到 audit_log 表
     AUDIT_LOG_ENABLED: bool = True
+    # 是否记录「问答完成」类审计（默认关闭，量较大；开启后仅记脱敏 query_preview + 会话/知识库元数据）
+    AUDIT_LOG_CHAT_COMPLETION: bool = False
     
     @property
     def allowed_file_types_list(self) -> List[str]:

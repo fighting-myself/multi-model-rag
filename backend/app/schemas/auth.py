@@ -33,9 +33,10 @@ class UserResponse(BaseModel):
 
 
 class Token(BaseModel):
-    """Token响应"""
+    """Token响应（登录可同时返回 user，避免前端再请求 /auth/me，减少一次往返与鉴权竞态）"""
     access_token: str
     token_type: str = "bearer"
+    user: Optional[UserResponse] = None
 
 
 class UpdatePasswordRequest(BaseModel):

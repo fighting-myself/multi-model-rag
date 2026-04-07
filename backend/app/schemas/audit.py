@@ -12,6 +12,8 @@ class AuditLogItem(BaseModel):
     resource_id: Optional[str] = None
     detail: Optional[str] = None
     ip: Optional[str] = None
+    request_id: Optional[str] = None
+    trace_id: Optional[str] = None
     created_at: datetime
 
     class Config:

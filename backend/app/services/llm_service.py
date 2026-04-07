@@ -2,15 +2,26 @@
 LLM 服务：调用 OpenAI 兼容接口生成回答
 """
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
+
+import httpx
 from openai import AsyncOpenAI
 from app.core.config import settings
 from app.services.time_context import get_system_time_context
 
 
 def _client() -> AsyncOpenAI:
+    """OpenAI 兼容客户端：可配置超时与重试（改造 D-1）。"""
+    timeout = httpx.Timeout(
+        connect=settings.HTTP_CONNECT_TIMEOUT_SEC,
+        read=settings.LLM_HTTP_READ_TIMEOUT_SEC,
+        write=settings.LLM_HTTP_WRITE_TIMEOUT_SEC,
+        pool=5.0,
+    )
     return AsyncOpenAI(
         api_key=settings.OPENAI_API_KEY or "dummy",
         base_url=settings.OPENAI_BASE_URL,
+        timeout=timeout,
+        max_retries=max(0, int(getattr(settings, "LLM_HTTP_MAX_RETRIES", 2))),
     )
 
 

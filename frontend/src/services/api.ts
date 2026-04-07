@@ -1,7 +1,33 @@
-import axios, { type AxiosRequestConfig } from 'axios'
+import axios from 'axios'
 import { useAuthStore } from '../stores/authStore'
 
-const BASE_URL = '/api/v1'
+/**
+ * 开发时默认走 Vite 代理 `/api` -> 后端。
+ * 若界面提示「网络异常」且代理异常，可在 frontend/.env.development 中设置：
+ *   VITE_API_BASE_URL=http://127.0.0.1:8000
+ * 将直连后端 API（需后端 CORS 允许；当前默认可用 *）。
+ */
+function normalizeApiBase(): string {
+  const raw = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? ''
+  if (!raw) return '/api/v1'
+  const base = raw.replace(/\/$/, '')
+  return base.endsWith('/api/v1') ? base : `${base}/api/v1`
+}
+
+const BASE_URL = normalizeApiBase()
+
+/**
+ * 将路径拼成完整请求 URL（供 fetch 使用）。
+ * 若以 `/api` 开头则视为站点内 API 绝对路径，原样返回，避免与 BASE 拼接成 `/api/v1/api/v1/...`。
+ */
+export function resolveApiUrl(path: string): string {
+  if (path.startsWith('/api')) {
+    return path
+  }
+  const p = path.replace(/^\//, '')
+  const base = BASE_URL.endsWith('/') ? BASE_URL.slice(0, -1) : BASE_URL
+  return `${base}/${p}`
+}
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -35,8 +61,8 @@ api.interceptors.response.use(
         ? error.response.data.detail
         : error.message
     }
-    const isAuthRequest =
-      error.config?.url === '/auth/login' || error.config?.url === '/auth/register'
+    const url = String(error.config?.url ?? '')
+    const isAuthRequest = url.includes('/auth/login') || url.includes('/auth/register')
     if (error.response?.status === 401 && !isAuthRequest) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
@@ -51,7 +77,18 @@ export async function fetchWithAuth(
   init?: RequestInit
 ): Promise<Response> {
   const token = useAuthStore.getState().token
-  const url = typeof input === 'string' && !input.startsWith('http') ? `${input.startsWith('/') ? '' : BASE_URL + '/'}${input}` : input
+  let url: string | URL
+  if (typeof input === 'string') {
+    if (input.startsWith('http')) {
+      url = input
+    } else if (input.startsWith('/api')) {
+      url = input
+    } else {
+      url = resolveApiUrl(input)
+    }
+  } else {
+    url = input
+  }
   const res = await fetch(url, {
     ...init,
     headers: {
@@ -60,7 +97,8 @@ export async function fetchWithAuth(
     } as HeadersInit,
   })
   if (res.status === 401) {
-    const isAuthUrl = String(input).includes('/auth/login') || String(input).includes('/auth/register')
+    const isAuthUrl =
+      String(input).includes('/auth/login') || String(input).includes('/auth/register')
     if (!isAuthUrl) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
@@ -69,13 +107,13 @@ export async function fetchWithAuth(
   return res
 }
 
-/** 封装流式 POST（JSON body），返回 response 与 body 的 reader；调用方需自行解析 SSE。支持 signal 用于停止对话。 */
+/** 封装流式 POST（JSON body），返回 response 与 body 的 reader；支持 signal 用于停止对话。 */
 export async function streamPost(
   path: string,
   body: unknown,
   options?: { signal?: AbortSignal }
 ): Promise<{ response: Response; reader: ReadableStreamDefaultReader<Uint8Array> }> {
-  const url = path.startsWith('/') ? path : `${BASE_URL}/${path}`
+  const url = resolveApiUrl(path)
   const res = await fetchWithAuth(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -91,9 +129,9 @@ export async function streamPost(
   return { response: res, reader }
 }
 
-/** 智能问答：先上传文件，返回 upload_id；发消息时在 attachments 里带 upload_id 即可（与豆包/DeepSeek 一致） */
+/** 智能问答：先上传文件，返回 upload_id */
 export async function uploadChatFile(file: File): Promise<{ upload_id: string; file_name: string; type: string }> {
-  const url = `${BASE_URL}/chat/attachments/upload`
+  const url = resolveApiUrl('chat/attachments/upload')
   const formData = new FormData()
   formData.append('file', file, file.name)
   const res = await fetchWithAuth(url, { method: 'POST', body: formData })

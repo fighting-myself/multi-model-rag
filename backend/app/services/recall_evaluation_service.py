@@ -154,6 +154,7 @@ async def run_recall_evaluation(
                 retrieval_mode=retrieval_mode,
                 use_rerank=use_rerank,
                 use_query_expand=use_query_expand,
+                user_id=user_id,
             )
             return (it["query"], it["relevant_ids"], ids)
         except Exception as e:

@@ -39,6 +39,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
+from app.core.request_context import reset_trace_id, set_trace_id
 from app.core.database import engine, Base
 from sqlalchemy import text
 from app.api.v1 import api_router
@@ -152,12 +153,18 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    """为每个请求生成或透传 X-Request-ID，并写入 request.state"""
+    """为每个请求生成或透传 X-Request-ID；同步 X-Trace-Id 与上下文变量（改造 D-2）。"""
     rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = rid
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = rid
-    return response
+    trace = (request.headers.get("X-Trace-Id") or rid).strip() or rid
+    tok = set_trace_id(trace)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = rid
+        response.headers["X-Trace-Id"] = trace
+        return response
+    finally:
+        reset_trace_id(tok)
 
 
 def _error_response(detail: str, status_code: int, request_id: str | None = None) -> dict:
@@ -226,6 +233,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 app.include_router(api_router, prefix="/api/v1")
 
 
+@app.get("/live")
+async def live():
+    """存活探针：不访问 DB/Redis/向量/MinIO。排查「网络异常」时请优先 curl 本路径确认进程与端口可达。"""
+    return {"status": "ok", "service": "rag-api"}
+
+
 @app.get("/")
 async def root():
     """根路径"""
@@ -249,6 +262,14 @@ async def _health_sync(name: str, fn, timeout: float = 8.0) -> tuple[bool, str]:
         return await asyncio.wait_for(asyncio.to_thread(fn), timeout=timeout)
     except asyncio.TimeoutError:
         return False, f"{name} 检查超时"
+
+
+@app.get("/api/v1/ops/snapshot")
+async def ops_snapshot():
+    """进程内轻量指标快照（改造 D-4），便于对接外部监控系统前自查。"""
+    from app.core.ops_metrics import snapshot
+
+    return snapshot()
 
 
 @app.get("/health")

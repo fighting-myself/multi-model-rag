@@ -9,13 +9,16 @@ from app.core.config import settings
 
 
 def _engine_connect_args() -> dict:
-    """避免 MySQL 等不可达时 TCP 长时间挂起，导致接口与前端一直 loading。"""
+    """避免数据库不可达时 TCP 长时间挂起，导致接口与前端一直 loading。"""
     u = (settings.DATABASE_URL or "").lower()
     if "sqlite" in u:
         return {}
     if "mysql" in u:
         # aiomysql / asyncmy 均支持 connect_timeout（秒）
         return {"connect_timeout": 10}
+    if "postgresql" in u or "postgres" in u:
+        # asyncpg：连接建立超时（秒）
+        return {"timeout": 10}
     return {}
 
 

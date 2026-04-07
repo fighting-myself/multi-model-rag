@@ -9,7 +9,15 @@
 """
 import asyncio
 import os
+import socket
 import sys
+
+
+def _is_port_in_use(port: int) -> bool:
+    """检测本机端口是否已有监听进程（用于防止重复启动）。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex(("127.0.0.1", port)) == 0
 
 
 def main() -> None:
@@ -40,6 +48,15 @@ def main() -> None:
             except ValueError:
                 pass
             break
+    if _is_port_in_use(port):
+        print(
+            f"[run.py] 端口 {port} 已被占用：疑似已有后端实例在运行。"
+            "为避免重复启动导致请求挂起，本次启动已取消。"
+        )
+        print(
+            f"[run.py] 如需重启：先停止旧进程（Ctrl+C 或 taskkill），再执行 python run.py --port {port}"
+        )
+        return
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

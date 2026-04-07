@@ -44,7 +44,13 @@ async def rerank(query: str, documents: List[str], top_n: int = 5) -> List[Dict[
     }
     
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        t = httpx.Timeout(
+            connect=settings.HTTP_CONNECT_TIMEOUT_SEC,
+            read=settings.RERANK_HTTP_TIMEOUT_SEC,
+            write=min(60.0, settings.RERANK_HTTP_TIMEOUT_SEC),
+            pool=5.0,
+        )
+        async with httpx.AsyncClient(timeout=t) as client:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             result = response.json()

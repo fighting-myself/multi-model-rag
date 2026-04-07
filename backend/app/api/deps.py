@@ -1,6 +1,8 @@
 """
 通用依赖：限流等
 """
+from typing import Optional
+
 from fastapi import Depends, HTTPException, Request
 
 from app.schemas.auth import UserResponse
@@ -61,3 +63,14 @@ def get_client_ip(request: Request) -> str:
     if request.client:
         return request.client.host or ""
     return ""
+
+
+def trace_id_from_request(request: Request) -> Optional[str]:
+    """与中间件一致：优先 X-Trace-Id，其次 X-Request-ID / request.state.request_id。"""
+    if not request:
+        return None
+    return (
+        request.headers.get("X-Trace-Id")
+        or request.headers.get("X-Request-ID")
+        or getattr(request.state, "request_id", None)
+    )

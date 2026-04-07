@@ -25,23 +25,30 @@ export default function Login() {
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true)
     try {
-      const formData = new FormData()
-      formData.append('username', values.username)
-      formData.append('password', values.password)
+      // application/x-www-form-urlencoded：与 OAuth2 密码模式一致，避免 multipart 在代理/浏览器下的边界问题
+      const body = new URLSearchParams()
+      body.set('username', values.username)
+      body.set('password', values.password)
 
-      const response = await api.post('/auth/login', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      })
+      const response = (await api.post('/auth/login', body)) as {
+        access_token: string
+        user?: unknown
+      }
 
       setToken(response.access_token)
-      const userResponse = await api.get('/auth/me')
-      setUser(userResponse)
+      if (response.user) {
+        setUser(response.user)
+      } else {
+        const userResponse = await api.get('/auth/me')
+        setUser(userResponse)
+      }
       message.success('登录成功')
       navigate('/')
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string | string[] } }; message?: string }
+      const e = err as {
+        response?: { data?: { detail?: string | string[]; message?: string } }
+        message?: string
+      }
       const detail = e.response?.data?.detail
       const msg =
         typeof detail === 'string'

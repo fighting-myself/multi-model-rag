@@ -1,10 +1,15 @@
 """
 嵌入服务：使用阿里云百炼 DashScope 多模态 API（qwen3-vl-embedding）获取文本/图片向量
 """
+import asyncio
 import base64
+import logging
 import httpx
 from typing import List
 from app.core.config import settings
+from app.core.ops_metrics import inc_embedding_transport_retry
+
+logger = logging.getLogger(__name__)
 
 
 async def get_embedding_for_image(image_bytes: bytes, image_format: str = "jpeg") -> List[float]:
@@ -33,24 +38,38 @@ async def get_embedding(text: str) -> List[float]:
 
 async def _request_multimodal_embeddings(contents: list, default_dim: int) -> List[List[float]]:
     """调用 DashScope 多模态 embedding API，contents 为 [{"text": "..."}] 或 [{"image": "data:image/..."}]。"""
-    import logging
     url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
     headers = {
         "Authorization": f"Bearer {settings.DASHSCOPE_API_KEY or settings.OPENAI_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {"model": "qwen3-vl-embedding", "input": {"contents": contents}}
-    try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-    except httpx.HTTPStatusError as e:
-        logging.error(f"DashScope API HTTP 错误: {e.response.status_code} - {e.response.text}")
-        raise ValueError(f"DashScope API 调用失败: {e.response.status_code} - {e.response.text}")
-    except Exception as e:
-        logging.error(f"DashScope API 调用异常: {e}")
-        raise ValueError(f"DashScope API 调用失败: {e}")
+    t = httpx.Timeout(
+        connect=settings.HTTP_CONNECT_TIMEOUT_SEC,
+        read=settings.EMBEDDING_HTTP_TIMEOUT_SEC,
+        write=min(60.0, settings.EMBEDDING_HTTP_TIMEOUT_SEC),
+        pool=5.0,
+    )
+    extra = max(0, int(getattr(settings, "EMBEDDING_HTTP_RETRIES", 1)))
+    for attempt in range(extra + 1):
+        try:
+            async with httpx.AsyncClient(timeout=t) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+            break
+        except httpx.HTTPStatusError as e:
+            logger.error("DashScope API HTTP 错误: %s - %s", e.response.status_code, e.response.text)
+            raise ValueError(f"DashScope API 调用失败: {e.response.status_code} - {e.response.text}") from e
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
+            logger.warning("DashScope embedding 网络超时/连接错误 attempt %s/%s: %s", attempt + 1, extra + 1, e)
+            if attempt >= extra:
+                raise ValueError(f"DashScope API 调用失败: {e}") from e
+            inc_embedding_transport_retry()
+            await asyncio.sleep(0.2 * (attempt + 1))
+        except Exception as e:
+            logger.error("DashScope API 调用异常: %s", e)
+            raise ValueError(f"DashScope API 调用失败: {e}") from e
     out = result.get("output", {})
     embeddings_list = out.get("embeddings", [])
     return [

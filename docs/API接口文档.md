@@ -8,7 +8,7 @@
 | 协议 | HTTP/HTTPS；开发环境常见为 `http://localhost:8000` |
 | 鉴权 | 多数业务接口需 **`Authorization: Bearer <access_token>`**（登录接口 `POST /api/v1/auth/login` 返回 token） |
 | 权威文档 | 部署后访问 **`/docs`（Swagger UI）**、**`/redoc`**，与代码内 Pydantic 模型一致 |
-| 请求追踪 | 可传 **`X-Request-ID`**；服务端会生成并回传 |
+| 请求追踪 | 可传 **`X-Request-ID`**、**`X-Trace-Id`**；服务端会生成/回传 `X-Request-ID`，并回传 **`X-Trace-Id`**（与上下文日志对齐） |
 
 根路径：
 
@@ -16,6 +16,7 @@
 |------|------|------|
 | GET | `/` | 服务信息与文档入口提示 |
 | GET | `/health` | 健康检查 |
+| GET | `/api/v1/ops/snapshot` | 进程内轻量指标（如 embedding 传输重试计数）；无鉴权，生产建议网关限制 |
 
 ---
 

@@ -22,8 +22,8 @@ def _get_redis():
             _redis_client = redis.Redis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=2.5,
-                socket_timeout=3.0,
+                socket_connect_timeout=float(getattr(settings, "REDIS_SOCKET_CONNECT_TIMEOUT_SEC", 2.5)),
+                socket_timeout=float(getattr(settings, "REDIS_SOCKET_TIMEOUT_SEC", 3.0)),
             )
         except Exception as e:
             logger.warning("Redis 连接失败，限流将不生效: %s", e)

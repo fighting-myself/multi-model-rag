@@ -15,9 +15,11 @@ from app.core.config import settings
 from app.schemas.chat import ChatMessage, ChatResponse, ConversationResponse, ConversationListResponse, MessageResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
-from app.api.deps import require_chat_rate_limit
-from app.services.chat_service import ChatService
+from app.api.deps import get_client_ip, require_chat_rate_limit, trace_id_from_request
+from app.application.chat_facade import ChatFacade
+from app.core.audit_text import summarize_text_for_audit
 from app.services import cache_service
+from app.services.audit_service import log_audit
 from app.services.knowledge_base_service import KnowledgeBaseService
 from app.services.ocr_service import extract_text_from_image
 from app.services.video_extract_service import extract_text_from_video
@@ -42,6 +44,7 @@ async def get_chat_attachment_settings(
 @router.post("/completions", response_model=ChatResponse)
 async def chat_completion(
     message: ChatMessage,
+    request: Request,
     conversation_id: Optional[int] = None,
     knowledge_base_id: Optional[int] = None,
     stream: bool = False,
@@ -50,7 +53,7 @@ async def chat_completion(
 ):
     """发送消息（同步）"""
     import logging
-    chat_service = ChatService(db)
+    chat = ChatFacade(db)
     try:
         super_mode = bool(message.super_mode) if message.super_mode is not None else False
         attachments_list = None
@@ -59,7 +62,7 @@ async def chat_completion(
                 {"type": a.type, "image_url": a.image_url or {}, "file_name": getattr(a, "file_name", None), "content_base64": getattr(a, "content_base64", None)}
                 for a in message.attachments
             ]
-        response = await chat_service.chat(
+        response = await chat.chat(
             user_id=current_user.id,
             message=message.content,
             conversation_id=conversation_id or message.conversation_id,
@@ -67,7 +70,27 @@ async def chat_completion(
             stream=stream,
             super_mode=super_mode,
             attachments=attachments_list,
+            trace_id=trace_id_from_request(request),
         )
+        if getattr(settings, "AUDIT_LOG_CHAT_COMPLETION", False):
+            detail = {
+                "query_preview": summarize_text_for_audit(message.content),
+                "stream": False,
+            }
+            _kb = knowledge_base_id if knowledge_base_id is not None else message.knowledge_base_id
+            if _kb is not None:
+                detail["knowledge_base_id"] = _kb
+            await log_audit(
+                db,
+                current_user.id,
+                "chat_completion",
+                "conversation",
+                str(response.conversation_id),
+                detail,
+                get_client_ip(request),
+                getattr(request.state, "request_id", None),
+                trace_id_from_request(request),
+            )
         return response
     except Exception as e:
         logging.exception("聊天接口异常")
@@ -289,8 +312,8 @@ async def chat_completion_stream(
         try:
             # 流式独立 session：响应结束/中断即归还连接，避免连接被 GC 清理告警
             async with AsyncSessionLocal() as db:
-                chat_service = ChatService(db)
-                chat_stream_gen = chat_service.chat_stream(
+                chat = ChatFacade(db)
+                chat_stream_gen = chat.chat_stream(
                     user_id=current_user.id,
                     message=content,
                     conversation_id=conv_id,
@@ -300,6 +323,7 @@ async def chat_completion_stream(
                     attachments=attachments_list,
                     attachments_meta=attachments_meta,
                     content_for_save=content_for_save,
+                    trace_id=trace_id_from_request(request),
                 )
                 async for event in chat_stream_gen:
                     if await request.is_disconnected():
@@ -311,6 +335,27 @@ async def chat_completion_stream(
                 yield "data: [DONE]\n\n"
             if last_conv_id is not None:
                 await asyncio.to_thread(cache_service.delete, cache_service.key_conv_detail(last_conv_id))
+            if last_conv_id is not None and getattr(settings, "AUDIT_LOG_CHAT_COMPLETION", False):
+                async with AsyncSessionLocal() as audit_db:
+                    detail = {
+                        "query_preview": summarize_text_for_audit(content_for_save),
+                        "stream": True,
+                    }
+                    if kb_id is not None:
+                        detail["knowledge_base_id"] = kb_id
+                    if kb_ids:
+                        detail["knowledge_base_ids"] = kb_ids
+                    await log_audit(
+                        audit_db,
+                        current_user.id,
+                        "chat_completion",
+                        "conversation",
+                        str(last_conv_id),
+                        detail,
+                        get_client_ip(request),
+                        getattr(request.state, "request_id", None),
+                        trace_id_from_request(request),
+                    )
         except Exception as e:
             logging.exception("智能问答流式生成异常")
             err_msg = str(e).strip() or "生成中断"
@@ -341,6 +386,7 @@ async def chat_completion_stream(
 
 @router.get("/conversations", response_model=ConversationListResponse)
 async def get_conversations(
+    request: Request,
     page: int = 1,
     page_size: int = 20,
     current_user: UserResponse = Depends(get_current_active_user),
@@ -352,8 +398,8 @@ async def get_conversations(
     cached = await asyncio.to_thread(cache_service.get, cache_key)
     if cached is not None:
         return ConversationListResponse(**cached)
-    chat_service = ChatService(db)
-    result = await chat_service.get_conversations(user_id, page, page_size)
+    chat = ChatFacade(db)
+    result = await chat.get_conversations(user_id, page, page_size, trace_id=trace_id_from_request(request))
     ttl = getattr(settings, "CACHE_TTL_CONV", 30)
     await asyncio.to_thread(cache_service.set, cache_key, result.model_dump(), ttl)
     return result
@@ -362,6 +408,7 @@ async def get_conversations(
 @router.get("/conversations/{conv_id}", response_model=ConversationResponse)
 async def get_conversation(
     conv_id: int,
+    request: Request,
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -370,11 +417,11 @@ async def get_conversation(
     cached = await asyncio.to_thread(cache_service.get, cache_key)
     if cached is not None:
         return ConversationResponse(**cached)
-    chat_service = ChatService(db)
-    conv = await chat_service.get_conversation(conv_id, current_user.id)
+    chat = ChatFacade(db)
+    conv = await chat.get_conversation(conv_id, current_user.id, trace_id=trace_id_from_request(request))
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
-    messages = await chat_service.get_conversation_messages(conv_id, current_user.id)
+    messages = await chat.get_conversation_messages(conv_id, current_user.id, trace_id=trace_id_from_request(request))
     from app.schemas.chat import MessageResponse
     out = ConversationResponse(
         id=conv.id,
@@ -406,12 +453,24 @@ async def get_conversation_messages(
 @router.delete("/conversations/{conv_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conv_id: int,
+    request: Request,
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """删除对话"""
-    chat_service = ChatService(db)
-    await chat_service.delete_conversation(conv_id, current_user.id)
+    chat = ChatFacade(db)
+    await chat.delete_conversation(conv_id, current_user.id, trace_id=trace_id_from_request(request))
+    await log_audit(
+        db,
+        current_user.id,
+        "delete_conversation",
+        "conversation",
+        str(conv_id),
+        None,
+        get_client_ip(request),
+        getattr(request.state, "request_id", None),
+        trace_id_from_request(request),
+    )
     user_id = current_user.id
     await asyncio.to_thread(cache_service.delete, cache_service.key_conv_detail(conv_id))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_conv_list(user_id))

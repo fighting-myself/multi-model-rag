@@ -1,0 +1,19 @@
+2026-04-07 14:00:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:00:01 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 8d81bdaa88e448ca864ad620bb2bd146
+2026-04-07 14:00:01 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:00:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:00:01 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:00:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:00:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:00:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:00:02 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:00:02 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:00:02 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:00:02 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:00:03 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:00:03 | INFO     | uvicorn.access:send:483 - 127.0.0.1:63824 - "GET /live HTTP/1.1" 200
+2026-04-07 14:00:05 | INFO     | uvicorn.access:send:483 - 127.0.0.1:63949 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:00:28 | INFO     | uvicorn.access:send:483 - 127.0.0.1:63996 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:00:33 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:01:11 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:01:28 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64040 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200

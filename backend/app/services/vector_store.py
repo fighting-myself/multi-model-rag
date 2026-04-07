@@ -103,6 +103,7 @@ class ZillizVectorStore:
             self._client = MilvusClient(
                 uri=settings.ZILLIZ_URI,
                 token=settings.ZILLIZ_TOKEN,
+                timeout=float(getattr(settings, "VECTOR_DB_TIMEOUT_SEC", 30.0)),
             )
         return self._client
 
@@ -244,6 +245,7 @@ class QdrantVectorStore:
             self._client = QdrantClient(
                 url=settings.QDRANT_URL,
                 api_key=settings.QDRANT_API_KEY or None,
+                timeout=float(getattr(settings, "VECTOR_DB_TIMEOUT_SEC", 30.0)),
             )
         return self._client
 

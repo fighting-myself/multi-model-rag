@@ -5,6 +5,7 @@
 | 脚本 | 说明 |
 |------|------|
 | `add_audit_request_id.sql` | audit_logs 表增加 request_id（链路追踪） |
+| `add_audit_trace_id.sql` | audit_logs 表增加 trace_id（与 X-Trace-Id / 门面日志对齐） |
 | `add_kb_chunk_config.sql` | 知识库/分块相关配置列 |
 | `add_kb_config_columns.sql` | 知识库级配置（模型、温度、rerank、混合检索等） |
 | `add_message_rag_fields.sql` | messages 表 RAG 相关字段 |

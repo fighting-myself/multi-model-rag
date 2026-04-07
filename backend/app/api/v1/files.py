@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.schemas.file import FileResponse, FileListResponse
 from app.schemas.auth import UserResponse
 from app.api.v1.auth import get_current_active_user
-from app.api.deps import get_client_ip, require_upload_rate_limit
+from app.api.deps import get_client_ip, require_upload_rate_limit, trace_id_from_request
 from app.services.file_service import FileService
 from app.services.audit_service import log_audit
 from app.services import cache_service
@@ -36,7 +36,7 @@ async def upload_file(
         user_id=current_user.id,
         knowledge_base_id=knowledge_base_id
     )
-    await log_audit(db, current_user.id, "upload_file", "file", str(file_record.id), {"filename": file_record.original_filename}, get_client_ip(request), getattr(request.state, "request_id", None))
+    await log_audit(db, current_user.id, "upload_file", "file", str(file_record.id), {"filename": file_record.original_filename}, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_file_list(current_user.id))
     await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
     return file_record
@@ -61,7 +61,7 @@ async def batch_upload_files(
     )
     ip = get_client_ip(request)
     for rec in file_records:
-        await log_audit(db, current_user.id, "upload_file", "file", str(rec.id), {"filename": rec.original_filename}, ip, getattr(request.state, "request_id", None))
+        await log_audit(db, current_user.id, "upload_file", "file", str(rec.id), {"filename": rec.original_filename}, ip, getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_file_list(current_user.id))
     await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
     await asyncio.to_thread(cache_service.delete, cache_service.key_usage_limits(current_user.id))
@@ -135,7 +135,7 @@ async def delete_file(
     """删除文件"""
     file_service = FileService(db)
     await file_service.delete_file(file_id, current_user.id)
-    await log_audit(db, current_user.id, "delete_file", "file", str(file_id), None, get_client_ip(request), getattr(request.state, "request_id", None))
+    await log_audit(db, current_user.id, "delete_file", "file", str(file_id), None, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_file_list(current_user.id))
     await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
     return None
