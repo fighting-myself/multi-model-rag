@@ -17,3 +17,655 @@
 2026-04-07 14:00:33 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
 2026-04-07 14:01:11 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
 2026-04-07 14:01:28 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64040 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:16:30 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64379 - "GET /api/v1/external-connections HTTP/1.1" 200
+2026-04-07 14:16:31 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64383 - "GET /api/v1/mcp-servers/mcp-available HTTP/1.1" 200
+2026-04-07 14:16:32 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64382 - "GET /api/v1/mcp-servers HTTP/1.1" 200
+2026-04-07 14:16:32 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64385 - "GET /api/v1/external-connections HTTP/1.1" 200
+2026-04-07 14:16:35 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64391 - "GET /api/v1/mcp-servers/mcp-available HTTP/1.1" 200
+2026-04-07 14:16:35 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64390 - "GET /api/v1/mcp-servers HTTP/1.1" 200
+2026-04-07 14:16:40 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:16:40 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 5bed80fbe33a47b9ac824070559bbe9b
+2026-04-07 14:16:40 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:16:41 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:16:41 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:16:41 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:16:42 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:16:42 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:16:42 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:16:42 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64398 - "GET /api/v1/mcp-servers/3/tools HTTP/1.1" 200
+2026-04-07 14:22:17 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64620 - "GET /api/v1/chat/settings/chat-attachment HTTP/1.1" 200
+2026-04-07 14:22:18 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64619 - "GET /api/v1/knowledge-bases?page_size=100 HTTP/1.1" 200
+2026-04-07 14:22:18 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64622 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:22:19 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64624 - "GET /api/v1/chat/conversations/290 HTTP/1.1" 200
+2026-04-07 14:22:36 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:22:36 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64631 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:22:38 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64636 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:22:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:22:45 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64644 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:22:48 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64647 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:23:10 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64650 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:23:15 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:23:15 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:23:18 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64654 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:23:33 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64664 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:23:38 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:23:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:23:41 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64673 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:27:49 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:27:49 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:27:49 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:27:49 | INFO     | uvicorn.error:_serve:102 - Finished server process [17196]
+2026-04-07 14:28:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:21 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 2577ccbd21dd4cf08a97e398c0163cc3
+2026-04-07 14:28:21 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:28:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:21 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:28:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:28:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:23 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:23 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:28:23 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:28:23 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:23 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:28:23 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:28:24 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:28:24 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:28:24 | INFO     | uvicorn.error:_serve:102 - Finished server process [21828]
+2026-04-07 14:28:38 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:38 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 1e4fc07ede45434e957a0b7c64d8ca8f
+2026-04-07 14:28:38 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:28:38 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:38 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:28:38 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:28:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:40 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:40 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:28:40 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:28:41 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:28:41 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:30:08 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:30:08 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:30:08 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:30:08 | INFO     | uvicorn.error:_serve:102 - Finished server process [21700]
+2026-04-07 14:30:22 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:30:22 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: b52e30151e324c19a6197f57bb20aafd
+2026-04-07 14:30:22 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:30:22 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:30:22 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:30:22 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:30:22 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:30:23 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:30:23 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:30:23 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:30:23 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:30:24 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:30:24 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:30:33 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64916 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:30:40 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:31:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:31:49 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64983 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:31:57 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:31:57 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64985 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:31:59 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64988 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:32:03 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64991 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:32:05 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64993 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:27 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '295', None, '127.0.0.1', 'ebe09c07-6d96-4d03-adf9-7025afcb0a15', 'ebe09c07-6d96-4d03-adf9-7025afcb0a15')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:28 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64995 - "DELETE /api/v1/chat/conversations/295 HTTP/1.1" 204
+2026-04-07 14:32:28 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64997 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:29 | INFO     | uvicorn.access:send:483 - 127.0.0.1:64999 - "GET /api/v1/chat/conversations/297 HTTP/1.1" 200
+2026-04-07 14:32:30 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '294', None, '127.0.0.1', '952449dd-151d-4719-8bfe-7e6857d5373f', '952449dd-151d-4719-8bfe-7e6857d5373f')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:31 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65001 - "DELETE /api/v1/chat/conversations/294 HTTP/1.1" 204
+2026-04-07 14:32:31 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65003 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:32 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '293', None, '127.0.0.1', '088b70a8-12a5-4bae-9d8f-d0d2e4ef8b20', '088b70a8-12a5-4bae-9d8f-d0d2e4ef8b20')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:33 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65005 - "DELETE /api/v1/chat/conversations/293 HTTP/1.1" 204
+2026-04-07 14:32:33 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65007 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:34 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '292', None, '127.0.0.1', 'e9254489-5489-4291-aecd-10f7e8f364f9', 'e9254489-5489-4291-aecd-10f7e8f364f9')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:35 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65009 - "DELETE /api/v1/chat/conversations/292 HTTP/1.1" 204
+2026-04-07 14:32:36 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65011 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:37 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '291', None, '127.0.0.1', 'b5522b1f-adcf-4179-bfcb-0858e8cf06c5', 'b5522b1f-adcf-4179-bfcb-0858e8cf06c5')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:37 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65014 - "DELETE /api/v1/chat/conversations/291 HTTP/1.1" 204
+2026-04-07 14:32:38 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65016 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:39 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '290', None, '127.0.0.1', 'a600d4ba-8d4f-4b5d-804b-83b0e311c474', 'a600d4ba-8d4f-4b5d-804b-83b0e311c474')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:39 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65018 - "DELETE /api/v1/chat/conversations/290 HTTP/1.1" 204
+2026-04-07 14:32:40 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65021 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:41 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '289', None, '127.0.0.1', '273e5dec-53b8-444c-95c2-187ec4801397', '273e5dec-53b8-444c-95c2-187ec4801397')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:42 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65023 - "DELETE /api/v1/chat/conversations/289 HTTP/1.1" 204
+2026-04-07 14:32:42 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65025 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:43 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '288', None, '127.0.0.1', '46bd2fb9-6d22-4173-aa74-7f9008c4e72a', '46bd2fb9-6d22-4173-aa74-7f9008c4e72a')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:44 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65027 - "DELETE /api/v1/chat/conversations/288 HTTP/1.1" 204
+2026-04-07 14:32:44 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65032 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:45 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '287', None, '127.0.0.1', '27ac22c7-8fdb-4fbb-b826-64bf759987d2', '27ac22c7-8fdb-4fbb-b826-64bf759987d2')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:46 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65038 - "DELETE /api/v1/chat/conversations/287 HTTP/1.1" 204
+2026-04-07 14:32:47 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65040 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:48 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '286', None, '127.0.0.1', 'a7819fef-2825-456c-a551-c8fe03eec313', 'a7819fef-2825-456c-a551-c8fe03eec313')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:48 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65042 - "DELETE /api/v1/chat/conversations/286 HTTP/1.1" 204
+2026-04-07 14:32:49 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65044 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:50 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '285', None, '127.0.0.1', '82544f5f-4664-4952-8b1f-c0a7a1e46ed6', '82544f5f-4664-4952-8b1f-c0a7a1e46ed6')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:51 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65046 - "DELETE /api/v1/chat/conversations/285 HTTP/1.1" 204
+2026-04-07 14:32:51 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65048 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:52 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '284', None, '127.0.0.1', '9a99e83c-7e79-4c98-b5dc-eaf1c6251c61', '9a99e83c-7e79-4c98-b5dc-eaf1c6251c61')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:53 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65050 - "DELETE /api/v1/chat/conversations/284 HTTP/1.1" 204
+2026-04-07 14:32:53 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65052 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:55 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '283', None, '127.0.0.1', '34ddff9c-f447-468f-8c30-533546ea242c', '34ddff9c-f447-468f-8c30-533546ea242c')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:55 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65054 - "DELETE /api/v1/chat/conversations/283 HTTP/1.1" 204
+2026-04-07 14:32:56 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65056 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:57 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '282', None, '127.0.0.1', '31af34f8-bfd5-4a65-97c2-6c0284b749a0', '31af34f8-bfd5-4a65-97c2-6c0284b749a0')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:32:58 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65058 - "DELETE /api/v1/chat/conversations/282 HTTP/1.1" 204
+2026-04-07 14:32:58 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65060 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:32:59 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '281', None, '127.0.0.1', 'e3504905-601c-46c9-8ca9-53cefac614a3', 'e3504905-601c-46c9-8ca9-53cefac614a3')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:33:00 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65062 - "DELETE /api/v1/chat/conversations/281 HTTP/1.1" 204
+2026-04-07 14:33:00 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65064 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:02 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '296', None, '127.0.0.1', '147e66da-0374-40ad-aa46-de3819eaea3d', '147e66da-0374-40ad-aa46-de3819eaea3d')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:33:02 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65066 - "DELETE /api/v1/chat/conversations/296 HTTP/1.1" 204
+2026-04-07 14:33:03 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65069 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:04 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '297', None, '127.0.0.1', '5def87d6-8f62-400d-bcee-db13441e9986', '5def87d6-8f62-400d-bcee-db13441e9986')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:33:05 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65071 - "DELETE /api/v1/chat/conversations/297 HTTP/1.1" 204
+2026-04-07 14:33:06 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65073 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:16 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:33:16 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65075 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:33:18 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65078 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:25 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:33:25 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65085 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:33:27 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65088 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:36 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65094 - "GET /api/v1/chat/conversations/298 HTTP/1.1" 200
+2026-04-07 14:33:36 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '298', None, '127.0.0.1', 'f44348ed-8f49-4df1-9ac8-23390a9c881e', 'f44348ed-8f49-4df1-9ac8-23390a9c881e')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:33:37 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65096 - "DELETE /api/v1/chat/conversations/298 HTTP/1.1" 204
+2026-04-07 14:33:38 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65098 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:40 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '299', None, '127.0.0.1', '4724bb8e-52f5-44d4-b873-fb37c3e3c2aa', '4724bb8e-52f5-44d4-b873-fb37c3e3c2aa')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:33:41 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65101 - "DELETE /api/v1/chat/conversations/299 HTTP/1.1" 204
+2026-04-07 14:33:41 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65103 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:47 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65124 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:33:51 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:33:51 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:33:54 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65129 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:33:58 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65132 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:34:04 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:34:05 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:34:07 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65136 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:34:50 | INFO     | uvicorn.access:send:483 - 127.0.0.1:65157 - "GET /api/v1/chat/conversations/300 HTTP/1.1" 200
+2026-04-07 14:38:21 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:38:21 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:38:21 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:38:21 | INFO     | uvicorn.error:_serve:102 - Finished server process [6400]
+2026-04-07 14:38:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:39 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 06accf32a173411abf30e516c35b34c7
+2026-04-07 14:38:39 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:38:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:38:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:39 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:38:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:40 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:40 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:38:40 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:38:40 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:41 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:38:44 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:38:44 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:38:44 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:38:44 | INFO     | uvicorn.error:_serve:102 - Finished server process [24388]
+2026-04-07 14:38:59 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:59 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 5edf206d675844129c71b203ecdaa53e
+2026-04-07 14:38:59 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:38:59 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:38:59 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:38:59 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:38:59 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:00 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:01 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:39:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:39:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:01 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:39:17 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:39:17 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:39:17 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:39:17 | INFO     | uvicorn.error:_serve:102 - Finished server process [17704]
+2026-04-07 14:39:26 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:26 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: d8cb79a3546f4fc6ada83d3027494af6
+2026-04-07 14:39:26 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:39:26 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:26 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:39:26 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:39:27 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:27 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:27 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:28 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:28 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:39:28 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:39:28 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:39:29 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:41:37 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:41:37 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:41:37 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:41:37 | INFO     | uvicorn.error:_serve:102 - Finished server process [4220]
+2026-04-07 14:41:49 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:41:49 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 47110f1079894a61b526fdba591870bf
+2026-04-07 14:41:49 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:41:49 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:41:49 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:41:49 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:41:50 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:41:50 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:41:51 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:41:51 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:41:51 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:41:51 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:41:52 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:41:52 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:41:52 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:41:52 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:41:52 | INFO     | uvicorn.error:_serve:102 - Finished server process [24496]
+2026-04-07 14:42:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:03 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: b6b80d968abe4de593c12b0df3407621
+2026-04-07 14:42:03 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:42:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:42:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:03 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:42:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:05 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:05 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:42:05 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:42:05 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:05 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:42:23 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:42:23 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:42:23 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:42:23 | INFO     | uvicorn.error:_serve:102 - Finished server process [2508]
+2026-04-07 14:42:32 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:32 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 750a8eed9f0f4271bd025e9e4c3b92ae
+2026-04-07 14:42:32 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:42:32 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:32 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:42:32 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:42:32 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:32 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:33 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:33 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:42:33 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:42:34 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:34 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:42:34 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:42:34 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:42:34 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:42:34 | INFO     | uvicorn.error:_serve:102 - Finished server process [23020]
+2026-04-07 14:42:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:45 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 9a23e00b97f9405cb2965dfad4bf3960
+2026-04-07 14:42:45 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:42:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:42:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:45 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:42:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:46 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:46 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:46 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:42:47 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:42:47 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:47 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:42:47 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:42:47 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:42:47 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:42:47 | INFO     | uvicorn.error:_serve:102 - Finished server process [23388]
+2026-04-07 14:42:58 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:58 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 2d113cf694fe43d29c4baaca6f771aef
+2026-04-07 14:42:58 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:42:58 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:58 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:42:58 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:42:59 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:42:59 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:00 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:00 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:43:00 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:43:00 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:01 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:43:12 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:43:12 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:43:12 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:43:12 | INFO     | uvicorn.error:_serve:102 - Finished server process [17276]
+2026-04-07 14:43:20 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:20 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: d8c7319d2cf14c0caa6edf9ad9e8f64c
+2026-04-07 14:43:20 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:43:20 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:20 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:43:20 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:43:20 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:20 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:21 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:43:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:43:21 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:43:22 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:45:20 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49181 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:45:25 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:45:44 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:45:47 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49201 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:45:49 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '301', None, '127.0.0.1', 'f9260be7-2369-43dc-99a0-b568af31fa92', 'f9260be7-2369-43dc-99a0-b568af31fa92')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:45:50 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49204 - "DELETE /api/v1/chat/conversations/301 HTTP/1.1" 204
+2026-04-07 14:45:51 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49206 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:45:52 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '300', None, '127.0.0.1', '8e9e4a52-65bd-4b45-873d-b4bb720cc769', '8e9e4a52-65bd-4b45-873d-b4bb720cc769')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:45:52 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49208 - "DELETE /api/v1/chat/conversations/300 HTTP/1.1" 204
+2026-04-07 14:45:53 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49210 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:45:56 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '302', None, '127.0.0.1', '9e52d966-1583-4309-a93c-cba97a3f1df2', '9e52d966-1583-4309-a93c-cba97a3f1df2')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:45:56 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49212 - "DELETE /api/v1/chat/conversations/302 HTTP/1.1" 204
+2026-04-07 14:45:57 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49214 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:46:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:46:03 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49216 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:46:05 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49220 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:46:09 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:46:09 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49222 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:46:11 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49225 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:46:57 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:46:57 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:46:57 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:46:57 | INFO     | uvicorn.error:_serve:102 - Finished server process [18424]
+2026-04-07 14:47:11 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:11 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: d04b5c121777403d883908f59f1f1761
+2026-04-07 14:47:11 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:47:11 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:11 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:47:12 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:47:12 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:12 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:13 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:13 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:47:14 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:47:14 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:14 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:47:26 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:47:26 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:47:26 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:47:26 | INFO     | uvicorn.error:_serve:102 - Finished server process [25052]
+2026-04-07 14:47:33 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:33 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 4ecdd496bb1b4381b4c9a54faf5726e5
+2026-04-07 14:47:33 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:47:34 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:47:34 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:34 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:47:34 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:34 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:35 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:35 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:47:35 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:47:35 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:47:36 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:48:01 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '303', None, '127.0.0.1', '1c9a0355-665b-415b-830f-a56b56a3b366', '1c9a0355-665b-415b-830f-a56b56a3b366')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:48:03 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49327 - "DELETE /api/v1/chat/conversations/303 HTTP/1.1" 204
+2026-04-07 14:48:03 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49332 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:48:05 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '304', None, '127.0.0.1', '2a5e7d2d-38e4-4bf3-9ff4-312e0f5ec61b', '2a5e7d2d-38e4-4bf3-9ff4-312e0f5ec61b')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:48:06 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49334 - "DELETE /api/v1/chat/conversations/304 HTTP/1.1" 204
+2026-04-07 14:48:07 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49337 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:48:35 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:48:35 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49340 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:48:38 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49352 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:48:55 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '305', None, '127.0.0.1', '6985189e-bb89-4dd5-a41e-203278feccd6', '6985189e-bb89-4dd5-a41e-203278feccd6')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:48:56 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49368 - "DELETE /api/v1/chat/conversations/305 HTTP/1.1" 204
+2026-04-07 14:48:57 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49371 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:49:00 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:49:00 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49374 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:49:02 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49379 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:49:10 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:49:10 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49384 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:49:12 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49389 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:49:16 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49393 - "GET /api/v1/chat/conversations/306 HTTP/1.1" 200
+2026-04-07 14:49:25 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49400 - "GET /api/v1/chat/conversations/307 HTTP/1.1" 200
+2026-04-07 14:50:36 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:50:36 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:50:36 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:50:36 | INFO     | uvicorn.error:_serve:102 - Finished server process [2772]
+2026-04-07 14:51:02 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:02 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 44e1dcc4b18d464bbe0b3bb90180c2fe
+2026-04-07 14:51:02 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:51:02 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:51:02 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:02 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:51:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:05 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:05 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:51:05 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:51:05 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:05 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:51:05 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:51:05 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:51:05 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:51:05 | INFO     | uvicorn.error:_serve:102 - Finished server process [14380]
+2026-04-07 14:51:16 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:16 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 1822867e39014ab48fd4f84b7a47e4ec
+2026-04-07 14:51:16 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:51:16 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:51:16 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:16 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:51:16 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:16 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:17 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:17 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:51:17 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:51:17 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:18 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:51:18 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:51:18 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:51:18 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:51:18 | INFO     | uvicorn.error:_serve:102 - Finished server process [17736]
+2026-04-07 14:51:25 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:25 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 2c677d78089c4476b01ca53c01cca240
+2026-04-07 14:51:25 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:51:25 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:51:25 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:25 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:51:26 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:26 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:27 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:27 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:51:27 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:51:27 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:51:27 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:51:40 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '306', None, '127.0.0.1', 'f8b01096-687e-4c69-98d3-cee1b193e016', 'f8b01096-687e-4c69-98d3-cee1b193e016')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:51:41 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49556 - "DELETE /api/v1/chat/conversations/306 HTTP/1.1" 204
+2026-04-07 14:51:42 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49560 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:51:42 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49562 - "GET /api/v1/chat/conversations/307 HTTP/1.1" 200
+2026-04-07 14:51:43 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '307', None, '127.0.0.1', '62b87440-f0c5-4a30-9bdd-10ff8789cafc', '62b87440-f0c5-4a30-9bdd-10ff8789cafc')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:51:43 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49567 - "DELETE /api/v1/chat/conversations/307 HTTP/1.1" 204
+2026-04-07 14:51:44 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49569 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:51:51 | INFO     | root:chat_stream:3566 - chat_memory injected(stream normal) user_id=12 conv_id=308
+2026-04-07 14:52:18 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:52:18 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49579 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:52:20 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49583 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:52:29 | WARNING  | root:log_audit:42 - 审计日志写入失败: (asyncmy.errors.OperationalError) (1054, "Unknown column 'trace_id' in 'field list'")
+[SQL: INSERT INTO audit_logs (user_id, action, resource_type, resource_id, detail, ip, request_id, trace_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)]
+[parameters: (12, 'delete_conversation', 'conversation', '308', None, '127.0.0.1', '50513c3f-9518-4cba-84d2-8e3c2d84d0d9', '50513c3f-9518-4cba-84d2-8e3c2d84d0d9')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-07 14:52:30 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49588 - "DELETE /api/v1/chat/conversations/308 HTTP/1.1" 204
+2026-04-07 14:52:30 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49590 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:56:22 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:56:22 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:56:22 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:56:22 | INFO     | uvicorn.error:_serve:102 - Finished server process [328]
+2026-04-07 14:56:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:56:45 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: d9a76506837943e2b4ff917e25a1671e
+2026-04-07 14:56:45 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:56:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:56:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:56:45 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:56:46 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:56:46 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:56:47 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:56:47 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:56:47 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:56:47 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:56:48 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:56:49 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:56:49 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:56:49 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:56:49 | INFO     | uvicorn.error:_serve:102 - Finished server process [18496]
+2026-04-07 14:57:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:01 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: 5d0a6248b57c4a22a4ed02f8b0666ce7
+2026-04-07 14:57:01 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:57:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:57:01 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:01 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:57:02 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:03 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:04 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:04 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:57:04 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:57:04 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:05 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:57:27 | INFO     | uvicorn.error:shutdown:272 - Shutting down
+2026-04-07 14:57:27 | INFO     | uvicorn.error:shutdown:67 - Waiting for application shutdown.
+2026-04-07 14:57:27 | INFO     | uvicorn.error:shutdown:76 - Application shutdown complete.
+2026-04-07 14:57:27 | INFO     | uvicorn.error:_serve:102 - Finished server process [9952]
+2026-04-07 14:57:37 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:37 | INFO     | mcp.client.streamable_http:_maybe_extract_session_id_from_response:181 - Received session ID: cefc463928694955a90b60d845d64f8d
+2026-04-07 14:57:37 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-06-18
+2026-04-07 14:57:37 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:37 | INFO     | mcp.client.streamable_http:handle_get_stream:298 - GET stream disconnected, reconnecting in 1000ms...
+2026-04-07 14:57:37 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:57:39 | INFO     | httpx:_send_single_request:1740 - HTTP Request: GET https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:41 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:41 | INFO     | httpx:_send_single_request:1740 - HTTP Request: DELETE https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi00071990/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:42 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:42 | INFO     | mcp.client.streamable_http:_maybe_extract_protocol_version_from_message:193 - Negotiated protocol version: 2025-11-25
+2026-04-07 14:57:42 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 202 Accepted"
+2026-04-07 14:57:42 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/mcps/market-cmapi033617/mcp "HTTP/1.1 200 OK"
+2026-04-07 14:57:42 | INFO     | uvicorn.error:startup:62 - Application startup complete.
+2026-04-07 14:57:56 | INFO     | root:chat_stream:3566 - chat_memory injected(stream normal) user_id=12 conv_id=309
+2026-04-07 14:58:26 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:58:26 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49863 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:58:27 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49871 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:58:27 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49873 - "GET /api/v1/knowledge-bases HTTP/1.1" 200
+2026-04-07 14:58:29 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49883 - "GET /api/v1/chat/settings/chat-attachment HTTP/1.1" 200
+2026-04-07 14:58:30 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49882 - "GET /api/v1/knowledge-bases?page_size=100 HTTP/1.1" 200
+2026-04-07 14:58:30 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49885 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:58:31 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49887 - "GET /api/v1/chat/conversations/309 HTTP/1.1" 200
+2026-04-07 14:58:39 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49898 - "DELETE /api/v1/chat/conversations/309 HTTP/1.1" 204
+2026-04-07 14:58:40 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49905 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:58:44 | INFO     | root:chat_stream:3566 - chat_memory injected(stream normal) user_id=12 conv_id=310
+2026-04-07 14:58:45 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:58:45 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49916 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:58:47 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49920 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:59:02 | INFO     | root:chat_stream:3566 - chat_memory injected(stream normal) user_id=12 conv_id=311
+2026-04-07 14:59:04 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:59:04 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49934 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 14:59:13 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 14:59:15 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49942 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:59:25 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49949 - "DELETE /api/v1/chat/conversations/311 HTTP/1.1" 204
+2026-04-07 14:59:26 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49951 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 14:59:28 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49953 - "DELETE /api/v1/chat/conversations/310 HTTP/1.1" 204
+2026-04-07 14:59:29 | INFO     | uvicorn.access:send:483 - 127.0.0.1:49956 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 15:03:25 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50080 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 15:03:30 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:03:30 | INFO     | root:chat_stream:3422 - chat_memory injected(stream super) user_id=12 conv_id=312
+2026-04-07 15:03:31 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:03:36 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50086 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 15:03:54 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50106 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 15:03:58 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:03:58 | INFO     | root:chat_stream:3422 - chat_memory injected(stream super) user_id=12 conv_id=313
+2026-04-07 15:03:58 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:04:03 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50114 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 15:04:28 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50124 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 15:04:32 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:04:32 | INFO     | root:chat_stream:3422 - chat_memory injected(stream super) user_id=12 conv_id=314
+2026-04-07 15:04:34 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:04:39 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50130 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 15:04:53 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50137 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 15:04:57 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:04:57 | INFO     | root:chat_stream:3422 - chat_memory injected(stream super) user_id=12 conv_id=315
+2026-04-07 15:04:57 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:05:02 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50143 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 15:05:46 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50161 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 15:05:50 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:05:50 | INFO     | root:chat_stream:3422 - chat_memory injected(stream super) user_id=12 conv_id=316
+2026-04-07 15:05:50 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:05:56 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50166 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200
+2026-04-07 15:06:15 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50168 - "POST /api/v1/chat/completions/stream HTTP/1.1" 200
+2026-04-07 15:06:22 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:06:22 | INFO     | root:chat_stream:3422 - chat_memory injected(stream super) user_id=12 conv_id=317
+2026-04-07 15:06:22 | INFO     | httpx:_send_single_request:1740 - HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-07 15:06:24 | INFO     | uvicorn.access:send:483 - 127.0.0.1:50177 - "GET /api/v1/chat/conversations?page_size=50 HTTP/1.1" 200

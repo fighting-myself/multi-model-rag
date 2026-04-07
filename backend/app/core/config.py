@@ -194,6 +194,21 @@ class Settings(BaseSettings):
     # 本地记忆（OpenClaw 风格：用户指令/执行结果/偏好，支持断点续做）
     MEMORY_ENABLED: bool = True  # 是否启用记忆检索与存储
     MEMORY_DB_PATH: str = ""  # 留空则使用 data/memory.db
+    # 智能问答跨会话记忆（产品化接线）：问前检索注入上下文，问后写入本轮摘要
+    CHAT_MEMORY_ENABLED: bool = True
+    CHAT_MEMORY_WRITE_ENABLED: bool = True
+    CHAT_MEMORY_MAX_RESULTS: int = 6  # 每次最多注入的记忆条数
+    CHAT_MEMORY_MAX_CHARS: int = 1200  # 注入到上下文中的总长度上限
+    CHAT_MEMORY_QUERY_MIN_LEN: int = 1  # 问题过短时改为“回放最近短期记忆”，避免问“我叫什么”之类无法命中
+    CHAT_MEMORY_WRITE_MAX_CHARS: int = 800  # 写入记忆的单条文本上限（脱敏后）
+    # 记忆等级与策略（通用，不做“特定词触发”）
+    CHAT_MEMORY_LONG_TERM_MAX_RESULTS: int = 4
+    CHAT_MEMORY_SHORT_TERM_MAX_RESULTS: int = 6
+    CHAT_MEMORY_TEMP_MAX_RESULTS: int = 0
+    CHAT_MEMORY_UPGRADE_ENABLED: bool = True
+    CHAT_MEMORY_UPGRADE_MIN_SHORT_TERM: int = 8  # 新增短期记忆达到该条数后触发升级
+    CHAT_MEMORY_UPGRADE_LOOKBACK: int = 30  # 升级时最多扫描最近短期记忆条数
+    CHAT_MEMORY_UPGRADE_MAX_CHARS: int = 600  # 产出的长期记忆摘要长度上限
 
     # Bash/Shell 执行（OpenClaw exec 能力：供 skills 调用 gh、curl、op 等 CLI）
     BASH_ENABLED: bool = True  # 是否允许 Agent 调用 bash 工具

@@ -150,6 +150,37 @@ def get_memory(
         conn.close()
 
 
+def list_memories(
+    user_id: str,
+    memory_types: Optional[List[str]] = None,
+    max_results: int = 50,
+    min_id_exclusive: Optional[int] = None,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """按时间倒序列出记忆，可按类型和最小 id 过滤。"""
+    conn = _get_connection(db_path)
+    try:
+        ensure_schema(conn)
+        params: List[Any] = [user_id]
+        clauses = ["user_id = ?"]
+        if memory_types:
+            placeholders = ",".join("?" * len(memory_types))
+            clauses.append(f"memory_type IN ({placeholders})")
+            params.extend(memory_types)
+        if min_id_exclusive is not None:
+            clauses.append("id > ?")
+            params.append(int(min_id_exclusive))
+        sql = (
+            "SELECT id, user_id, memory_type, content, metadata, related_task_id, created_at "
+            "FROM memory WHERE " + " AND ".join(clauses) + " ORDER BY id DESC LIMIT ?"
+        )
+        params.append(max(1, int(max_results)))
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def is_memory_enabled() -> bool:
     """是否启用记忆（由配置决定）。"""
     return getattr(settings, "MEMORY_ENABLED", True)

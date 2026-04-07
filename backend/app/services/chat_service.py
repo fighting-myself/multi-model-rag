@@ -58,6 +58,7 @@ from app.services.bash_tools import BASH_TOOL, is_bash_enabled
 from app.services.knowledge_base_service import KnowledgeBaseService
 from app.services.knowledge_access import sanitize_kb_scope_for_user
 from app.infrastructure.rag.progress import RagProgressCb, rag_progress_call as _rag_progress_call
+from app.core.audit_text import summarize_text_for_audit
 
 # 超能模式流式思考：子步骤与主协程之间用 Queue 传递，此对象作为结束标记
 _RAG_TRACE_STREAM_END = object()
@@ -74,6 +75,260 @@ class ChatService:
     
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    def _is_chat_memory_enabled(self) -> bool:
+        return bool(getattr(settings, "MEMORY_ENABLED", True)) and bool(getattr(settings, "CHAT_MEMORY_ENABLED", True))
+
+    @staticmethod
+    def _parse_json_dict(raw: Any) -> Dict[str, Any]:
+        if isinstance(raw, dict):
+            return raw
+        if not raw:
+            return {}
+        try:
+            obj = _json.loads(str(raw))
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _memory_level(memory_type: str) -> str:
+        """
+        通用记忆等级映射（避免“提取特定词”）。
+        - long_term：用户偏好/事实/长期任务上下文（低频、持久）
+        - short_term：最近会话中可复用的执行记录/结论（中频、持久）
+        - temporary：一次性临时信息（高频、可不注入）
+        其他未识别类型默认归为 short_term（兼容历史数据）。
+        """
+        mt = (memory_type or "").strip().lower()
+        if mt in {"user_preference", "profile", "task_context", "long_term"}:
+            return "long_term"
+        if mt in {"temporary", "temp", "memory_archive_marker"}:
+            return "temporary"
+        # execution_record / chat_turn / 以及未知类型：默认短期
+        return "short_term"
+
+    async def _build_chat_memory_context(self, *, user_id: int, query: str) -> str:
+        """
+        从 memory.db 中按 query 检索跨会话记忆，拼成可注入 LLM 的上下文块。
+        注意：memory_service 为同步 sqlite，必须丢到线程池以免阻塞事件循环。
+        """
+        if not self._is_chat_memory_enabled():
+            return ""
+        q = (query or "").strip()
+        min_len = int(getattr(settings, "CHAT_MEMORY_QUERY_MIN_LEN", 1))
+        # 通用策略：
+        # 1) 极短/短句（如“我叫什么”这类改写问法）优先回放最近记忆，避免中文整串 LIKE 命中率低；
+        # 2) 正常长度问题走关键词检索。
+        # 注意：这里不做任何“特定词”判断。
+        is_short_query = (len(q) <= 8 and " " not in q)
+        use_query = q if (len(q) >= min_len and not is_short_query) else ""
+        try:
+            from app.services.memory_service import search_memory
+
+            rows = await asyncio.to_thread(
+                search_memory,
+                user_id=str(user_id),
+                query=use_query,
+                memory_types=None,
+                max_results=max(
+                    1,
+                    int(getattr(settings, "CHAT_MEMORY_MAX_RESULTS", 6)),
+                ),
+            )
+        except Exception:
+            logging.getLogger(__name__).debug("chat memory search failed", exc_info=True)
+            return ""
+
+        # 回退：关键词检索为空时，自动退化为“最近记忆回放”
+        if not rows and use_query:
+            try:
+                from app.services.memory_service import search_memory
+                rows = await asyncio.to_thread(
+                    search_memory,
+                    user_id=str(user_id),
+                    query="",
+                    memory_types=None,
+                    max_results=max(
+                        1,
+                        int(getattr(settings, "CHAT_MEMORY_MAX_RESULTS", 6)),
+                    ),
+                )
+            except Exception:
+                rows = []
+
+        if not rows:
+            return ""
+        # 分级注入：长期（少而稳定）+ 短期（最近可复用）；临时默认不注入
+        max_chars = int(getattr(settings, "CHAT_MEMORY_MAX_CHARS", 1200))
+        long_k = int(getattr(settings, "CHAT_MEMORY_LONG_TERM_MAX_RESULTS", 4))
+        short_k = int(getattr(settings, "CHAT_MEMORY_SHORT_TERM_MAX_RESULTS", 6))
+        temp_k = int(getattr(settings, "CHAT_MEMORY_TEMP_MAX_RESULTS", 0))
+
+        long_rows: List[dict] = []
+        short_rows: List[dict] = []
+        temp_rows: List[dict] = []
+        for r in rows:
+            mt = str(r.get("memory_type") or "").strip()
+            lv = self._memory_level(mt)
+            if lv == "long_term":
+                long_rows.append(r)
+            elif lv == "temporary":
+                temp_rows.append(r)
+            else:
+                short_rows.append(r)
+
+        picked: List[tuple[str, dict]] = []
+        picked.extend([("长期记忆", r) for r in long_rows[: max(0, long_k)]])
+        picked.extend([("短期记忆", r) for r in short_rows[: max(0, short_k)]])
+        if temp_k > 0:
+            picked.extend([("临时记忆", r) for r in temp_rows[: max(0, temp_k)]])
+
+        lines: List[str] = ["【跨会话记忆（供参考）】"]
+        used = 0
+        for label, r in picked:
+            mt = str(r.get("memory_type") or "").strip() or "memory"
+            content = str(r.get("content") or "").strip()
+            if not content:
+                continue
+            content = summarize_text_for_audit(content, max_chars=260)
+            item = f"- ({label}/{mt}) {content}"
+            if used + len(item) + 1 > max_chars:
+                break
+            lines.append(item)
+            used += len(item) + 1
+        if len(lines) <= 1:
+            return ""
+        return "\n".join(lines).strip()
+
+    async def _write_chat_memory_turn(
+        self,
+        *,
+        user_id: int,
+        conversation_id: int,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        """将本轮问答写入 memory.db（脱敏 + 截断），失败不影响主流程。"""
+        if not (self._is_chat_memory_enabled() and bool(getattr(settings, "CHAT_MEMORY_WRITE_ENABLED", True))):
+            return
+        try:
+            from app.services.memory_service import add_memory
+
+            max_chars = int(getattr(settings, "CHAT_MEMORY_WRITE_MAX_CHARS", 800))
+            u = summarize_text_for_audit(user_message, max_chars=240)
+            a = summarize_text_for_audit(assistant_message, max_chars=max(240, max_chars - 260))
+            content = f"Q: {u}\nA: {a}".strip()
+            content = summarize_text_for_audit(content, max_chars=max_chars)
+            await asyncio.to_thread(
+                add_memory,
+                user_id=str(user_id),
+                # 通用：默认写短期记忆（持久化存储，但检索时受 short_term 配额控制）
+                memory_type="short_term",
+                content=content,
+                metadata={"source": "chat", "conversation_id": str(conversation_id)},
+                related_task_id=str(conversation_id),
+            )
+            await self._maybe_upgrade_chat_memory(user_id=user_id)
+        except Exception:
+            logging.getLogger(__name__).debug("chat memory write failed", exc_info=True)
+            return
+
+    async def _maybe_upgrade_chat_memory(self, *, user_id: int) -> None:
+        """
+        通用“记忆升级/归档”流程：
+        - 当新增短期记忆达到阈值时，将最近短期记忆压缩为一条长期记忆；
+        - 再写一条归档标记，避免重复升级同一批短期记忆。
+        """
+        if not bool(getattr(settings, "CHAT_MEMORY_UPGRADE_ENABLED", True)):
+            return
+        try:
+            from app.services.memory_service import add_memory, list_memories
+        except Exception:
+            return
+
+        lookback = int(getattr(settings, "CHAT_MEMORY_UPGRADE_LOOKBACK", 30))
+        min_short = int(getattr(settings, "CHAT_MEMORY_UPGRADE_MIN_SHORT_TERM", 8))
+        if lookback <= 0 or min_short <= 0:
+            return
+
+        try:
+            markers = await asyncio.to_thread(
+                list_memories,
+                user_id=str(user_id),
+                memory_types=["memory_archive_marker"],
+                max_results=1,
+            )
+            last_archived_id = 0
+            if markers:
+                md = self._parse_json_dict(markers[0].get("metadata"))
+                last_archived_id = int(md.get("last_short_term_id") or 0)
+
+            short_rows = await asyncio.to_thread(
+                list_memories,
+                user_id=str(user_id),
+                memory_types=["short_term", "execution_record"],
+                max_results=lookback,
+                min_id_exclusive=last_archived_id if last_archived_id > 0 else None,
+            )
+            if len(short_rows) < min_short:
+                return
+
+            # 由近到远排列，升级时按时间正序拼接以保留演进语义
+            short_rows = list(reversed(short_rows))
+            snippets: List[str] = []
+            source_ids: List[int] = []
+            for r in short_rows:
+                rid = int(r.get("id") or 0)
+                source_ids.append(rid)
+                txt = summarize_text_for_audit(str(r.get("content") or ""), max_chars=180)
+                if txt:
+                    snippets.append(f"- {txt}")
+            if not snippets:
+                return
+
+            merged = "\n".join(snippets)
+            max_chars = int(getattr(settings, "CHAT_MEMORY_UPGRADE_MAX_CHARS", 600))
+            # 通用压缩：优先用模型汇总，失败则退化为截断拼接
+            summary = ""
+            try:
+                system = (
+                    "你是记忆压缩器。请将以下短期会话记忆压缩为长期可复用信息，"
+                    "保留稳定事实、偏好、约束、长期目标，去掉一次性噪音。"
+                    "仅输出纯文本，不要编号解释。"
+                )
+                summary = (await llm_chat_simple(system, merged, max_tokens=220, temperature=0.1)).strip()
+            except Exception:
+                summary = ""
+            if not summary:
+                summary = merged
+            summary = summarize_text_for_audit(summary, max_chars=max_chars)
+            if not summary:
+                return
+
+            await asyncio.to_thread(
+                add_memory,
+                user_id=str(user_id),
+                memory_type="long_term",
+                content=summary,
+                metadata={
+                    "source": "chat_memory_upgrade",
+                    "source_type": "short_term",
+                    "source_ids": source_ids,
+                },
+                related_task_id="memory_upgrade",
+            )
+            await asyncio.to_thread(
+                add_memory,
+                user_id=str(user_id),
+                memory_type="memory_archive_marker",
+                content=f"archived short_term <= {max(source_ids)}",
+                metadata={"last_short_term_id": max(source_ids)},
+                related_task_id="memory_upgrade",
+            )
+        except Exception:
+            logging.getLogger(__name__).debug("chat memory upgrade failed", exc_info=True)
+            return
 
     async def _ensure_mcp_tools_cache(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """加载 MCP 工具缓存：服务名/工具名/参数 schema/调用配置。"""
@@ -2100,6 +2355,9 @@ class ChatService:
                     trace_events,
                     thinking_seconds,
                 )
+        memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
+        if memory_ctx:
+            full_context = (memory_ctx + "\n\n" + (full_context or "")).strip()
         try:
             assistant_content = await llm_chat(
                 user_content=user_content_llm,
@@ -2827,6 +3085,11 @@ class ChatService:
             if history_context:
                 full_context += f"【对话历史】\n{history_context}\n\n"
 
+            memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
+            if memory_ctx:
+                full_context = (memory_ctx + "\n\n" + full_context).strip() + "\n\n"
+                logging.info("chat_memory injected(non-stream) user_id=%s conv_id=%s", conv.user_id, conv.id)
+
             # 普通模式不自动公网检索；联网由超能模式 Skills 阶段按需触发
 
             user_content_llm = self._build_user_content_for_llm(message, attachments)
@@ -2874,6 +3137,13 @@ class ChatService:
             conv.title = message[:50] if len(message) > 50 else message
         await self.db.commit()
         await self.db.refresh(conv)  # 刷新以获取 updated_at
+        # 跨会话记忆：写入本轮摘要（不影响主流程）
+        await self._write_chat_memory_turn(
+            user_id=conv.user_id,
+            conversation_id=conv.id,
+            user_message=message,
+            assistant_message=assistant_content,
+        )
         try:
             await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
         except Exception as e:
@@ -3146,6 +3416,10 @@ class ChatService:
                             web_retrieved_context,
                             web_sources_list,
                         ) = data
+                        memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
+                        if memory_ctx:
+                            full_context = (memory_ctx + "\n\n" + (full_context or "")).strip()
+                            logging.info("chat_memory injected(stream super) user_id=%s conv_id=%s", conv.user_id, conv.id)
             except Exception:
                 logging.exception("超能模式（流式）失败")
                 assistant_content = "抱歉，超能模式处理失败，请稍后重试。"
@@ -3213,6 +3487,12 @@ class ChatService:
             await self.db.commit()
             await self.db.refresh(conv)
             await self.db.refresh(assistant_msg)
+            await self._write_chat_memory_turn(
+                user_id=conv.user_id,
+                conversation_id=conv.id,
+                user_message=message,
+                assistant_message=assistant_content,
+            )
             try:
                 await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
             except Exception as e:
@@ -3280,6 +3560,10 @@ class ChatService:
                 full_context += f"【知识库上下文】\n{rag_context}\n\n"
         if history_context:
             full_context += f"【对话历史】\n{history_context}\n\n"
+        memory_ctx = await self._build_chat_memory_context(user_id=conv.user_id, query=message)
+        if memory_ctx:
+            full_context = (memory_ctx + "\n\n" + full_context).strip() + "\n\n"
+            logging.info("chat_memory injected(stream normal) user_id=%s conv_id=%s", conv.user_id, conv.id)
 
         user_content_llm = self._build_user_content_for_llm(message, attachments)
         full_content: List[str] = []
@@ -3324,6 +3608,12 @@ class ChatService:
         await self.db.commit()
         await self.db.refresh(conv)
         await self.db.refresh(assistant_msg)
+        await self._write_chat_memory_turn(
+            user_id=conv.user_id,
+            conversation_id=conv.id,
+            user_message=message,
+            assistant_message=assistant_content,
+        )
         try:
             await asyncio.to_thread(cache_service.invalidate_conversation_cache, conv.user_id, conv.id)
         except Exception as e:
