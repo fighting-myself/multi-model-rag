@@ -1,4 +1,4 @@
-# 本地可启动：仅跑后端，数据库/Redis/Qdrant/MinIO 全部使用远程（.env 中配置）
+# 本地可启动：仅跑后端，数据库/Redis/Qdrant/MinIO 全部使用远程（backend/.env 中配置）
 # 使用方式: docker-compose -f docker-compose.local.yml up -d --build
 # 或本地不跑 Docker，直接: cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000
 
@@ -10,7 +10,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - ./backend/.env
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL:-redis://localhost:6379/0}
@@ -40,7 +40,7 @@ services:
   #   build:
   #     context: ./backend
   #     dockerfile: Dockerfile
-  #   env_file: [.env]
+  #   env_file: [./backend/.env]
   #   environment:
   #     - DATABASE_URL=${DATABASE_URL}
   #     - REDIS_URL=${REDIS_URL}

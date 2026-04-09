@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const proxyTarget = process.env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:8000'
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -13,13 +15,13 @@ export default defineConfig({
     proxy: {
       '/api': {
         // Windows 下 localhost 可能解析到 IPv6 ::1，与仅监听 IPv4 的代理/服务组合时易异常；固定 127.0.0.1
-        target: 'http://127.0.0.1:8000',
+        target: proxyTarget,
         changeOrigin: true,
         // 流式接口（如 /completions/stream）可能较久，避免 proxy 超时导致 socket hang up
         timeout: 300000, // 5 分钟
         configure: (proxy) => {
           proxy.on('error', (err) => {
-            console.error('[vite proxy] /api -> http://127.0.0.1:8000 失败（请先启动后端）:', err.message)
+            console.error(`[vite proxy] /api -> ${proxyTarget} 失败（请先启动后端）:`, err.message)
           })
           proxy.on('proxyReq', (proxyReq) => {
             // 流式请求不设置超时，由后端控制

@@ -3,7 +3,7 @@ import { useAuthStore } from '../stores/authStore'
 
 /**
  * 开发时默认走 Vite 代理 `/api` -> 后端。
- * 若界面提示「网络异常」且代理异常，可在 frontend/.env.development 中设置：
+ * 若界面提示「网络异常」且代理异常，可在 frontend/.env 或 frontend/.env.development 中设置：
  *   VITE_API_BASE_URL=http://127.0.0.1:8000
  * 将直连后端 API（需后端 CORS 允许；当前默认可用 *）。
  */

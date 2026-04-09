@@ -69,6 +69,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://rag_user:${POSTGRES_PASSWORD:-rag_password_123}@postgres:5432/rag_db
       REDIS_URL: redis://redis:6379/0
@@ -99,6 +101,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://rag_user:${POSTGRES_PASSWORD:-rag_password_123}@postgres:5432/rag_db
       REDIS_URL: redis://redis:6379/0
