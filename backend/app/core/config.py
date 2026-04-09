@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     PROJECT_ROOT: Path = Path(__file__).parent.parent.parent
     
     model_config = SettingsConfigDict(
-        env_file=str(PROJECT_ROOT.parent / ".env"),  # 从项目根目录读取 .env
+        env_file=str(PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
