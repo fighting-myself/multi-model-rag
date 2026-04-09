@@ -25,7 +25,7 @@ def _memory_db_path() -> Path:
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
     root = getattr(settings, "PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent)
-    data_dir = root.parent / "data"
+    data_dir = root / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "memory.db"
 

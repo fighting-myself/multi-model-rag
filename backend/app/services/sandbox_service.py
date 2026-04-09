@@ -24,7 +24,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT: Path = settings.PROJECT_ROOT.parent
+# 沙箱挂载与 bash/skill 脚本工作区：backend 目录（含 skills、data）
+REPO_ROOT: Path = settings.PROJECT_ROOT
 
 
 def _popen_communicate_sync(
@@ -310,7 +311,7 @@ async def run_python_skill_async(script: Path, json_arg: str) -> Tuple[bytes, by
         try:
             rel = script.relative_to(REPO_ROOT.resolve())
         except ValueError:
-            msg = "技能脚本不在仓库根目录下，无法在沙箱中挂载执行。"
+            msg = "技能脚本不在 backend 目录下，无法在沙箱中挂载执行。"
             return (b"", msg.encode("utf-8"), 127)
         image = (getattr(settings, "SANDBOX_DOCKER_IMAGE", "") or "").strip()
         vol = _host_path_to_docker_volume(REPO_ROOT)

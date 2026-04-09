@@ -17,9 +17,9 @@ from app.services.sandbox_service import run_shell_sync
 
 logger = logging.getLogger(__name__)
 
-# 项目根目录（与 skill_loader 一致）
+# 工作区为 backend/（与 skill_loader、沙箱一致）
 _def_project_root: Path = getattr(settings, "PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent)
-REPO_ROOT: Path = _def_project_root.parent
+REPO_ROOT: Path = _def_project_root
 DEFAULT_WORKDIR = REPO_ROOT
 DEFAULT_TIMEOUT_SEC = int(getattr(settings, "BASH_TIMEOUT_SEC", 120))
 DEFAULT_MAX_OUTPUT_CHARS = int(getattr(settings, "BASH_MAX_OUTPUT_CHARS", 50000))
@@ -160,7 +160,7 @@ BASH_TOOL = {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "要执行的 shell 命令（当使用 approval_token 时可留空）"},
-                "workdir": {"type": "string", "description": "工作目录，须在项目根之下"},
+                "workdir": {"type": "string", "description": "工作目录，须在 backend 目录之下"},
                 "timeout": {"type": "integer", "description": "超时秒数，默认 120"},
                 "pty": {"type": "boolean", "description": "使用 PTY（仅 Unix，交互式 CLI 如 op signin）"},
                 "approval_token": {"type": "string", "description": "用户审批后获得的 approval_id，用于获取已执行命令的结果"},

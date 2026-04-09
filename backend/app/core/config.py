@@ -228,7 +228,7 @@ class Settings(BaseSettings):
     SANDBOX_DOCKER_NETWORK: str = ""  # 非空则传给 docker run --network（默认 bridge，留空不追加参数）
     SANDBOX_DOCKER_EXTRA_ARGS: str = ""  # 追加到 docker run，如 --memory=512m（shell 分词）
 
-    # 文档门户 REST（skills/confluence，见该目录 SKILL.md）；变量名沿用 CONFLUENCE_* 以兼容现有部署
+    # 文档门户 REST（backend/skills/confluence，见该目录 SKILL.md）；变量名沿用 CONFLUENCE_* 以兼容现有部署
     # 自建：BASE=站点根，用户名+密码；云租户：BASE+邮箱+API Token（按实际环境）
     CONFLUENCE_BASE_URL: str = ""  # 站点根，如 https://docs.example.com
     CONFLUENCE_CONTEXT_PATH: str = ""  # 若 REST 在 /confluence/rest/api 则填 /confluence；根路径部署留空

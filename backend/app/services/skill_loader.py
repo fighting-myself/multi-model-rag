@@ -12,10 +12,9 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 项目根目录（backend 的上一级）
-REPO_ROOT: Path = getattr(settings, "PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent).parent
-# OpenClaw 技能目录：skills/<name>/SKILL.md
-SKILLS_DIR: Path = REPO_ROOT / "skills"
+# 后端应用根（backend/），技能目录为 backend/skills/<name>/SKILL.md
+_BACKEND_ROOT: Path = getattr(settings, "PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent)
+SKILLS_DIR: Path = _BACKEND_ROOT / "skills"
 SKILL_MD = "SKILL.md"
 
 # skill_id：目录名即工具标识，须稳定可解析（便于意图识别与路由）

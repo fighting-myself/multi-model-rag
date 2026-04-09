@@ -21,8 +21,8 @@ from app.services.bash_tools import BASH_TOOL, run_bash_tool, is_bash_enabled
 
 logger = logging.getLogger(__name__)
 
-# 允许写入的目录：项目根目录下的 data（与 skills 同级的 data）
-STEWARD_DATA_DIR: Path = getattr(settings, "PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent).parent / "data"
+# 允许写入的目录：backend/data
+STEWARD_DATA_DIR: Path = getattr(settings, "PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent) / "data"
 
 # 当前请求的 browser/page/playwright，由 agent 在运行前清空、工具内设置
 # 仅在「浏览器线程」内被赋值与使用，主线程通过 run_in_browser_thread 提交协程
