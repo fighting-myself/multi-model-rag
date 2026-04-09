@@ -102,11 +102,13 @@ class ZillizVectorStore:
                 pass
             
             from pymilvus import MilvusClient
-            if not settings.ZILLIZ_URI or not settings.ZILLIZ_TOKEN:
-                raise ValueError("ZILLIZ_URI 和 ZILLIZ_TOKEN 必须在 .env 中配置")
+            if not settings.ZILLIZ_URI or not str(settings.ZILLIZ_URI).strip():
+                raise ValueError("ZILLIZ_URI 必须在环境变量中配置（自建 Milvus 示例：http://milvus:19530）")
+            # 自建 Milvus 未开启鉴权时 token 可为空；Zilliz Cloud 需填写 token
+            token = (settings.ZILLIZ_TOKEN or "").strip()
             self._client = MilvusClient(
-                uri=settings.ZILLIZ_URI,
-                token=settings.ZILLIZ_TOKEN,
+                uri=str(settings.ZILLIZ_URI).strip(),
+                token=token,
                 timeout=float(getattr(settings, "VECTOR_DB_TIMEOUT_SEC", 30.0)),
             )
         return self._client

@@ -311,6 +311,12 @@ async def ops_snapshot():
     return snapshot()
 
 
+@app.get("/live")
+async def live_probe():
+    """Kubernetes liveness：仅表示进程存活，不探测外部依赖。"""
+    return JSONResponse(content={"status": "ok"})
+
+
 @app.get("/health")
 async def health_check():
     """健康检查：返回各依赖连通状态"""
