@@ -13,6 +13,7 @@ from app.models.audit_log import AuditLog
 from app.models.mcp_server import McpServer
 from app.models.benchmark_dataset import BenchmarkDataset
 from app.models.external_connection import ExternalConnection
+from app.models.agent_tool import AgentTool
 
 __all__ = [
     "User",
@@ -31,4 +32,5 @@ __all__ = [
     "McpServer",
     "BenchmarkDataset",
     "ExternalConnection",
+    "AgentTool",
 ]

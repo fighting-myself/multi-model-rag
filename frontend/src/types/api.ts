@@ -394,3 +394,22 @@ export interface RAGMetricsPrecheckResponse {
   memory_context_disabled_for_eval: boolean
   warnings: string[]
 }
+
+export interface AgentToolItem {
+  id: number
+  name: string
+  code: string
+  description?: string
+  tool_type: string
+  parameters_schema?: Record<string, unknown> | null
+  config?: Record<string, unknown> | null
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface MultiAgentRunResponse {
+  answer: string
+  tools_used: string[]
+  trace: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
+}
