@@ -251,6 +251,12 @@ multi-model-rag/
   - 前端：`cd frontend && npm test`（若已配置测试脚本）。
 - **部署**：
   - 可通过 Docker / K8s 等方式部署（参考 `docs/05-部署方案.md` 与你当前的实际部署脚本）。
+  
+  容器部署：
+  1. 创建网络：docker network create rag-net
+  2. 启动前端：docker run -d --name rag-frontend --restart always --network rag-net -p 80:80 -v /etc/localtime:/etc/localtime:ro rag-frontend:v1
+  3. 启动后端：docker run -d --name backend --restart always --network rag-net -p 8000:8000 -v /etc/localtime:/etc/localtime:ro rag-backend:v1
+  
 
 ---
 
