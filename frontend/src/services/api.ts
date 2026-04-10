@@ -1,5 +1,20 @@
-import axios from 'axios'
+import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '../stores/authStore'
+
+/** 与下方响应拦截器一致：成功时 resolve 为 response.data，而非 AxiosResponse */
+export type ApiInstance = Omit<
+  AxiosInstance,
+  'request' | 'get' | 'delete' | 'head' | 'options' | 'post' | 'put' | 'patch'
+> & {
+  request<T = unknown>(config: AxiosRequestConfig): Promise<T>
+  get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T>
+  delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T>
+  head<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T>
+  options<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T>
+  post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>
+  put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>
+  patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>
+}
 
 /**
  * 开发时默认走 Vite 代理 `/api` -> 后端。
@@ -142,4 +157,4 @@ export async function uploadChatFile(file: File): Promise<{ upload_id: string; f
   return res.json()
 }
 
-export default api
+export default api as ApiInstance

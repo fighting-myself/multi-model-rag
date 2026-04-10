@@ -205,9 +205,16 @@ export default function ImageSearch() {
     try {
       const fd = new FormData()
       fd.append('file', file)
-      if (selectedKbId != null) fd.append('knowledge_base_id', String(selectedKbId))
-      fd.append('top_k', '24')
-      const res = await api.post<ImageSearchResponse>('/search/by-image/upload', fd)
+      const params: Record<string, number | number[]> = { top_k: 24 }
+      if (selectedKbIds.length === 1) {
+        params.knowledge_base_id = selectedKbIds[0]
+      } else if (selectedKbIds.length > 1) {
+        params.knowledge_base_ids = selectedKbIds
+      }
+      const res = await api.post<ImageSearchResponse>('/search/by-image/upload', fd, {
+        params,
+        paramsSerializer: { indexes: null },
+      })
       setResults(res.files || [])
       if (!(res.files?.length)) message.info('未找到相似图片')
     } catch (e: unknown) {
@@ -385,7 +392,13 @@ export default function ImageSearch() {
                                 type="link"
                                 size="small"
                                 icon={<EyeOutlined />}
-                                onClick={() => setSnippetModal({ visible: true, title: item.original_filename, snippet: item.snippet })}
+                                onClick={() =>
+                                  setSnippetModal({
+                                    visible: true,
+                                    title: item.original_filename,
+                                    snippet: item.snippet ?? '',
+                                  })
+                                }
                               >
                                 查看片段
                               </Button>,
