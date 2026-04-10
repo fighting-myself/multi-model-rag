@@ -18,3 +18,4 @@ backend/**/__pycache__/
 backend/.env
 frontend/.env
 frontend/.env.development
+backend/logs/app.log
