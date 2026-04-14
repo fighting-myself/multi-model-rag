@@ -263,8 +263,9 @@ multi-model-rag/
   容器部署（前端 + 后端 + MinIO，同一网络）：
   1. 创建网络：
      `docker network create rag-net`
-  2. 启动 MinIO（API:9000 / 控制台:9001）：
-     `docker run -d --name minio --restart always --network rag-net -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin123 -v minio-data:/data minio/minio server /data --console-address ":9001"`
+  2. 准备宿主机目录并启动 MinIO（API:9000 / 控制台:9001）：
+     - `mkdir -p /data/minio`
+     - `docker run -d --name minio --restart always --network rag-net -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin123 -v /data/minio:/data minio/minio server /data --console-address ":9001"`
   3. 登录 MinIO 控制台 `http://<你的IP>:9001`，创建 bucket：`rag-files`
   4. 后端配置（`backend/.env`）至少包含：
      - `MINIO_ENDPOINT=minio:9000`
