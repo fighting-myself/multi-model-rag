@@ -93,8 +93,12 @@ try:
     from mcp.client.stdio import StdioServerParameters
     try:
         from mcp.client.streamable_http import streamable_http_client
-    except ImportError:
-        streamable_http_client = None  # mcp 1.1+ 已移除，用 sse_client 替代
+    except ImportError as _sh_exc:
+        streamable_http_client = None  # mcp<1.15 无此模块；DashScope 等需 mcp>=1.15
+        logger.warning(
+            "mcp.client.streamable_http 导入失败，DashScope/streamable_http 端点将不可用: %s",
+            _sh_exc,
+        )
     try:
         from mcp.client.sse import sse_client as _sse_client
     except ImportError:

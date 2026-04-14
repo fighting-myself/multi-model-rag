@@ -1,10 +1,16 @@
 """
 应用配置：从环境变量读取配置
 """
+import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
+
+_settings_log = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -242,6 +248,44 @@ class Settings(BaseSettings):
     RATE_LIMIT_CONVERSATION_PER_DAY: int = 200  # 每日对话条数上限
     RATE_LIMIT_SEARCH_QPS: float = 10.0  # 检索 QPS 上限（每秒请求数）
     RATE_LIMIT_ENABLED: bool = True  # 是否启用限流
+
+    @model_validator(mode="after")
+    def normalize_minio_connection(self) -> "Settings":
+        """
+        MinIO 客户端误开 TLS 连明文 9000 时会出现 SSLError: record layer failure。
+        - 若 MINIO_ENDPOINT 带 http(s)://，则解析出 host:port，并以协议决定 MINIO_SECURE。
+        - 若 endpoint 为 host:9000（常见 Docker S3 API）且 MINIO_SECURE=True，则改为 False 并告警。
+        """
+        ep = (self.MINIO_ENDPOINT or "").strip()
+        if not ep:
+            return self
+
+        if ep.lower().startswith(("http://", "https://")):
+            u = urlparse(ep)
+            host = u.hostname or ""
+            if not host:
+                return self
+            port = u.port
+            if port is not None:
+                new_ep = f"{host}:{port}"
+            elif u.scheme == "https":
+                new_ep = f"{host}:443"
+            else:
+                new_ep = f"{host}:80"
+            secure = u.scheme == "https"
+            return self.model_copy(update={"MINIO_ENDPOINT": new_ep, "MINIO_SECURE": secure})
+
+        if self.MINIO_SECURE and "://" not in ep:
+            _host, _, port_s = ep.rpartition(":")
+            if port_s.isdigit() and int(port_s) == 9000:
+                _settings_log.warning(
+                    "MINIO_ENDPOINT=%s 且 MINIO_SECURE=True：默认 MinIO API 端口 9000 多为明文 HTTP，"
+                    "将自动使用 MINIO_SECURE=False。若你确在 9000 上启用了 TLS，请改用 https://主机:9000 形式的 MINIO_ENDPOINT。",
+                    ep,
+                )
+                return self.model_copy(update={"MINIO_SECURE": False})
+
+        return self
 
 
 # 创建全局配置实例
