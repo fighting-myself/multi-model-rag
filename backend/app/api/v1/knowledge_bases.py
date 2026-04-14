@@ -134,7 +134,10 @@ async def delete_knowledge_base(
 ):
     """删除知识库"""
     kb_service = KnowledgeBaseService(db)
-    await kb_service.delete_knowledge_base(kb_id, current_user.id)
+    try:
+        await kb_service.delete_knowledge_base(kb_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     await log_audit(db, current_user.id, "delete_kb", "knowledge_base", str(kb_id), None, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete, cache_service.key_kb_detail(kb_id))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_kb_list(current_user.id))

@@ -3,6 +3,7 @@
 """
 import hashlib
 import os
+import logging
 from typing import List, Optional
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ class FileService:
     
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.logger = logging.getLogger(__name__)
         self.minio_client = Minio(
             settings.MINIO_ENDPOINT,
             access_key=settings.MINIO_ACCESS_KEY,
@@ -100,6 +102,13 @@ class FileService:
                 length=len(content),
                 content_type=file.content_type or "application/octet-stream"
             )
+        except S3Error as e:
+            code = (getattr(e, "code", "") or "").strip()
+            if code == "AccessDenied":
+                raise ValueError("对象存储写入被拒绝（AccessDenied）：请检查 MINIO_ACCESS_KEY/MINIO_SECRET_KEY 与 bucket 写权限")
+            if code == "NoSuchBucket":
+                raise ValueError(f"对象存储 bucket 不存在：{settings.MINIO_BUCKET_NAME}")
+            raise ValueError(f"文件上传失败（S3Error:{code or 'Unknown'}）: {str(e)}")
         except Exception as e:
             raise ValueError(f"文件上传失败: {str(e)}")
         file_record = File(
@@ -138,8 +147,8 @@ class FileService:
                 length=len(content),
                 content_type=file.content_type or "application/octet-stream"
             )
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.warning("覆盖上传对象存储失败 storage_path=%s err=%s", existing.storage_path, e)
         existing.file_size = len(content)
         existing.chunk_count = 0
         existing.original_filename = file.filename

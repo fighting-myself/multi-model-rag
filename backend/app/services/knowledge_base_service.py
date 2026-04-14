@@ -10,6 +10,7 @@ from sqlalchemy import select, func, delete, or_
 from sqlalchemy.exc import OperationalError
 
 from app.models.knowledge_base import KnowledgeBase, KnowledgeBaseFile
+from app.models.benchmark_dataset import BenchmarkDataset
 from app.models.file import File
 from app.models.chunk import Chunk
 from app.schemas.knowledge_base import (
@@ -197,7 +198,18 @@ class KnowledgeBaseService:
         )
         await self.db.flush()
         
-        # 5. 删除知识库本身
+        # 5. 解绑评测数据集对知识库的外键引用，避免 1451 外键拦截
+        await self.db.execute(
+            # 保留评测数据集，仅将 knowledge_base_id 置空
+            # 这样用户历史评测集不会丢失
+            # SQLAlchemy Core update
+            BenchmarkDataset.__table__.update()
+            .where(BenchmarkDataset.knowledge_base_id == kb_id)
+            .values(knowledge_base_id=None)
+        )
+        await self.db.flush()
+
+        # 6. 删除知识库本身
         await self.db.delete(kb)
         await self.db.commit()
         

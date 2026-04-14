@@ -31,11 +31,16 @@ async def upload_file(
 ):
     """上传文件"""
     file_service = FileService(db)
-    file_record = await file_service.upload_file(
-        file=file,
-        user_id=current_user.id,
-        knowledge_base_id=knowledge_base_id
-    )
+    try:
+        file_record = await file_service.upload_file(
+            file=file,
+            user_id=current_user.id,
+            knowledge_base_id=knowledge_base_id
+        )
+    except ValueError as e:
+        msg = str(e)
+        status_code = 502 if "对象存储" in msg else 400
+        raise HTTPException(status_code=status_code, detail=msg)
     await log_audit(db, current_user.id, "upload_file", "file", str(file_record.id), {"filename": file_record.original_filename}, get_client_ip(request), getattr(request.state, "request_id", None), trace_id_from_request(request))
     await asyncio.to_thread(cache_service.delete_by_prefix, cache_service.prefix_user_file_list(current_user.id))
     await asyncio.to_thread(cache_service.delete, cache_service.key_dashboard_stats(current_user.id))
@@ -53,12 +58,17 @@ async def batch_upload_files(
 ):
     """批量上传文件"""
     file_service = FileService(db)
-    file_records = await file_service.batch_upload_files(
-        files=files,
-        user_id=current_user.id,
-        knowledge_base_id=knowledge_base_id,
-        on_duplicate=on_duplicate,
-    )
+    try:
+        file_records = await file_service.batch_upload_files(
+            files=files,
+            user_id=current_user.id,
+            knowledge_base_id=knowledge_base_id,
+            on_duplicate=on_duplicate,
+        )
+    except ValueError as e:
+        msg = str(e)
+        status_code = 502 if "对象存储" in msg else 400
+        raise HTTPException(status_code=status_code, detail=msg)
     ip = get_client_ip(request)
     for rec in file_records:
         await log_audit(db, current_user.id, "upload_file", "file", str(rec.id), {"filename": rec.original_filename}, ip, getattr(request.state, "request_id", None), trace_id_from_request(request))
