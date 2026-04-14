@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     --timeout 7200 \
     --retries 20
 
-# 构建期校验：DashScope 等需 mcp.client.streamable_http；若缺失说明依赖未装全或镜像过旧
+# 构建期校验：DashScope 等需 streamable_http_client（mcp>=1.25，1.15 仅有 streamablehttp_client）
 RUN python -c "from importlib.metadata import version as _v; print('mcp', _v('mcp')); from mcp.client.streamable_http import streamable_http_client; print('streamable_http_client ok')"
 
 # 复制代码

@@ -85,7 +85,7 @@ def _normalize_mcp_config(config: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         transport = "sse" if transport in ("http", "https") else transport
     return transport, config
 
-# 可选依赖：未安装 mcp 时仅做占位，不报错。mcp 1.1.x 移除了 streamable_http，阿里云/百炼等为 POST 协议会报 Content-Type 错误，需 mcp>=1.15 恢复 streamable_http_client
+# 可选依赖：未安装 mcp 时仅做占位，不报错。DashScope 等需 mcp.client.streamable_http.streamable_http_client（mcp>=1.25）
 try:
     import httpx
     from mcp import ClientSession
@@ -94,7 +94,7 @@ try:
     try:
         from mcp.client.streamable_http import streamable_http_client
     except ImportError as _sh_exc:
-        streamable_http_client = None  # mcp<1.15 无此模块；DashScope 等需 mcp>=1.15
+        streamable_http_client = None  # 旧版 mcp 无此符号；需 mcp>=1.25
         logger.warning(
             "mcp.client.streamable_http 导入失败，DashScope/streamable_http 端点将不可用: %s",
             _sh_exc,
@@ -332,7 +332,7 @@ def _session_for_server(transport_type: str, config: Dict[str, Any]):
                 timeout_sec = None
         # DashScope 等云 MCP 端点应优先使用 streamable_http（POST），避免误走 SSE(GET) 导致 Content-Type 错误
         prefer_streamable_http = _is_dashscope_mcp_url(url) or transport_type in ("streamable_http", "streamableHttp")
-        # mcp 1.15+ 提供 streamable_http_client；若缺失则无法正确访问 streamable_http 端点
+        # mcp>=1.25 提供 streamable_http_client；若缺失则无法正确访问 streamable_http 端点
         if streamable_http_client is not None and prefer_streamable_http:
             http_client = _create_http_client_with_content_type_fix(timeout_sec)
             if http_client is None and create_mcp_http_client:
@@ -344,7 +344,7 @@ def _session_for_server(transport_type: str, config: Dict[str, Any]):
             return streamable_http_client(url, http_client=http_client)
         if streamable_http_client is None and prefer_streamable_http:
             raise ValueError(
-                "当前 MCP SDK 不支持 streamable_http_client（请安装/升级 mcp>=1.15.0）。"
+                "当前 MCP SDK 无 streamable_http_client（请安装/升级 mcp>=1.25.0）。"
                 "DashScope MCP 端点需要 streamable_http 传输，不能使用 SSE。"
             )
         if transport_type in ("sse", "streamableHttp") and _sse_client is not None:
