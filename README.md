@@ -131,6 +131,8 @@ python -m venv venv
 # Windows: venv\Scripts\activate
 # macOS / Linux: source venv/bin/activate
 pip install -r requirements.txt
+# 若需测试与代码质量工具（pytest/black/flake8/mypy），改用：
+# pip install -r requirements-dev.txt
 
 # 开发模式启动
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
