@@ -21,12 +21,23 @@ ENV FORCE_CUDA=0
 # 复制依赖
 COPY requirements.txt .
 
-# 正常安装所有依赖（去掉 --no-deps！！！）
-RUN pip install --no-cache-dir -r requirements.txt \
-    -i https://mirrors.aliyun.com/pypi/simple/ \
-    --trusted-host mirrors.aliyun.com \
-    --timeout 7200 \
-    --retries 20
+# 大包与全量依赖分步安装，并提供镜像回退，降低 Broken pipe 失败概率
+RUN set -eux; \
+    install_with_fallback () { \
+      args="$1"; \
+      for index in "https://mirrors.aliyun.com/pypi/simple/" "https://pypi.org/simple"; do \
+        for attempt in 1 2 3; do \
+          echo "pip install attempt=${attempt} index=${index} args=${args}"; \
+          if pip install --no-cache-dir --progress-bar off ${args} -i "${index}" --trusted-host mirrors.aliyun.com --timeout 7200 --retries 20; then \
+            return 0; \
+          fi; \
+          sleep $((attempt * 5)); \
+        done; \
+      done; \
+      return 1; \
+    }; \
+    install_with_fallback "chromadb~=1.1.0 --only-binary=:all:"; \
+    install_with_fallback "-r requirements.txt --prefer-binary"
 
 # 构建期校验：DashScope 等需 streamable_http_client（mcp>=1.25，1.15 仅有 streamablehttp_client）
 RUN python -c "from importlib.metadata import version as _v; print('mcp', _v('mcp')); from mcp.client.streamable_http import streamable_http_client; print('streamable_http_client ok')"
