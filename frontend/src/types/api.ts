@@ -419,3 +419,20 @@ export interface SingleAgentRunRequest {
   query: string
   paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
 }
+
+export interface MultiAgentRunRequest {
+  query: string
+  scene: 'finance_research' | 'market_ops' | 'compliance_risk' | 'product_strategy'
+  finance_params?: {
+    symbol?: string
+    time_window?: string
+    risk_preference?: string
+  }
+}
+
+export interface MultiAgentRunResponse {
+  answer: string
+  scene: 'finance_research' | 'market_ops' | 'compliance_risk' | 'product_strategy'
+  framework: string
+  traces: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
+}

@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 import json as _json
 
 
@@ -46,5 +46,5 @@ class SingleAgentRunRequest(BaseModel):
 class SingleAgentRunResponse(BaseModel):
     answer: str
     paradigm: Literal["react", "plan_execute", "reflexion", "rewoo"] = "plan_execute"
-    tools_used: List[str] = []
-    trace: List[Dict[str, Any]] = []
+    tools_used: List[str] = Field(default_factory=list)
+    trace: List[Dict[str, Any]] = Field(default_factory=list)

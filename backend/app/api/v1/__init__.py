@@ -2,7 +2,7 @@
 API v1 路由
 """
 from fastapi import APIRouter
-from app.api.v1 import auth, files, knowledge_bases, chat, billing, dashboard, search, tasks, audit, mcp, steward, computer_steward, bash_approval, evaluation, external_connections, single_agent
+from app.api.v1 import auth, files, knowledge_bases, chat, billing, dashboard, search, tasks, audit, mcp, steward, computer_steward, bash_approval, evaluation, external_connections, single_agent, multi_agent
 
 api_router = APIRouter()
 
@@ -23,3 +23,4 @@ api_router.include_router(bash_approval.router, prefix="/bash", tags=["Bash 审�
 api_router.include_router(evaluation.router, prefix="/evaluation", tags=["召回率评测"])
 api_router.include_router(external_connections.router, prefix="/external-connections", tags=["外接平台连接"])
 api_router.include_router(single_agent.router, prefix="/single-agent", tags=["单智能体"])
+api_router.include_router(multi_agent.router, prefix="/multi-agent", tags=["多智能体"])

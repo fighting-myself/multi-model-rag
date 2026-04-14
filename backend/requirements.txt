@@ -52,6 +52,8 @@ langchain-text-splitters==1.0.0
 langchain-classic==1.0.0
 # LangGraph（需与 langchain 1.0.0 对齐：<1.1.0）
 langgraph==1.0.0
+# CrewAI（多智能体协作）
+crewai
 # LlamaIndex（Advanced RAG：查询变换、多步检索等，与 LangChain 配合）
 # 已锁定为可互相兼容的组合：openai-like 0.7.0 依赖 llms-openai>=0.6,<0.7
 llama-index-core==0.14.5

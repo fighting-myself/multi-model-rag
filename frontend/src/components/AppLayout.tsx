@@ -46,7 +46,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   const selectedMenuKey = location.pathname.startsWith('/single-agent')
     ? '/single-agent/plan_execute'
-    : location.pathname
+    : (location.pathname.startsWith('/multi-agent') ? '/multi-agent' : location.pathname)
 
   const menuItems = [
     { key: '/', icon: <HomeOutlined />, label: '首页' },
@@ -63,6 +63,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
     { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
     { key: '/single-agent/plan_execute', icon: <RobotOutlined />, label: '单智能体' },
+    { key: '/multi-agent', icon: <RobotOutlined />, label: '多智能体' },
   ]
 
   const userMenuItems = [
