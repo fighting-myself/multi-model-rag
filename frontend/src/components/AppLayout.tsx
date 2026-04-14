@@ -44,8 +44,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { user, logout } = useAuthStore()
   const { theme, toggleTheme } = useThemeStore()
 
-  const selectedMenuKey = location.pathname.startsWith('/multi-agent')
-    ? '/multi-agent/plan_execute'
+  const selectedMenuKey = location.pathname.startsWith('/single-agent')
+    ? '/single-agent/plan_execute'
     : location.pathname
 
   const menuItems = [
@@ -62,7 +62,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/computer-steward', icon: <DesktopOutlined />, label: '电脑管家' },
     { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
     { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
-    { key: '/multi-agent/plan_execute', icon: <RobotOutlined />, label: '单智能体' },
+    { key: '/single-agent/plan_execute', icon: <RobotOutlined />, label: '单智能体' },
   ]
 
   const userMenuItems = [

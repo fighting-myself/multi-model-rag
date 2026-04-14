@@ -1,5 +1,5 @@
 """
-多智能体服务：支持 4 种 Agent 范式
+单智能体服务：支持 4 种 Agent 范式
 - react
 - plan_execute
 - reflexion
@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Dict, List, Literal, Set, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -24,7 +23,7 @@ from app.services.agent_tool_registry_service import list_agent_tools, run_regis
 AgentParadigm = Literal["react", "plan_execute", "reflexion", "rewoo"]
 
 
-class MultiAgentState(TypedDict, total=False):
+class SingleAgentState(TypedDict, total=False):
     query: str
     perception: Dict[str, Any]
     plan: Dict[str, Any]
@@ -35,7 +34,7 @@ class MultiAgentState(TypedDict, total=False):
     tools_used: List[str]
 
 
-class MultiAgentService:
+class SingleAgentService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -95,7 +94,7 @@ class MultiAgentService:
     async def _perceive(self, query: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         llm = self._make_llm(temperature=0.1, max_tokens=600)
         prompt = (
-            "你是多智能体系统的感知代理。请识别用户意图、任务类型、是否需要外部工具、风险点。"
+            "你是单智能体系统的感知代理。请识别用户意图、任务类型、是否需要外部工具、风险点。"
             '只输出 JSON，结构: {"intent":"", "task_type":"", "need_tools":true/false, "risk_notes":["..."]}'
         )
         res = await llm.ainvoke([SystemMessage(content=prompt), HumanMessage(content=query)])

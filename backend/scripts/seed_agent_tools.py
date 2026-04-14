@@ -1,5 +1,5 @@
 """
-向数据库写入默认多智能体工具
+向数据库写入默认单智能体工具
 用法:
   python scripts/seed_agent_tools.py
 """

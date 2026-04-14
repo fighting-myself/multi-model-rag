@@ -4,27 +4,27 @@ import { ApiOutlined, ToolOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import api from '../services/api'
-import type { AgentToolItem, MultiAgentRunRequest, MultiAgentRunResponse } from '../types/api'
+import type { AgentToolItem, SingleAgentRunRequest, SingleAgentRunResponse } from '../types/api'
 
 const { TextArea } = Input
 
-export default function MultiAgent() {
+export default function SingleAgent() {
   const navigate = useNavigate()
   const { paradigm: paradigmFromRoute } = useParams()
   const normalizedParadigm = useMemo(() => {
     const p = (paradigmFromRoute || '').toLowerCase()
     if (p === 'react' || p === 'plan_execute' || p === 'reflexion' || p === 'rewoo') {
-      return p as MultiAgentRunRequest['paradigm']
+      return p as SingleAgentRunRequest['paradigm']
     }
-    return 'plan_execute' as MultiAgentRunRequest['paradigm']
+    return 'plan_execute' as SingleAgentRunRequest['paradigm']
   }, [paradigmFromRoute])
 
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [tools, setTools] = useState<AgentToolItem[]>([])
-  const [result, setResult] = useState<MultiAgentRunResponse | null>(null)
-  const [paradigm, setParadigm] = useState<MultiAgentRunRequest['paradigm']>(normalizedParadigm)
+  const [result, setResult] = useState<SingleAgentRunResponse | null>(null)
+  const [paradigm, setParadigm] = useState<SingleAgentRunRequest['paradigm']>(normalizedParadigm)
 
   useEffect(() => {
     setParadigm(normalizedParadigm)
@@ -32,7 +32,7 @@ export default function MultiAgent() {
 
   const loadTools = async () => {
     try {
-      const data = await api.get<AgentToolItem[]>('/multi-agent/tools')
+      const data = await api.get<AgentToolItem[]>('/single-agent/tools')
       setTools(data || [])
     } catch (e: unknown) {
       message.error((e as Error)?.message || '加载工具失败')
@@ -46,7 +46,7 @@ export default function MultiAgent() {
   const seedTools = async () => {
     setSeeding(true)
     try {
-      await api.post('/multi-agent/tools/seed')
+      await api.post('/single-agent/tools/seed')
       message.success('已写入默认工具')
       await loadTools()
     } catch (e: unknown) {
@@ -65,7 +65,7 @@ export default function MultiAgent() {
     setLoading(true)
     setResult(null)
     try {
-      const data = await api.post<MultiAgentRunResponse>('/multi-agent/run', { query: q, paradigm }, { timeout: 180000 })
+      const data = await api.post<SingleAgentRunResponse>('/single-agent/run', { query: q, paradigm }, { timeout: 180000 })
       setResult(data)
     } catch (e: unknown) {
       message.error((e as Error)?.message || '执行失败')
@@ -80,7 +80,7 @@ export default function MultiAgent() {
         title={
           <Space>
             <ApiOutlined />
-            <span>多智能体</span>
+            <span>单智能体</span>
           </Space>
         }
         extra={
@@ -102,9 +102,9 @@ export default function MultiAgent() {
           <Segmented
             value={paradigm}
             onChange={(v) => {
-              const next = String(v) as MultiAgentRunRequest['paradigm']
+              const next = String(v) as SingleAgentRunRequest['paradigm']
               setParadigm(next)
-              navigate(`/multi-agent/${next}`)
+              navigate(`/single-agent/${next}`)
             }}
             options={[
               { label: 'ReAct', value: 'react' },
@@ -120,7 +120,7 @@ export default function MultiAgent() {
             placeholder="例如：先查今天上海天气，再结合最近公开新闻判断对出行和消费股可能有什么影响"
           />
           <Button type="primary" onClick={run} loading={loading}>
-            运行多智能体
+            运行单智能体
           </Button>
         </Space>
       </Card>
@@ -149,7 +149,7 @@ export default function MultiAgent() {
 
       {loading && (
         <Card style={{ marginTop: 16 }}>
-          <Spin tip="多智能体执行中..." />
+          <Spin tip="单智能体执行中..." />
         </Card>
       )}
 

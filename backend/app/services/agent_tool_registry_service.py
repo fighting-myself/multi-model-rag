@@ -1,5 +1,5 @@
 """
-多智能体工具注册与执行服务
+单智能体工具注册与执行服务
 """
 from __future__ import annotations
 

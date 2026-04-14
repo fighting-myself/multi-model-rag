@@ -15,7 +15,7 @@ import Steward from './pages/Steward'
 import ComputerSteward from './pages/ComputerSteward'
 import RecallEvaluation from './pages/RecallEvaluation'
 import AdvancedRAGMetrics from './pages/AdvancedRAGMetrics'
-import MultiAgent from './pages/MultiAgent'
+import SingleAgent from './pages/SingleAgent'
 import ProtectedShell from './components/ProtectedShell'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import PageTitle from './components/PageTitle'
@@ -99,18 +99,18 @@ export default function App() {
             }
           />
           <Route
-            path="/multi-agent"
+            path="/single-agent"
             element={
               <ErrorBoundary>
-                <MultiAgent />
+                <SingleAgent />
               </ErrorBoundary>
             }
           />
           <Route
-            path="/multi-agent/:paradigm"
+            path="/single-agent/:paradigm"
             element={
               <ErrorBoundary>
-                <MultiAgent />
+                <SingleAgent />
               </ErrorBoundary>
             }
           />

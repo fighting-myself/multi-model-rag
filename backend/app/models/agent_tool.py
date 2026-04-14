@@ -1,5 +1,5 @@
 """
-多智能体工具注册表
+单智能体工具注册表（为当前单智能体范式提供可调用工具）
 """
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text

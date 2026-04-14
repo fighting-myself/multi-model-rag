@@ -408,14 +408,14 @@ export interface AgentToolItem {
   updated_at: string
 }
 
-export interface MultiAgentRunResponse {
+export interface SingleAgentRunResponse {
   paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
   answer: string
   tools_used: string[]
   trace: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
 }
 
-export interface MultiAgentRunRequest {
+export interface SingleAgentRunRequest {
   query: string
   paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
 }

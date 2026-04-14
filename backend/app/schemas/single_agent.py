@@ -1,5 +1,5 @@
 """
-多智能体相关 Schema
+单智能体相关 Schema
 """
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
@@ -37,13 +37,13 @@ class AgentToolResponse(BaseModel):
         from_attributes = True
 
 
-class MultiAgentRunRequest(BaseModel):
+class SingleAgentRunRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
     paradigm: Literal["react", "plan_execute", "reflexion", "rewoo"] = "plan_execute"
 
 
-class MultiAgentRunResponse(BaseModel):
+class SingleAgentRunResponse(BaseModel):
     answer: str
     paradigm: Literal["react", "plan_execute", "reflexion", "rewoo"] = "plan_execute"
     tools_used: List[str] = []

@@ -1,5 +1,5 @@
 """
-多智能体 API
+单智能体 API
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,15 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.auth import get_current_active_user
 from app.core.database import get_db
 from app.schemas.auth import UserResponse
-from app.schemas.multi_agent import AgentToolResponse, MultiAgentRunRequest, MultiAgentRunResponse
+from app.schemas.single_agent import AgentToolResponse, SingleAgentRunRequest, SingleAgentRunResponse
 from app.services.agent_tool_registry_service import list_agent_tools, seed_default_agent_tools
-from app.services.multi_agent_service import MultiAgentService
+from app.services.single_agent_service import SingleAgentService
 
 router = APIRouter()
 
 
 @router.get("/tools", response_model=list[AgentToolResponse])
-async def get_multi_agent_tools(
+async def get_single_agent_tools(
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -25,7 +25,7 @@ async def get_multi_agent_tools(
 
 
 @router.post("/tools/seed")
-async def seed_multi_agent_tools(
+async def seed_single_agent_tools(
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -34,9 +34,9 @@ async def seed_multi_agent_tools(
     return {"message": "ok", "changed": changed}
 
 
-@router.post("/run", response_model=MultiAgentRunResponse)
-async def run_multi_agent(
-    body: MultiAgentRunRequest,
+@router.post("/run", response_model=SingleAgentRunResponse)
+async def run_single_agent(
+    body: SingleAgentRunRequest,
     current_user: UserResponse = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -44,6 +44,6 @@ async def run_multi_agent(
     query = (body.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query 不能为空")
-    svc = MultiAgentService(db)
+    svc = SingleAgentService(db)
     out = await svc.run(query, body.paradigm)
-    return MultiAgentRunResponse(paradigm=body.paradigm, **out)
+    return SingleAgentRunResponse(paradigm=body.paradigm, **out)
