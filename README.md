@@ -138,6 +138,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+> 说明：`backend/Dockerfile` 使用 `constraints.txt` 与 BuildKit pip 缓存来降低依赖回溯与重复下载耗时。
+
 - 后端默认监听 `http://localhost:8000`
 - OpenAPI 文档：`http://localhost:8000/docs`
 - 部分功能（如浏览器助手、电脑管家）需要额外依赖：
@@ -250,7 +252,7 @@ multi-model-rag/
   docker build -t rag-frontend:v1 .
 - 后端镜像：
   cd multi-model-rag/backend
-  docker build -t rag-backend:v1 .
+  DOCKER_BUILDKIT=1 docker build -t rag-backend:v1 .
 
 ## 开发、测试与部署
 

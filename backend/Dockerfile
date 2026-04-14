@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -21,15 +22,16 @@ ENV FORCE_CUDA=0
 
 # 复制依赖
 COPY requirements.txt .
+COPY constraints.txt .
 
 # 大包与全量依赖分步安装，并提供镜像回退，降低 Broken pipe 失败概率
-RUN set -eux; \
+RUN --mount=type=cache,target=/root/.cache/pip set -eux; \
     install_with_fallback () { \
       args="$1"; \
       for index in "https://mirrors.aliyun.com/pypi/simple/" "https://pypi.org/simple"; do \
         for attempt in 1 2 3; do \
           echo "pip install attempt=${attempt} index=${index} args=${args}"; \
-          if PIP_INDEX_URL="${index}" pip install --no-cache-dir --progress-bar off ${args} --trusted-host mirrors.aliyun.com --timeout 7200 --retries 20; then \
+          if PIP_INDEX_URL="${index}" pip install --progress-bar off --disable-pip-version-check -c constraints.txt ${args} --trusted-host mirrors.aliyun.com --timeout 7200 --retries 20; then \
             return 0; \
           fi; \
           sleep $((attempt * 5)); \

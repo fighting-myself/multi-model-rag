@@ -1,0 +1,4 @@
+# 降低 pip resolver 回溯开销（结合 requirements.txt 使用）
+tqdm==4.66.6
+Pillow==12.2.0
+pypdfium2==5.7.0
