@@ -260,10 +260,30 @@ multi-model-rag/
 - **部署**：
   - 可通过 Docker / K8s 等方式部署（参考 `docs/05-部署方案.md` 与你当前的实际部署脚本）。
   
-  容器部署：
-  1. 创建网络：docker network create rag-net
-  2. 启动前端：docker run -d --name rag-frontend --restart always --network rag-net -p 80:80 -v /etc/localtime:/etc/localtime:ro rag-frontend:v1
-  3. 启动后端：docker run -d --name backend --restart always --network rag-net -p 8000:8000 -v /etc/localtime:/etc/localtime:ro rag-backend:v1
+  容器部署（前端 + 后端 + MinIO，同一网络）：
+  1. 创建网络：
+     `docker network create rag-net`
+  2. 启动 MinIO（API:9000 / 控制台:9001）：
+     `docker run -d --name minio --restart always --network rag-net -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin123 -v minio-data:/data minio/minio server /data --console-address ":9001"`
+  3. 登录 MinIO 控制台 `http://<你的IP>:9001`，创建 bucket：`rag-files`
+  4. 后端配置（`backend/.env`）至少包含：
+     - `MINIO_ENDPOINT=minio:9000`
+     - `MINIO_ACCESS_KEY=minioadmin`
+     - `MINIO_SECRET_KEY=minioadmin123`
+     - `MINIO_SECURE=false`
+     - `MINIO_BUCKET_NAME=rag-files`
+  5. 启动后端：
+     `docker run -d --name backend --restart always --network rag-net -p 8000:8000 -v /etc/localtime:/etc/localtime:ro --env-file backend/.env rag-backend:v1`
+  6. 启动前端：
+     `docker run -d --name rag-frontend --restart always --network rag-net -p 80:80 -v /etc/localtime:/etc/localtime:ro rag-frontend:v1`
+  7. 验证：
+     - 前端：`curl -I http://127.0.0.1`
+     - 后端：`curl -I http://127.0.0.1:8000/live`
+     - MinIO：`curl -I http://127.0.0.1:9000/minio/health/live`
+  
+  说明：
+  - 若后端不在容器中运行（本地 Python），`MINIO_ENDPOINT` 请改为 `127.0.0.1:9000`。
+  - 生产环境建议改掉默认 `minioadmin/minioadmin123`。
   
 
 ---
