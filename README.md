@@ -138,7 +138,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-> 说明：`backend/Dockerfile` 使用 `constraints.txt` 与 BuildKit pip 缓存来降低依赖回溯与重复下载耗时。
+> 说明：`backend/Dockerfile` 使用 `constraints.txt`、BuildKit pip 缓存，以及 `requirements-heavy.txt`（重依赖独立缓存层）来降低依赖回溯与重复下载耗时。
 
 - 后端默认监听 `http://localhost:8000`
 - OpenAPI 文档：`http://localhost:8000/docs`

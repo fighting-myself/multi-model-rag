@@ -1,4 +1,5 @@
 -r requirements.txt
+-r requirements-heavy.txt
 
 # 测试
 pytest==7.4.3

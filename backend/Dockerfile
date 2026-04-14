@@ -22,6 +22,7 @@ ENV FORCE_CUDA=0
 
 # 复制依赖
 COPY requirements.txt .
+COPY requirements-heavy.txt .
 COPY constraints.txt .
 
 # 大包与全量依赖分步安装，并提供镜像回退，降低 Broken pipe 失败概率
@@ -39,7 +40,7 @@ RUN --mount=type=cache,target=/root/.cache/pip set -eux; \
       done; \
       return 1; \
     }; \
-    install_with_fallback "chromadb~=1.1.0 --only-binary=:all:"; \
+    install_with_fallback "-r requirements-heavy.txt --prefer-binary"; \
     install_with_fallback "-r requirements.txt --prefer-binary"
 
 # 构建期校验：DashScope 等需 streamable_http_client（mcp>=1.25，1.15 仅有 streamablehttp_client）
