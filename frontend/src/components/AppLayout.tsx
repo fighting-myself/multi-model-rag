@@ -44,6 +44,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { user, logout } = useAuthStore()
   const { theme, toggleTheme } = useThemeStore()
 
+  const selectedMenuKey = location.pathname.startsWith('/multi-agent')
+    ? '/multi-agent/plan_execute'
+    : location.pathname
+
   const menuItems = [
     { key: '/', icon: <HomeOutlined />, label: '首页' },
     { key: '/files', icon: <FileOutlined />, label: '文件管理' },
@@ -58,17 +62,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/computer-steward', icon: <DesktopOutlined />, label: '电脑管家' },
     { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
     { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
-    {
-      key: '/multi-agent',
-      icon: <RobotOutlined />,
-      label: '多智能体',
-      children: [
-        { key: '/multi-agent/react', label: 'ReAct' },
-        { key: '/multi-agent/plan_execute', label: 'Plan & Execute' },
-        { key: '/multi-agent/reflexion', label: 'Reflexion' },
-        { key: '/multi-agent/rewoo', label: 'ReWOO' },
-      ],
-    },
+    { key: '/multi-agent/plan_execute', icon: <RobotOutlined />, label: '单智能体' },
   ]
 
   const userMenuItems = [
@@ -135,7 +129,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         <div style={{ flex: 1, overflow: 'auto', paddingBottom: 56 }}>
           <Menu
             mode="inline"
-            selectedKeys={[location.pathname]}
+            selectedKeys={[selectedMenuKey]}
             items={menuItems}
             onClick={handleMenuClick}
             style={{
@@ -143,7 +137,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               background: 'transparent',
               border: 'none',
             }}
-            theme="dark"
+            theme={theme === 'dark' ? 'dark' : 'light'}
             inlineCollapsed={siderCollapsed}
             className="tech-sider-menu"
           />
