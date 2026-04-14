@@ -8,9 +8,23 @@ from urllib.parse import urlparse
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import Any, List
 
 _settings_log = logging.getLogger(__name__)
+
+
+def _minio_endpoint_port(endpoint_no_scheme: str) -> int | None:
+    """从 host:port 或 [ipv6]:port 解析端口。"""
+    s = (endpoint_no_scheme or "").strip()
+    if not s or "://" in s:
+        return None
+    if s.startswith("[") and "]:" in s:
+        _, _, rest = s.rpartition("]:")
+        return int(rest) if rest.isdigit() else None
+    if ":" not in s:
+        return None
+    _, _, port_s = s.rpartition(":")
+    return int(port_s) if port_s.isdigit() else None
 
 
 class Settings(BaseSettings):
@@ -253,12 +267,15 @@ class Settings(BaseSettings):
     def normalize_minio_connection(self) -> "Settings":
         """
         MinIO 客户端误开 TLS 连明文 9000 时会出现 SSLError: record layer failure。
-        - 若 MINIO_ENDPOINT 带 http(s)://，则解析出 host:port，并以协议决定 MINIO_SECURE。
-        - 若 endpoint 为 host:9000（常见 Docker S3 API）且 MINIO_SECURE=True，则改为 False 并告警。
+        - 若 MINIO_ENDPOINT 带 http(s)://，先解析为 host:port，并以协议得到 tentative MINIO_SECURE。
+        - 若解析后端口为 9000（常见 Docker S3 API）且仍为 TLS，则强制 MINIO_SECURE=False（含误写 https://minio:9000）。
         """
         ep = (self.MINIO_ENDPOINT or "").strip()
         if not ep:
             return self
+
+        new_ep = ep
+        secure = self.MINIO_SECURE
 
         if ep.lower().startswith(("http://", "https://")):
             u = urlparse(ep)
@@ -273,18 +290,23 @@ class Settings(BaseSettings):
             else:
                 new_ep = f"{host}:80"
             secure = u.scheme == "https"
-            return self.model_copy(update={"MINIO_ENDPOINT": new_ep, "MINIO_SECURE": secure})
 
-        if self.MINIO_SECURE and "://" not in ep:
-            _host, _, port_s = ep.rpartition(":")
-            if port_s.isdigit() and int(port_s) == 9000:
-                _settings_log.warning(
-                    "MINIO_ENDPOINT=%s 且 MINIO_SECURE=True：默认 MinIO API 端口 9000 多为明文 HTTP，"
-                    "将自动使用 MINIO_SECURE=False。若你确在 9000 上启用了 TLS，请改用 https://主机:9000 形式的 MINIO_ENDPOINT。",
-                    ep,
-                )
-                return self.model_copy(update={"MINIO_SECURE": False})
+        port_num = _minio_endpoint_port(new_ep)
+        if port_num == 9000 and secure:
+            _settings_log.warning(
+                "MinIO S3 API 端口 9000 一般为明文 HTTP；已自动设置 MINIO_SECURE=False（endpoint=%s）。"
+                "若确在 9000 上使用 TLS，请改为反代 HTTPS 端口并更新 MINIO_ENDPOINT。",
+                new_ep,
+            )
+            secure = False
 
+        updates: dict[str, Any] = {}
+        if new_ep != ep:
+            updates["MINIO_ENDPOINT"] = new_ep
+        if secure != self.MINIO_SECURE:
+            updates["MINIO_SECURE"] = secure
+        if updates:
+            return self.model_copy(update=updates)
         return self
 
 
