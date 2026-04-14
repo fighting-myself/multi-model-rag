@@ -1,18 +1,34 @@
-import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Input, List, Space, Spin, Tag, message } from 'antd'
+import { useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Card, Input, List, Segmented, Space, Spin, Tag, message } from 'antd'
 import { ApiOutlined, ToolOutlined } from '@ant-design/icons'
+import { useNavigate, useParams } from 'react-router-dom'
 
 import api from '../services/api'
-import type { AgentToolItem, MultiAgentRunResponse } from '../types/api'
+import type { AgentToolItem, MultiAgentRunRequest, MultiAgentRunResponse } from '../types/api'
 
 const { TextArea } = Input
 
 export default function MultiAgent() {
+  const navigate = useNavigate()
+  const { paradigm: paradigmFromRoute } = useParams()
+  const normalizedParadigm = useMemo(() => {
+    const p = (paradigmFromRoute || '').toLowerCase()
+    if (p === 'react' || p === 'plan_execute' || p === 'reflexion' || p === 'rewoo') {
+      return p as MultiAgentRunRequest['paradigm']
+    }
+    return 'plan_execute' as MultiAgentRunRequest['paradigm']
+  }, [paradigmFromRoute])
+
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [tools, setTools] = useState<AgentToolItem[]>([])
   const [result, setResult] = useState<MultiAgentRunResponse | null>(null)
+  const [paradigm, setParadigm] = useState<MultiAgentRunRequest['paradigm']>(normalizedParadigm)
+
+  useEffect(() => {
+    setParadigm(normalizedParadigm)
+  }, [normalizedParadigm])
 
   const loadTools = async () => {
     try {
@@ -49,7 +65,7 @@ export default function MultiAgent() {
     setLoading(true)
     setResult(null)
     try {
-      const data = await api.post<MultiAgentRunResponse>('/multi-agent/run', { query: q }, { timeout: 180000 })
+      const data = await api.post<MultiAgentRunResponse>('/multi-agent/run', { query: q, paradigm }, { timeout: 180000 })
       setResult(data)
     } catch (e: unknown) {
       message.error((e as Error)?.message || '执行失败')
@@ -80,8 +96,22 @@ export default function MultiAgent() {
           <Alert
             type="info"
             showIcon
-            message="执行链路：感知 -> 编排 -> 执行(工具调用) -> 综合"
+            message="支持 4 种范式：ReAct / Plan & Execute / Reflexion / ReWOO"
             description="工具来自数据库，可通过“初始化默认工具”快速写入网页搜索、天气、金融行情。"
+          />
+          <Segmented
+            value={paradigm}
+            onChange={(v) => {
+              const next = String(v) as MultiAgentRunRequest['paradigm']
+              setParadigm(next)
+              navigate(`/multi-agent/${next}`)
+            }}
+            options={[
+              { label: 'ReAct', value: 'react' },
+              { label: 'Plan & Execute', value: 'plan_execute' },
+              { label: 'Reflexion', value: 'reflexion' },
+              { label: 'ReWOO', value: 'rewoo' },
+            ]}
           />
           <TextArea
             rows={4}
@@ -125,6 +155,10 @@ export default function MultiAgent() {
 
       {!loading && result && (
         <Card title="执行结果" style={{ marginTop: 16 }}>
+          <div style={{ marginBottom: 8 }}>
+            <strong>范式：</strong>
+            <Tag color="blue" style={{ marginLeft: 8 }}>{result.paradigm}</Tag>
+          </div>
           <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{result.answer}</div>
           {result.tools_used?.length > 0 && (
             <div style={{ marginTop: 12 }}>

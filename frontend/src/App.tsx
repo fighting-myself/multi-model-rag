@@ -106,6 +106,14 @@ export default function App() {
               </ErrorBoundary>
             }
           />
+          <Route
+            path="/multi-agent/:paradigm"
+            element={
+              <ErrorBoundary>
+                <MultiAgent />
+              </ErrorBoundary>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

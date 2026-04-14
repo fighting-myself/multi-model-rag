@@ -409,7 +409,13 @@ export interface AgentToolItem {
 }
 
 export interface MultiAgentRunResponse {
+  paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
   answer: string
   tools_used: string[]
   trace: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
+}
+
+export interface MultiAgentRunRequest {
+  query: string
+  paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
 }

@@ -2,7 +2,7 @@
 多智能体相关 Schema
 """
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, field_validator
 import json as _json
@@ -40,9 +40,11 @@ class AgentToolResponse(BaseModel):
 class MultiAgentRunRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
+    paradigm: Literal["react", "plan_execute", "reflexion", "rewoo"] = "plan_execute"
 
 
 class MultiAgentRunResponse(BaseModel):
     answer: str
+    paradigm: Literal["react", "plan_execute", "reflexion", "rewoo"] = "plan_execute"
     tools_used: List[str] = []
     trace: List[Dict[str, Any]] = []

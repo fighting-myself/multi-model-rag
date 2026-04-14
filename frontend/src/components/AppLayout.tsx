@@ -58,7 +58,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { key: '/computer-steward', icon: <DesktopOutlined />, label: '电脑管家' },
     { key: '/audit-log', icon: <AuditOutlined />, label: '审计日志' },
     { key: '/billing', icon: <DollarOutlined />, label: '计费中心' },
-    { key: '/multi-agent', icon: <RobotOutlined />, label: '多智能体' },
+    {
+      key: '/multi-agent',
+      icon: <RobotOutlined />,
+      label: '多智能体',
+      children: [
+        { key: '/multi-agent/react', label: 'ReAct' },
+        { key: '/multi-agent/plan_execute', label: 'Plan & Execute' },
+        { key: '/multi-agent/reflexion', label: 'Reflexion' },
+        { key: '/multi-agent/rewoo', label: 'ReWOO' },
+      ],
+    },
   ]
 
   const userMenuItems = [

@@ -45,5 +45,5 @@ async def run_multi_agent(
     if not query:
         raise HTTPException(status_code=400, detail="query 不能为空")
     svc = MultiAgentService(db)
-    out = await svc.run(query)
-    return MultiAgentRunResponse(**out)
+    out = await svc.run(query, body.paradigm)
+    return MultiAgentRunResponse(paradigm=body.paradigm, **out)
