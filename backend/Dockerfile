@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 先升级 pip（必须）
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
 
-# 强制 CPU 版 Torch（关键）
+# 强制 CPU 版 Torch（仅作为额外源，不参与普通包主索引解析）
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ENV PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
 ENV FORCE_CUDA=0
 
@@ -28,7 +29,7 @@ RUN set -eux; \
       for index in "https://mirrors.aliyun.com/pypi/simple/" "https://pypi.org/simple"; do \
         for attempt in 1 2 3; do \
           echo "pip install attempt=${attempt} index=${index} args=${args}"; \
-          if pip install --no-cache-dir --progress-bar off ${args} -i "${index}" --trusted-host mirrors.aliyun.com --timeout 7200 --retries 20; then \
+          if PIP_INDEX_URL="${index}" pip install --no-cache-dir --progress-bar off ${args} --trusted-host mirrors.aliyun.com --timeout 7200 --retries 20; then \
             return 0; \
           fi; \
           sleep $((attempt * 5)); \
