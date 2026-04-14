@@ -91,6 +91,45 @@ class SingleAgentService:
             args_schema=args_schema,
         )
 
+    @staticmethod
+    def _tool_schema_dict(tool: AgentTool) -> Dict[str, Any]:
+        if not tool.parameters_schema:
+            return {}
+        if isinstance(tool.parameters_schema, dict):
+            return tool.parameters_schema
+        if isinstance(tool.parameters_schema, str):
+            try:
+                data = json.loads(tool.parameters_schema)
+                return data if isinstance(data, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    @staticmethod
+    def _normalize_tool_arguments(tool: AgentTool, args: Any) -> Dict[str, Any]:
+        raw = args if isinstance(args, dict) else {}
+        out: Dict[str, Any] = dict(raw)
+        schema = SingleAgentService._tool_schema_dict(tool)
+        props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+        keys = set(props.keys())
+
+        # 常见别名兜底：ReWOO 计划经常产出 location，而天气工具要求 city。
+        alias_pairs = [
+            ("location", "city"),
+            ("q", "query"),
+            ("keyword", "query"),
+            ("code", "symbol"),
+            ("ticker", "symbol"),
+        ]
+        for src, dst in alias_pairs:
+            if dst in keys and src in out and dst not in out:
+                out[dst] = out[src]
+
+        # 仅保留 schema 中定义过的参数，避免传入无效字段干扰工具。
+        if keys:
+            out = {k: v for k, v in out.items() if k in keys}
+        return out
+
     async def _perceive(self, query: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         llm = self._make_llm(temperature=0.1, max_tokens=600)
         prompt = (
@@ -299,12 +338,23 @@ class SingleAgentService:
     async def _run_rewoo(self, query: str, tools: List[AgentTool], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         llm = self._make_llm(temperature=0.2, max_tokens=900)
         tool_codes = [t.code for t in tools]
+        tool_specs: List[Dict[str, Any]] = []
+        for t in tools:
+            tool_specs.append(
+                {
+                    "tool": t.code,
+                    "description": t.description or t.name,
+                    "parameters_schema": self._tool_schema_dict(t),
+                }
+            )
         planner_prompt = (
             "你是 ReWOO Planner。先产出无观察计划，步骤可为 tool 或 llm。"
             "变量命名 E1/E2...，后续步骤可引用 #E1。"
             '只输出 JSON：{"steps":[{"id":"E1","kind":"tool|llm","tool":"",'
             '"args":{},"instruction":""}],"final_instruction":"..."}'
-            f"\n可用工具: {tool_codes}"
+            "\n工具步骤必须严格使用工具 parameters_schema 里的参数名，禁止臆造字段。"
+            f"\n可用工具编码: {tool_codes}"
+            f"\n工具定义: {json.dumps(tool_specs, ensure_ascii=False)}"
         )
         plan_res = await llm.ainvoke([SystemMessage(content=planner_prompt), HumanMessage(content=query)])
         plan = self._parse_json(getattr(plan_res, "content", "") or "", {"steps": [], "final_instruction": "请给出最终答案"})
@@ -326,10 +376,20 @@ class SingleAgentService:
                 if tool_name not in tool_map:
                     out = f"工具不存在或未启用: {tool_name}"
                 else:
-                    out = await run_registered_tool(tool_map[tool_name], args if isinstance(args, dict) else {})
+                    normalized_args = self._normalize_tool_arguments(tool_map[tool_name], args)
+                    out = await run_registered_tool(tool_map[tool_name], normalized_args)
                     used.add(tool_name)
                 vars_map[sid] = out[:5000]
-                notes.append({"step": sid, "kind": "tool", "tool": tool_name, "args": args, "result": out[:3000]})
+                notes.append(
+                    {
+                        "step": sid,
+                        "kind": "tool",
+                        "tool": tool_name,
+                        "args": args,
+                        "normalized_args": normalized_args if tool_name in tool_map else {},
+                        "result": out[:3000],
+                    }
+                )
                 trace.append({"step": "execute", "title": f"{sid} 工具执行", "text": out[:200]})
             else:
                 instruction = self._resolve_refs_in_text(str(step.get("instruction") or ""), vars_map)

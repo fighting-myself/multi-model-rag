@@ -7,6 +7,7 @@ import json
 from typing import Any, Dict, List
 
 import httpx
+from pydantic import Field, ValidationError, create_model
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,6 +65,59 @@ DEFAULT_AGENT_TOOLS: List[Dict[str, Any]] = [
 ]
 
 
+def _tool_schema_dict(tool: AgentTool) -> Dict[str, Any]:
+    if not tool.parameters_schema:
+        return {}
+    if isinstance(tool.parameters_schema, dict):
+        return tool.parameters_schema
+    if isinstance(tool.parameters_schema, str):
+        try:
+            data = json.loads(tool.parameters_schema)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _validate_tool_arguments(tool: AgentTool, arguments: Dict[str, Any]) -> tuple[bool, Dict[str, Any], str]:
+    """
+    使用工具 parameters_schema 做统一参数校验与轻量归一化。
+    返回: (ok, normalized_args, err_msg)
+    """
+    schema = _tool_schema_dict(tool)
+    properties = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+    required = set(schema.get("required") or []) if isinstance(schema, dict) else set()
+    if not properties:
+        return True, dict(arguments or {}), ""
+
+    fields: Dict[str, Any] = {}
+    for key, conf in properties.items():
+        typ = (conf.get("type") or "string") if isinstance(conf, dict) else "string"
+        desc = (conf.get("description") or "") if isinstance(conf, dict) else ""
+        if typ == "integer":
+            py_t = int
+        elif typ == "number":
+            py_t = float
+        elif typ == "boolean":
+            py_t = bool
+        else:
+            py_t = str
+        default = ... if key in required else None
+        anno = py_t if key in required else (py_t | None)
+        fields[key] = (anno, Field(default=default, description=desc))
+
+    Model = create_model(f"ToolArgs_{tool.code}", **fields)
+    safe_args = {k: v for k, v in (arguments or {}).items() if k in properties}
+    try:
+        parsed = Model.model_validate(safe_args)
+    except ValidationError as e:
+        first = e.errors()[0] if e.errors() else {}
+        loc = ".".join(str(x) for x in (first.get("loc") or [])) or "args"
+        msg = first.get("msg") or str(e)
+        return False, {}, f"参数校验失败({loc}): {msg}"
+    return True, parsed.model_dump(exclude_none=True), ""
+
+
 async def list_agent_tools(db: AsyncSession, enabled_only: bool = True) -> List[AgentTool]:
     stmt = select(AgentTool).order_by(AgentTool.id.asc())
     if enabled_only:
@@ -105,6 +159,11 @@ async def seed_default_agent_tools(db: AsyncSession) -> int:
 
 
 async def run_registered_tool(tool: AgentTool, arguments: Dict[str, Any]) -> str:
+    ok, normalized_args, err = _validate_tool_arguments(tool, arguments)
+    if not ok:
+        return f"错误: {err}"
+    arguments = normalized_args
+
     if tool.code == "web_search":
         query = str(arguments.get("query") or "").strip()
         if not query:
