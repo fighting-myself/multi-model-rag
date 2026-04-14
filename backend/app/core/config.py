@@ -27,6 +27,57 @@ def _minio_endpoint_port(endpoint_no_scheme: str) -> int | None:
     return int(port_s) if port_s.isdigit() else None
 
 
+def _minio_host_colon_port(host: str, port: int) -> str:
+    """组成 MinIO endpoint；IPv6 必须为 [addr]:port。"""
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
+def normalize_minio_endpoint_and_secure(
+    endpoint: str | None,
+    secure: bool,
+    *,
+    warn_plaintext_9000: bool = False,
+) -> tuple[str, bool]:
+    """
+    得到 MinIO Python SDK 所需的 endpoint（无 scheme）与 secure。
+    Docker 默认 S3 API 为 9000 明文；误配 https 或 MINIO_SECURE=true 会导致 SSL record layer failure。
+    """
+    ep = (endpoint or "").strip()
+    if not ep:
+        return ep, secure
+
+    new_ep = ep
+    new_secure = secure
+
+    if ep.lower().startswith(("http://", "https://")):
+        u = urlparse(ep)
+        host = u.hostname or ""
+        if not host:
+            return ep, secure
+        port = u.port
+        if port is not None:
+            new_ep = _minio_host_colon_port(host, port)
+        elif u.scheme == "https":
+            new_ep = _minio_host_colon_port(host, 443)
+        else:
+            new_ep = _minio_host_colon_port(host, 80)
+        new_secure = u.scheme == "https"
+
+    port_num = _minio_endpoint_port(new_ep)
+    if port_num == 9000 and new_secure:
+        if warn_plaintext_9000:
+            _settings_log.warning(
+                "MinIO S3 API 端口 9000 一般为明文 HTTP；已自动使用 secure=False（endpoint=%s）。"
+                "若确为 TLS，请使用反代 HTTPS 端口并更新 MINIO_ENDPOINT。",
+                new_ep,
+            )
+        new_secure = False
+
+    return new_ep, new_secure
+
+
 class Settings(BaseSettings):
     """应用配置类"""
     
@@ -266,45 +317,21 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def normalize_minio_connection(self) -> "Settings":
         """
-        MinIO 客户端误开 TLS 连明文 9000 时会出现 SSLError: record layer failure。
-        - 若 MINIO_ENDPOINT 带 http(s)://，先解析为 host:port，并以协议得到 tentative MINIO_SECURE。
-        - 若解析后端口为 9000（常见 Docker S3 API）且仍为 TLS，则强制 MINIO_SECURE=False（含误写 https://minio:9000）。
+        启动时写入归一化后的 MINIO_*（与 normalize_minio_endpoint_and_secure 一致）。
         """
         ep = (self.MINIO_ENDPOINT or "").strip()
         if not ep:
             return self
-
-        new_ep = ep
-        secure = self.MINIO_SECURE
-
-        if ep.lower().startswith(("http://", "https://")):
-            u = urlparse(ep)
-            host = u.hostname or ""
-            if not host:
-                return self
-            port = u.port
-            if port is not None:
-                new_ep = f"{host}:{port}"
-            elif u.scheme == "https":
-                new_ep = f"{host}:443"
-            else:
-                new_ep = f"{host}:80"
-            secure = u.scheme == "https"
-
-        port_num = _minio_endpoint_port(new_ep)
-        if port_num == 9000 and secure:
-            _settings_log.warning(
-                "MinIO S3 API 端口 9000 一般为明文 HTTP；已自动设置 MINIO_SECURE=False（endpoint=%s）。"
-                "若确在 9000 上使用 TLS，请改为反代 HTTPS 端口并更新 MINIO_ENDPOINT。",
-                new_ep,
-            )
-            secure = False
-
+        new_ep, new_sec = normalize_minio_endpoint_and_secure(
+            self.MINIO_ENDPOINT,
+            self.MINIO_SECURE,
+            warn_plaintext_9000=True,
+        )
         updates: dict[str, Any] = {}
         if new_ep != ep:
             updates["MINIO_ENDPOINT"] = new_ep
-        if secure != self.MINIO_SECURE:
-            updates["MINIO_SECURE"] = secure
+        if new_sec != self.MINIO_SECURE:
+            updates["MINIO_SECURE"] = new_sec
         if updates:
             return self.model_copy(update=updates)
         return self
@@ -312,3 +339,12 @@ class Settings(BaseSettings):
 
 # 创建全局配置实例
 settings = Settings()
+
+
+def minio_client_connect() -> tuple[str, bool]:
+    """创建 Minio(...) 时使用的 endpoint 与 secure（运行时再算一遍，与 Settings 归一化一致）。"""
+    return normalize_minio_endpoint_and_secure(
+        settings.MINIO_ENDPOINT,
+        settings.MINIO_SECURE,
+        warn_plaintext_9000=False,
+    )

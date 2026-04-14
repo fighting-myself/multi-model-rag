@@ -11,7 +11,7 @@ from sqlalchemy import select, func, delete
 from minio import Minio
 from minio.error import S3Error
 
-from app.core.config import settings
+from app.core.config import minio_client_connect, settings
 from app.models.file import File, FileStatus
 from app.models.chunk import Chunk
 from app.models.knowledge_base import KnowledgeBaseFile
@@ -30,11 +30,12 @@ class FileService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.logger = logging.getLogger(__name__)
+        minio_ep, minio_secure = minio_client_connect()
         self.minio_client = Minio(
-            settings.MINIO_ENDPOINT,
+            minio_ep,
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
-            secure=settings.MINIO_SECURE
+            secure=minio_secure,
         )
         # 确保bucket存在
         try:

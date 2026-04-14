@@ -4,7 +4,7 @@
 import logging
 from typing import Tuple, Any
 
-from app.core.config import settings
+from app.core.config import minio_client_connect, settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +61,12 @@ def check_minio() -> Tuple[bool, str]:
     try:
         from minio import Minio
         from minio.error import S3Error
+        minio_ep, minio_secure = minio_client_connect()
         client = Minio(
-            settings.MINIO_ENDPOINT,
+            minio_ep,
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
-            secure=settings.MINIO_SECURE,
+            secure=minio_secure,
         )
         client.bucket_exists(settings.MINIO_BUCKET_NAME)
         return True, "ok"
