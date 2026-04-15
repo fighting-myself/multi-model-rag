@@ -3,8 +3,8 @@ import { Alert, Button, Card, Input, List, Segmented, Space, Spin, Tag, message 
 import { ApiOutlined, ToolOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 
-import api from '../services/api'
-import type { AgentToolItem, SingleAgentRunRequest, SingleAgentRunResponse } from '../types/api'
+import api, { consumeSingleAgentRunStream } from '../services/api'
+import type { AgentToolItem, SingleAgentRunRequest, SingleAgentSsePayload } from '../types/api'
 
 const { TextArea } = Input
 
@@ -23,7 +23,8 @@ export default function SingleAgent() {
   const [loading, setLoading] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [tools, setTools] = useState<AgentToolItem[]>([])
-  const [result, setResult] = useState<SingleAgentRunResponse | null>(null)
+  const [result, setResult] = useState<Extract<SingleAgentSsePayload, { type: 'done' }> | null>(null)
+  const [liveTrace, setLiveTrace] = useState<Array<{ step?: string; title?: string; text?: string; data?: unknown }>>([])
   const [paradigm, setParadigm] = useState<SingleAgentRunRequest['paradigm']>(normalizedParadigm)
 
   useEffect(() => {
@@ -64,9 +65,27 @@ export default function SingleAgent() {
     }
     setLoading(true)
     setResult(null)
+    setLiveTrace([])
     try {
-      const data = await api.post<SingleAgentRunResponse>('/single-agent/run', { query: q, paradigm }, { timeout: 180000 })
-      setResult(data)
+      await consumeSingleAgentRunStream(
+        { query: q, paradigm },
+        {
+          onEvent: (evt) => {
+            if (evt.type === 'trace') {
+              setLiveTrace((prev) => [...prev, evt.item])
+              return
+            }
+            if (evt.type === 'done') {
+              setResult(evt)
+              setLiveTrace(evt.trace || [])
+              return
+            }
+            if (evt.type === 'error') {
+              message.error(evt.detail || '执行失败')
+            }
+          },
+        }
+      )
     } catch (e: unknown) {
       message.error((e as Error)?.message || '执行失败')
     } finally {
@@ -153,6 +172,29 @@ export default function SingleAgent() {
         </Card>
       )}
 
+      {(loading || liveTrace.length > 0) && (
+        <Card title="思考区" style={{ marginTop: 16 }}>
+          {loading && liveTrace.length === 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <Spin size="small" /> <span style={{ marginLeft: 8 }}>正在生成思考步骤...</span>
+            </div>
+          )}
+          <List
+            bordered
+            dataSource={liveTrace}
+            locale={{ emptyText: loading ? '等待步骤...' : '暂无思考步骤' }}
+            renderItem={(t) => (
+              <List.Item>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{t.title || t.step || '步骤'}</div>
+                  <div style={{ whiteSpace: 'pre-wrap', color: 'var(--app-text-secondary)' }}>{t.text || ''}</div>
+                </div>
+              </List.Item>
+            )}
+          />
+        </Card>
+      )}
+
       {!loading && result && (
         <Card title="执行结果" style={{ marginTop: 16 }}>
           <div style={{ marginBottom: 8 }}>
@@ -168,24 +210,6 @@ export default function SingleAgent() {
                   <Tag key={x}>{x}</Tag>
                 ))}
               </Space>
-            </div>
-          )}
-          {result.trace?.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <strong>执行轨迹</strong>
-              <List
-                style={{ marginTop: 8 }}
-                bordered
-                dataSource={result.trace}
-                renderItem={(t) => (
-                  <List.Item>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{t.title || t.step || '步骤'}</div>
-                      <div style={{ whiteSpace: 'pre-wrap', color: 'var(--app-text-secondary)' }}>{t.text || ''}</div>
-                    </div>
-                  </List.Item>
-                )}
-              />
             </div>
           )}
         </Card>

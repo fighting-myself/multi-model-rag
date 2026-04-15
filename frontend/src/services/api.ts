@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '../stores/authStore'
-import type { MultiAgentRunRequest, MultiAgentSsePayload } from '../types/api'
+import type { MultiAgentRunRequest, MultiAgentSsePayload, SingleAgentRunRequest, SingleAgentSsePayload } from '../types/api'
 
 /** 与下方响应拦截器一致：成功时 resolve 为 response.data，而非 AxiosResponse */
 export type ApiInstance = Omit<
@@ -175,6 +175,41 @@ export async function consumeMultiAgentRunStream(
       let evt: MultiAgentSsePayload
       try {
         evt = JSON.parse(json) as MultiAgentSsePayload
+      } catch {
+        continue
+      }
+      options.onEvent(evt)
+    }
+  }
+}
+
+/**
+ * 单智能体 SSE：解析 `data: {...}\n\n`，按事件顺序回调。
+ */
+export async function consumeSingleAgentRunStream(
+  payload: SingleAgentRunRequest,
+  options: { signal?: AbortSignal; onEvent: (e: SingleAgentSsePayload) => void }
+): Promise<void> {
+  const { reader } = await streamPost('/single-agent/run/stream', payload, {
+    signal: options.signal,
+    headers: { Accept: 'text/event-stream' },
+  })
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const parts = buf.split(/\r?\n\r?\n/)
+    buf = parts.pop() ?? ''
+    for (const block of parts) {
+      const line = block.split(/\r?\n/).find((l) => l.startsWith('data:'))
+      if (!line) continue
+      const json = line.replace(/^data:\s?/, '').trim()
+      if (!json) continue
+      let evt: SingleAgentSsePayload
+      try {
+        evt = JSON.parse(json) as SingleAgentSsePayload
       } catch {
         continue
       }

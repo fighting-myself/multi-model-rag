@@ -408,17 +408,21 @@ export interface AgentToolItem {
   updated_at: string
 }
 
-export interface SingleAgentRunResponse {
-  paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
-  answer: string
-  tools_used: string[]
-  trace: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
-}
-
 export interface SingleAgentRunRequest {
   query: string
   paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
 }
+
+export type SingleAgentSsePayload =
+  | { type: 'trace'; item: { step?: string; title?: string; text?: string; data?: unknown } }
+  | {
+      type: 'done'
+      answer: string
+      paradigm: 'react' | 'plan_execute' | 'reflexion' | 'rewoo'
+      tools_used: string[]
+      trace: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
+    }
+  | { type: 'error'; detail: string }
 
 export interface MultiAgentRunRequest {
   query: string

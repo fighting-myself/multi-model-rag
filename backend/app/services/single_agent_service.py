@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Literal, Set, TypedDict
+from collections.abc import AsyncIterator, Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
@@ -56,6 +57,19 @@ class SingleAgentState(TypedDict, total=False):
 
 
 class SingleAgentService:
+    @staticmethod
+    def _append_trace(
+        trace: List[Dict[str, Any]],
+        item: Dict[str, Any],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> None:
+        trace.append(item)
+        if on_trace is not None:
+            try:
+                on_trace(item)
+            except Exception:
+                logger.exception("single-agent trace callback failed")
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -175,7 +189,12 @@ class SingleAgentService:
             out = {k: v for k, v in out.items() if k in keys}
         return out
 
-    async def _perceive(self, query: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _perceive(
+        self,
+        query: str,
+        trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> Dict[str, Any]:
         llm = self._make_llm(temperature=0.1, max_tokens=600)
         res = await self._ainvoke_with_retry(
             llm,
@@ -183,10 +202,20 @@ class SingleAgentService:
             stage="perceive",
         )
         perception = self._parse_json(getattr(res, "content", "") or "", {"intent": "general", "need_tools": True})
-        trace.append({"step": "perceive", "title": "感知", "text": f"识别意图: {perception.get('intent', 'general')}"})
+        self._append_trace(
+            trace,
+            {"step": "perceive", "title": "感知", "text": f"识别意图: {perception.get('intent', 'general')}"},
+            on_trace,
+        )
         return perception
 
-    async def _plan(self, query: str, perception: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _plan(
+        self,
+        query: str,
+        perception: Dict[str, Any],
+        trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> Dict[str, Any]:
         llm = self._make_llm(temperature=0.2, max_tokens=700)
         res = await self._ainvoke_with_retry(
             llm,
@@ -197,7 +226,11 @@ class SingleAgentService:
             stage="plan",
         )
         plan = self._parse_json(getattr(res, "content", "") or "", {"strategy": "direct", "steps": ["直接回答"]})
-        trace.append({"step": "plan", "title": "编排", "text": "\n".join(plan.get("steps") or [])})
+        self._append_trace(
+            trace,
+            {"step": "plan", "title": "编排", "text": "\n".join(plan.get("steps") or [])},
+            on_trace,
+        )
         return plan
 
     async def _react_execute(
@@ -209,6 +242,7 @@ class SingleAgentService:
         plan: Dict[str, Any] | None = None,
         extra_instruction: str = "",
         trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
         max_rounds: int = 4,
     ) -> tuple[str, List[Dict[str, Any]], List[str]]:
         lc_tools = [self._build_lc_tool(x) for x in tools]
@@ -248,7 +282,11 @@ class SingleAgentService:
                     result = await self._run_tool_with_retry(picked, args)
                     used.add(name)
                 notes.append({"tool": name, "args": args, "result": result[:3000]})
-                trace.append({"step": "execute", "title": f"执行工具: {name}", "text": result[:200]})
+                self._append_trace(
+                    trace,
+                    {"step": "execute", "title": f"执行工具: {name}", "text": result[:200]},
+                    on_trace,
+                )
                 messages.append(ToolMessage(content=result, tool_call_id=tc.get("id") or "tool_call"))
 
         if not draft_answer:
@@ -262,6 +300,7 @@ class SingleAgentService:
         draft: str,
         notes: List[Dict[str, Any]],
         trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
     ) -> str:
         llm = self._make_llm(temperature=0.1, max_tokens=1200)
         res = await self._ainvoke_with_retry(
@@ -279,7 +318,7 @@ class SingleAgentService:
             stage="summarize",
         )
         answer = (getattr(res, "content", "") or "").strip() or draft
-        trace.append({"step": "summarize", "title": "综合", "text": "已生成最终回答"})
+        self._append_trace(trace, {"step": "summarize", "title": "综合", "text": "已生成最终回答"}, on_trace)
         return answer
 
     async def _reflect(self, query: str, draft: str, notes: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -319,42 +358,64 @@ class SingleAgentService:
             return {k: self._resolve_refs(v, vars_map) for k, v in data.items()}
         return data
 
-    async def _run_react(self, query: str, tools: List[AgentTool], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-        draft, notes, used = await self._react_execute(query=query, tools=tools, trace=trace)
-        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace)
+    async def _run_react(
+        self,
+        query: str,
+        tools: List[AgentTool],
+        trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> Dict[str, Any]:
+        draft, notes, used = await self._react_execute(query=query, tools=tools, trace=trace, on_trace=on_trace)
+        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace, on_trace=on_trace)
         return {"answer": answer, "tools_used": used, "trace": trace}
 
-    async def _run_plan_execute(self, query: str, tools: List[AgentTool], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-        perception = await self._perceive(query, trace)
-        plan = await self._plan(query, perception, trace)
+    async def _run_plan_execute(
+        self,
+        query: str,
+        tools: List[AgentTool],
+        trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> Dict[str, Any]:
+        perception = await self._perceive(query, trace, on_trace)
+        plan = await self._plan(query, perception, trace, on_trace)
         draft, notes, used = await self._react_execute(
             query=query,
             tools=tools,
             perception=perception,
             plan=plan,
             trace=trace,
+            on_trace=on_trace,
         )
-        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace)
+        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace, on_trace=on_trace)
         return {"answer": answer, "tools_used": used, "trace": trace}
 
-    async def _run_reflexion(self, query: str, tools: List[AgentTool], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-        perception = await self._perceive(query, trace)
-        plan = await self._plan(query, perception, trace)
+    async def _run_reflexion(
+        self,
+        query: str,
+        tools: List[AgentTool],
+        trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> Dict[str, Any]:
+        perception = await self._perceive(query, trace, on_trace)
+        plan = await self._plan(query, perception, trace, on_trace)
         draft, notes, used = await self._react_execute(
             query=query,
             tools=tools,
             perception=perception,
             plan=plan,
             trace=trace,
+            on_trace=on_trace,
         )
         reflection = await self._reflect(query, draft, notes)
-        trace.append(
+        self._append_trace(
+            trace,
             {
                 "step": "reflect",
                 "title": "反思",
                 "text": "; ".join(reflection.get("issues") or []) or "无需重试",
                 "data": reflection,
-            }
+            },
+            on_trace,
         )
         if reflection.get("need_retry"):
             draft2, notes2, used2 = await self._react_execute(
@@ -364,15 +425,22 @@ class SingleAgentService:
                 plan=plan,
                 extra_instruction=str(reflection.get("improvement_plan") or ""),
                 trace=trace,
+                on_trace=on_trace,
                 max_rounds=3,
             )
             draft = draft2
             notes.extend(notes2)
             used = sorted(set(used) | set(used2))
-        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace)
+        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace, on_trace=on_trace)
         return {"answer": answer, "tools_used": used, "trace": trace}
 
-    async def _run_rewoo(self, query: str, tools: List[AgentTool], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _run_rewoo(
+        self,
+        query: str,
+        tools: List[AgentTool],
+        trace: List[Dict[str, Any]],
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> Dict[str, Any]:
         llm = self._make_llm(temperature=0.2, max_tokens=900)
         tool_codes = [t.code for t in tools]
         tool_specs: List[Dict[str, Any]] = []
@@ -395,7 +463,11 @@ class SingleAgentService:
             stage="rewoo_plan",
         )
         plan = self._parse_json(getattr(plan_res, "content", "") or "", {"steps": [], "final_instruction": "请给出最终答案"})
-        trace.append({"step": "plan", "title": "ReWOO 规划", "text": json.dumps(plan, ensure_ascii=False)[:600]})
+        self._append_trace(
+            trace,
+            {"step": "plan", "title": "ReWOO 规划", "text": json.dumps(plan, ensure_ascii=False)[:600]},
+            on_trace,
+        )
 
         vars_map: Dict[str, str] = {}
         notes: List[Dict[str, Any]] = []
@@ -427,7 +499,7 @@ class SingleAgentService:
                         "result": out[:3000],
                     }
                 )
-                trace.append({"step": "execute", "title": f"{sid} 工具执行", "text": out[:200]})
+                self._append_trace(trace, {"step": "execute", "title": f"{sid} 工具执行", "text": out[:200]}, on_trace)
             else:
                 instruction = self._resolve_refs_in_text(str(step.get("instruction") or ""), vars_map)
                 llm_out = await self._ainvoke_with_retry(
@@ -438,7 +510,7 @@ class SingleAgentService:
                 out = (getattr(llm_out, "content", "") or "").strip()
                 vars_map[sid] = out
                 notes.append({"step": sid, "kind": "llm", "instruction": instruction, "result": out[:3000]})
-                trace.append({"step": "execute", "title": f"{sid} 子任务", "text": out[:200]})
+                self._append_trace(trace, {"step": "execute", "title": f"{sid} 子任务", "text": out[:200]}, on_trace)
 
         final_instruction = self._resolve_refs_in_text(str(plan.get("final_instruction") or "请给出最终答案"), vars_map)
         final_draft = await self._ainvoke_with_retry(
@@ -450,23 +522,29 @@ class SingleAgentService:
             stage="rewoo_solver",
         )
         draft = (getattr(final_draft, "content", "") or "").strip() or "未生成有效结论"
-        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace)
+        answer = await self._summarize(query=query, draft=draft, notes=notes, trace=trace, on_trace=on_trace)
         return {"answer": answer, "tools_used": sorted(used), "trace": trace}
 
-    async def run(self, query: str, paradigm: AgentParadigm = "plan_execute") -> Dict[str, Any]:
+    async def _execute(
+        self,
+        query: str,
+        paradigm: AgentParadigm = "plan_execute",
+        on_trace: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> Dict[str, Any]:
         logger.info("single-agent run start paradigm=%s", paradigm)
-        trace: List[Dict[str, Any]] = [{"step": "mode", "title": "范式", "text": paradigm}]
+        trace: List[Dict[str, Any]] = []
+        self._append_trace(trace, {"step": "mode", "title": "范式", "text": paradigm}, on_trace)
         tools = await list_agent_tools(self.db, enabled_only=True)
         mode = (paradigm or "plan_execute").strip().lower()
         try:
             if mode == "react":
-                out = await self._run_react(query, tools, trace)
+                out = await self._run_react(query, tools, trace, on_trace)
             elif mode == "reflexion":
-                out = await self._run_reflexion(query, tools, trace)
+                out = await self._run_reflexion(query, tools, trace, on_trace)
             elif mode == "rewoo":
-                out = await self._run_rewoo(query, tools, trace)
+                out = await self._run_rewoo(query, tools, trace, on_trace)
             else:
-                out = await self._run_plan_execute(query, tools, trace)
+                out = await self._run_plan_execute(query, tools, trace, on_trace)
             logger.info("single-agent run done paradigm=%s tools_used=%s", paradigm, len(out.get("tools_used") or []))
             return out
         except SingleAgentExecutionError:
@@ -474,3 +552,45 @@ class SingleAgentService:
         except Exception as e:
             logger.exception("single-agent unexpected error paradigm=%s", paradigm)
             raise SingleAgentExecutionError(f"单智能体执行失败: {e}") from e
+
+    async def run_stream_events(
+        self,
+        query: str,
+        paradigm: AgentParadigm = "plan_execute",
+    ) -> AsyncIterator[Dict[str, Any]]:
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue[Any] = asyncio.Queue()
+        holder: Dict[str, Any] = {}
+
+        def emit_trace_item(item: Dict[str, Any]) -> None:
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "trace", "item": item})
+
+        async def worker() -> None:
+            try:
+                holder["result"] = await self._execute(query=query, paradigm=paradigm, on_trace=emit_trace_item)
+            except Exception as e:
+                holder["exc"] = e
+            finally:
+                await q.put(None)
+
+        task = asyncio.create_task(worker())
+        while True:
+            msg = await q.get()
+            if msg is None:
+                break
+            yield msg
+        await task
+
+        exc = holder.get("exc")
+        if exc is not None:
+            yield {"type": "error", "detail": str(exc)}
+            return
+
+        result = holder.get("result") or {}
+        yield {
+            "type": "done",
+            "answer": str(result.get("answer") or "").strip(),
+            "paradigm": paradigm,
+            "tools_used": result.get("tools_used") or [],
+            "trace": result.get("trace") or [],
+        }
