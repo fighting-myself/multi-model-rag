@@ -39,8 +39,8 @@ ENV_OPENAI_API_BASE = "OPENAI_API_BASE"
 ENV_DASHSCOPE_API_KEY = "DASHSCOPE_API_KEY"
 ENV_DASHSCOPE_API_BASE = "DASHSCOPE_API_BASE"
 
-# LiteLLM provider 前缀（DashScope: https://docs.litellm.ai/docs/providers/dashscope）
-LITELLM_PROVIDER_DASHSCOPE = "dashscope"
+# LiteLLM provider 前缀。百炼 compatible-mode 为 OpenAI 兼容：CrewAI 经 LiteLLM 时用 openai/ + base_url（见 CrewAiLlmFactory）。
+LITELLM_PROVIDER_DASHSCOPE = "dashscope"  # 保留：文档/未来直连 DashScope 非兼容端点等
 LITELLM_PROVIDER_OPENAI = "openai"
 
 # DashScope / 百炼兼容端点识别（依据 OPENAI_BASE_URL）

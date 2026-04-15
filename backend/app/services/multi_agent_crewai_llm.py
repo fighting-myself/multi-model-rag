@@ -17,7 +17,6 @@ from app.core.constants import (
     ENV_OPENAI_API_BASE,
     ENV_OPENAI_API_KEY,
     ENV_OPENAI_BASE_URL,
-    LITELLM_PROVIDER_DASHSCOPE,
     LITELLM_PROVIDER_OPENAI,
     URL_SUBSTRING_ALIYUNCS,
     URL_SUBSTRING_COMPATIBLE_MODE,
@@ -33,7 +32,10 @@ logger = logging.getLogger(__name__)
 class CrewAiLlmFactory:
     """
     根据应用配置解析 LiteLLM 模型串、密钥与 base_url，并同步子进程可见的环境变量。
-    DashScope 约定见：https://docs.litellm.ai/docs/providers/dashscope
+
+    百炼 ``compatible-mode/v1`` 为 OpenAI 兼容协议：CrewAI 经 LiteLLM 调用时须使用
+    ``openai/<模型 id>`` + ``base_url`` 指向 DashScope（与 ``ChatOpenAI`` 一致）。
+    部分 LiteLLM 版本未注册 ``dashscope/`` 提供方，使用 ``dashscope/qwen-...`` 会报 Provider NOT provided。
     """
 
     def __init__(self, app_settings: Settings | None = None) -> None:
@@ -77,20 +79,17 @@ class CrewAiLlmFactory:
 
     def litellm_model_id(self) -> str:
         """CrewAI -> LiteLLM 所需的 provider/model。"""
+        if self.is_dashscope_route():
+            return f"{LITELLM_PROVIDER_OPENAI}/{self.bare_model_id()}"
+
         raw = (self._s.LLM_MODEL or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID).strip() or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID
         if "/" in raw:
             provider, name = raw.split("/", 1)
             provider_l = provider.strip().lower()
             name = name.strip()
-            if self.is_dashscope_route():
-                if provider_l in (LITELLM_PROVIDER_DASHSCOPE, LITELLM_PROVIDER_OPENAI):
-                    return f"{LITELLM_PROVIDER_DASHSCOPE}/{name}"
-                return raw
-            if provider_l in (LITELLM_PROVIDER_DASHSCOPE, LITELLM_PROVIDER_OPENAI):
+            if provider_l in ("dashscope", LITELLM_PROVIDER_OPENAI):
                 return f"{provider_l}/{name}"
             return raw
-        if self.is_dashscope_route():
-            return f"{LITELLM_PROVIDER_DASHSCOPE}/{raw}"
         return f"{LITELLM_PROVIDER_OPENAI}/{raw}"
 
     def api_key_for_crew(self) -> str:
