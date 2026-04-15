@@ -8,6 +8,8 @@ import type { AgentToolItem, SingleAgentRunRequest, SingleAgentSsePayload } from
 
 const { TextArea } = Input
 const THINKING_PREVIEW_LINES = 5
+const THINKING_PANEL_MIN_HEIGHT = 220
+const RESULT_PANEL_MIN_HEIGHT = 180
 
 function lastNLines(text: string, n: number): string {
   const lines = text.split('\n')
@@ -41,6 +43,7 @@ export default function SingleAgent() {
   const [liveTrace, setLiveTrace] = useState<Array<{ step?: string; title?: string; text?: string; data?: unknown }>>([])
   const [paradigm, setParadigm] = useState<SingleAgentRunRequest['paradigm']>(normalizedParadigm)
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
+  const [hasRun, setHasRun] = useState(false)
 
   const thinkingFullText = useMemo(() => traceToText(liveTrace), [liveTrace])
   const thinkingPreviewText = useMemo(() => lastNLines(thinkingFullText, THINKING_PREVIEW_LINES), [thinkingFullText])
@@ -81,6 +84,7 @@ export default function SingleAgent() {
       message.warning('请输入问题')
       return
     }
+    setHasRun(true)
     setLoading(true)
     setResult(null)
     setLiveTrace([])
@@ -186,15 +190,19 @@ export default function SingleAgent() {
         </Space>
       </Card>
 
-      {(loading || liveTrace.length > 0) && (
-        <Card
-          title="思考区"
-          style={{ marginTop: 16 }}
-          extra={
-            <Button type="link" size="small" onClick={() => setThinkingExpanded((v) => !v)}>
-              {thinkingExpanded ? '收起' : '展开'}
-            </Button>
-          }
+      <Card
+        title="思考区"
+        style={{ marginTop: 16 }}
+        extra={
+          <Button type="link" size="small" onClick={() => setThinkingExpanded((v) => !v)}>
+            {thinkingExpanded ? '收起' : '展开'}
+          </Button>
+        }
+      >
+        <div
+          style={{
+            minHeight: THINKING_PANEL_MIN_HEIGHT,
+          }}
         >
           {loading && liveTrace.length === 0 && (
             <div style={{ marginBottom: 12 }}>
@@ -212,7 +220,7 @@ export default function SingleAgent() {
                 minHeight: `${THINKING_PREVIEW_LINES * 1.6}em`,
               }}
             >
-              {thinkingFullText || (loading ? '等待步骤...' : '暂无思考步骤')}
+              {thinkingFullText || (loading ? '等待步骤...' : hasRun ? '' : '提交后显示思考过程')}
             </div>
           ) : loading ? (
             <div
@@ -227,25 +235,35 @@ export default function SingleAgent() {
             >
               {thinkingPreviewText || '等待步骤...'}
             </div>
+          ) : !hasRun ? (
+            <div style={{ color: 'var(--app-text-secondary)' }}>提交后显示思考过程</div>
           ) : null}
-        </Card>
-      )}
+        </div>
+      </Card>
 
-      {!loading && result && (
-        <Card title="执行结果" style={{ marginTop: 16 }}>
-          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{result.answer}</div>
-          {result.tools_used?.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <strong>工具调用：</strong>
-              <Space wrap style={{ marginLeft: 8 }}>
-                {result.tools_used.map((x) => (
-                  <Tag key={x}>{x}</Tag>
-                ))}
-              </Space>
+      <Card title="执行结果" style={{ marginTop: 16 }}>
+        <div style={{ minHeight: RESULT_PANEL_MIN_HEIGHT }}>
+          {result ? (
+            <>
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{result.answer}</div>
+              {result.tools_used?.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <strong>工具调用：</strong>
+                  <Space wrap style={{ marginLeft: 8 }}>
+                    {result.tools_used.map((x) => (
+                      <Tag key={x}>{x}</Tag>
+                    ))}
+                  </Space>
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ color: 'var(--app-text-secondary)' }}>
+              {loading ? '正在生成最终输出...' : hasRun ? '等待本次结果...' : '提交后显示最终输出'}
             </div>
           )}
-        </Card>
-      )}
+        </div>
+      </Card>
     </div>
   )
 }

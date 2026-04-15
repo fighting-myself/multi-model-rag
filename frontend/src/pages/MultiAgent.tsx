@@ -32,6 +32,7 @@ const SCENES: Array<{ value: MultiAgentRunRequest['scene']; label: string; desc:
 
 const COLLAPSED_LINE_COUNT = 5
 const LINE_HEIGHT_EM = 1.5
+const PROCESS_EXPANDED_HEIGHT_PX = 440
 
 function lastNLines(text: string, n: number): string {
   const lines = text.split('\n')
@@ -235,7 +236,7 @@ export default function MultiAgent() {
             style={
               processExpanded
                 ? {
-                    maxHeight: 'min(50vh, 440px)',
+                    height: `${PROCESS_EXPANDED_HEIGHT_PX}px`,
                     overflowY: 'auto',
                     overflowX: 'hidden',
                     overscrollBehavior: 'contain',
