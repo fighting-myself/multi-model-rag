@@ -33,6 +33,7 @@ const SCENES: Array<{ value: MultiAgentRunRequest['scene']; label: string; desc:
 const COLLAPSED_LINE_COUNT = 5
 const LINE_HEIGHT_EM = 1.5
 const PROCESS_EXPANDED_HEIGHT_PX = 440
+const SCENE_PARAMS_FIXED_HEIGHT_PX = 120
 
 function lastNLines(text: string, n: number): string {
   const lines = text.split('\n')
@@ -196,8 +197,22 @@ export default function MultiAgent() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="例如：给我一份某上市公司的投研分析，包含基本面、技术面、风险与结论建议。"
           />
-          {scene === 'finance_research' && (
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <div
+            style={{
+              height: `${SCENE_PARAMS_FIXED_HEIGHT_PX}px`,
+              overflow: 'hidden',
+            }}
+          >
+            <Space
+              direction="vertical"
+              size={8}
+              style={{
+                width: '100%',
+                visibility: scene === 'finance_research' ? 'visible' : 'hidden',
+                pointerEvents: scene === 'finance_research' ? 'auto' : 'none',
+              }}
+              aria-hidden={scene !== 'finance_research'}
+            >
               <Input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="股票代码，如 600519.SH / AAPL" />
               <Input value={timeWindow} onChange={(e) => setTimeWindow(e.target.value)} placeholder="时间窗口，如 近30天 / 近4个季度" />
               <Select
@@ -210,7 +225,7 @@ export default function MultiAgent() {
                 onChange={(v) => setRiskPreference(v)}
               />
             </Space>
-          )}
+          </div>
           <Button type="primary" onClick={run} loading={loading}>
             运行多智能体
           </Button>
