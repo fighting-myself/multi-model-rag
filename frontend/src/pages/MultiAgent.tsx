@@ -34,6 +34,7 @@ const COLLAPSED_LINE_COUNT = 5
 const LINE_HEIGHT_EM = 1.5
 const PROCESS_EXPANDED_HEIGHT_PX = 440
 const SCENE_PARAMS_FIXED_HEIGHT_PX = 120
+const SCENE_DESC_FIXED_HEIGHT_PX = 44
 
 function lastNLines(text: string, n: number): string {
   const lines = text.split('\n')
@@ -189,7 +190,17 @@ export default function MultiAgent() {
               options={SCENES.map((x) => ({ value: x.value, label: x.label }))}
               onChange={(v) => setScene(v)}
             />
-            <div style={{ marginTop: 8, color: 'var(--app-text-secondary)' }}>{currentScene?.desc}</div>
+            <div
+              style={{
+                marginTop: 8,
+                color: 'var(--app-text-secondary)',
+                minHeight: `${SCENE_DESC_FIXED_HEIGHT_PX}px`,
+                maxHeight: `${SCENE_DESC_FIXED_HEIGHT_PX}px`,
+                overflow: 'hidden',
+              }}
+            >
+              {currentScene?.desc}
+            </div>
           </div>
           <TextArea
             rows={5}
