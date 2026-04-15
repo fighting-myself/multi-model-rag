@@ -247,7 +247,7 @@ class MultiAgentCrewAIService:
             "agents": [t.agent for t in tasks],
             "tasks": tasks,
             "process": process_cls.sequential,
-            "verbose": 2,  # 强制详细日志
+            "verbose": CREWAI_AGENT_VERBOSE,  # 强制详细日志
         }
 
         # 👇 直接硬传 task_callback，0.118.0 100% 支持
