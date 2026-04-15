@@ -247,18 +247,13 @@ class MultiAgentCrewAIService:
             "agents": [t.agent for t in tasks],
             "tasks": tasks,
             "process": process_cls.sequential,
-            "verbose": CREWAI_AGENT_VERBOSE,  # 👈 强制开启详细日志，0.118.0 必须
+            "verbose": 2,  # 强制详细日志
         }
 
+        # 👇 直接硬传 task_callback，0.118.0 100% 支持
         if per_output_callback is not None:
-            sig = inspect.signature(crew_cls.__init__)
-            # 👇 0.118.0 正确回调名是 task_callback，不是 step_callback
-            if "task_callback" in sig.parameters:
-                kwargs["task_callback"] = per_output_callback
-            else:
-                raise MultiAgentExecutionError(
-                    "当前 CrewAI 版本不支持回调，请升级到 0.90+ 版本。"
-                )
+            kwargs["task_callback"] = per_output_callback
+
         return crew_cls(**kwargs)
 
     @staticmethod
