@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Input, List, Segmented, Space, Spin, Tag, message } from 'antd'
+import { Button, Card, Collapse, Input, List, Segmented, Space, Spin, Tag, message } from 'antd'
 import { ApiOutlined, ToolOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -7,6 +7,19 @@ import api, { consumeSingleAgentRunStream } from '../services/api'
 import type { AgentToolItem, SingleAgentRunRequest, SingleAgentSsePayload } from '../types/api'
 
 const { TextArea } = Input
+const THINKING_PREVIEW_LINES = 5
+
+function lastNLines(text: string, n: number): string {
+  const lines = text.split('\n')
+  return lines.slice(-n).join('\n')
+}
+
+function traceToText(trace: Array<{ step?: string; title?: string; text?: string; data?: unknown }>): string {
+  return trace
+    .map((t) => `${t.title || t.step || '步骤'}: ${t.text || ''}`.trim())
+    .filter(Boolean)
+    .join('\n')
+}
 
 export default function SingleAgent() {
   const navigate = useNavigate()
@@ -26,6 +39,12 @@ export default function SingleAgent() {
   const [result, setResult] = useState<Extract<SingleAgentSsePayload, { type: 'done' }> | null>(null)
   const [liveTrace, setLiveTrace] = useState<Array<{ step?: string; title?: string; text?: string; data?: unknown }>>([])
   const [paradigm, setParadigm] = useState<SingleAgentRunRequest['paradigm']>(normalizedParadigm)
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
+
+  const thinkingPreviewText = useMemo(
+    () => lastNLines(traceToText(liveTrace), THINKING_PREVIEW_LINES),
+    [liveTrace]
+  )
 
   useEffect(() => {
     setParadigm(normalizedParadigm)
@@ -112,12 +131,6 @@ export default function SingleAgent() {
         }
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="支持 4 种范式：ReAct / Plan & Execute / Reflexion / ReWOO"
-            description="工具来自数据库，可通过“初始化默认工具”快速写入网页搜索、天气、金融行情。"
-          />
           <Segmented
             value={paradigm}
             onChange={(v) => {
@@ -141,29 +154,37 @@ export default function SingleAgent() {
           <Button type="primary" onClick={run} loading={loading}>
             运行单智能体
           </Button>
+          <Collapse
+            size="small"
+            items={[
+              {
+                key: 'tools',
+                label: `已注册工具 (${tools.length})`,
+                children: (
+                  <List
+                    dataSource={tools}
+                    locale={{ emptyText: '暂无工具，请先初始化默认工具' }}
+                    renderItem={(it) => (
+                      <List.Item>
+                        <List.Item.Meta
+                          avatar={<ToolOutlined />}
+                          title={
+                            <Space>
+                              <span>{it.name}</span>
+                              <Tag>{it.code}</Tag>
+                              <Tag color={it.enabled ? 'green' : 'default'}>{it.enabled ? '启用' : '禁用'}</Tag>
+                            </Space>
+                          }
+                          description={it.description || '-'}
+                        />
+                      </List.Item>
+                    )}
+                  />
+                ),
+              },
+            ]}
+          />
         </Space>
-      </Card>
-
-      <Card title="已注册工具" style={{ marginTop: 16 }}>
-        <List
-          dataSource={tools}
-          locale={{ emptyText: '暂无工具，请先初始化默认工具' }}
-          renderItem={(it) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={<ToolOutlined />}
-                title={
-                  <Space>
-                    <span>{it.name}</span>
-                    <Tag>{it.code}</Tag>
-                    <Tag color={it.enabled ? 'green' : 'default'}>{it.enabled ? '启用' : '禁用'}</Tag>
-                  </Space>
-                }
-                description={it.description || '-'}
-              />
-            </List.Item>
-          )}
-        />
       </Card>
 
       {loading && (
@@ -173,25 +194,48 @@ export default function SingleAgent() {
       )}
 
       {(loading || liveTrace.length > 0) && (
-        <Card title="思考区" style={{ marginTop: 16 }}>
+        <Card
+          title="思考区"
+          style={{ marginTop: 16 }}
+          extra={
+            <Button type="link" size="small" onClick={() => setThinkingExpanded((v) => !v)}>
+              {thinkingExpanded ? '收起' : '展开'}
+            </Button>
+          }
+        >
           {loading && liveTrace.length === 0 && (
             <div style={{ marginBottom: 12 }}>
               <Spin size="small" /> <span style={{ marginLeft: 8 }}>正在生成思考步骤...</span>
             </div>
           )}
-          <List
-            bordered
-            dataSource={liveTrace}
-            locale={{ emptyText: loading ? '等待步骤...' : '暂无思考步骤' }}
-            renderItem={(t) => (
-              <List.Item>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{t.title || t.step || '步骤'}</div>
-                  <div style={{ whiteSpace: 'pre-wrap', color: 'var(--app-text-secondary)' }}>{t.text || ''}</div>
-                </div>
-              </List.Item>
-            )}
-          />
+          {thinkingExpanded ? (
+            <List
+              bordered
+              dataSource={liveTrace}
+              locale={{ emptyText: loading ? '等待步骤...' : '暂无思考步骤' }}
+              renderItem={(t) => (
+                <List.Item>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{t.title || t.step || '步骤'}</div>
+                    <div style={{ whiteSpace: 'pre-wrap', color: 'var(--app-text-secondary)' }}>{t.text || ''}</div>
+                  </div>
+                </List.Item>
+              )}
+            />
+          ) : (
+            <div
+              style={{
+                lineHeight: 1.6,
+                fontFamily: 'ui-monospace, monospace',
+                fontSize: 13,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                minHeight: `${THINKING_PREVIEW_LINES * 1.6}em`,
+              }}
+            >
+              {thinkingPreviewText || (loading ? '等待步骤...' : '暂无思考步骤')}
+            </div>
+          )}
         </Card>
       )}
 
