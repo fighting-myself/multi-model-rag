@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Input, List, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Card, Input, Select, Space, Spin, Tag, message } from 'antd'
 import { ClusterOutlined } from '@ant-design/icons'
 
 import { consumeMultiAgentRunStream } from '../services/api'
-import type {
-  MultiAgentRunRequest,
-  MultiAgentTraceItem,
-} from '../types/api'
+import type { MultiAgentRunRequest } from '../types/api'
 
 const { TextArea } = Input
 
@@ -36,31 +33,6 @@ const SCENES: Array<{ value: MultiAgentRunRequest['scene']; label: string; desc:
 const COLLAPSED_LINE_COUNT = 5
 const LINE_HEIGHT_EM = 1.5
 
-function isMetaTrace(step?: string): boolean {
-  return step === 'scene' || step === 'paradigm' || step === 'params'
-}
-
-function traceBlockText(t: MultiAgentTraceItem): string {
-  const title = t.title || t.step || '步骤'
-  const phase = t.phase || ''
-  const thinking = (t.thinking || '').trim()
-  const raw = (t.output ?? t.text ?? '').trim()
-  const oneLine = raw.replace(/\s+/g, ' ').slice(0, 400)
-  const resultLabel =
-    t.step === 'params'
-      ? '注入参数'
-      : t.step === 'llm_request'
-        ? 'LLM 请求体'
-        : isMetaTrace(t.step)
-          ? '编排说明'
-          : '输出结果'
-  return [`【${title}】${phase ? ` ${phase}` : ''}`, `思考：${thinking}`, `${resultLabel}：${oneLine}`].join('\n')
-}
-
-function buildProcessLog(traces: MultiAgentTraceItem[]): string {
-  return traces.map((t) => traceBlockText(t)).join('\n---\n')
-}
-
 function lastNLines(text: string, n: number): string {
   const lines = text.split('\n')
   return lines.slice(-n).join('\n')
@@ -74,23 +46,61 @@ export default function MultiAgent() {
   const [riskPreference, setRiskPreference] = useState('平衡')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ answer: string; scene: MultiAgentRunRequest['scene']; framework: string } | null>(null)
-  const [traces, setTraces] = useState<MultiAgentTraceItem[]>([])
+  const [processText, setProcessText] = useState('')
   const [processExpanded, setProcessExpanded] = useState(false)
-  const tracesRef = useRef<MultiAgentTraceItem[]>([])
+  const processTextRef = useRef('')
+  const streamQueueRef = useRef<string[]>([])
+  const streamTimerRef = useRef<number | null>(null)
   const processScrollRef = useRef<HTMLDivElement | null>(null)
   const runAbortRef = useRef<AbortController | null>(null)
   const currentScene = useMemo(() => SCENES.find((x) => x.value === scene), [scene])
 
   const collapsedPreview = useMemo(
-    () => lastNLines(buildProcessLog(traces), COLLAPSED_LINE_COUNT),
-    [traces]
+    () => lastNLines(processText, COLLAPSED_LINE_COUNT),
+    [processText]
   )
 
   useEffect(() => {
     if (!processExpanded || !processScrollRef.current) return
     const el = processScrollRef.current
     el.scrollTop = el.scrollHeight
-  }, [traces, processExpanded])
+  }, [processText, processExpanded])
+
+  useEffect(() => {
+    return () => {
+      if (streamTimerRef.current != null) {
+        window.clearTimeout(streamTimerRef.current)
+      }
+    }
+  }, [])
+
+  const enqueueStreamText = (text: string) => {
+    if (!text) return
+    streamQueueRef.current.push(text)
+    if (streamTimerRef.current != null) return
+
+    const tick = () => {
+      const current = streamQueueRef.current[0]
+      if (!current) {
+        streamTimerRef.current = null
+        return
+      }
+      const chunkSize = 24
+      const nextChunk = current.slice(0, chunkSize)
+      const remain = current.slice(chunkSize)
+      const nextText = processTextRef.current + nextChunk
+      processTextRef.current = nextText
+      setProcessText(nextText)
+      if (remain.length === 0) {
+        streamQueueRef.current.shift()
+      } else {
+        streamQueueRef.current[0] = remain
+      }
+      streamTimerRef.current = window.setTimeout(tick, 18)
+    }
+
+    streamTimerRef.current = window.setTimeout(tick, 0)
+  }
 
   const run = async () => {
     const q = query.trim()
@@ -113,16 +123,23 @@ export default function MultiAgent() {
 
     setLoading(true)
     setResult(null)
-    tracesRef.current = []
-    setTraces([])
+    processTextRef.current = ''
+    setProcessText('')
+    streamQueueRef.current = []
+    if (streamTimerRef.current != null) {
+      window.clearTimeout(streamTimerRef.current)
+      streamTimerRef.current = null
+    }
 
     try {
       await consumeMultiAgentRunStream(payload, {
         signal: ac.signal,
         onEvent: (e) => {
           if (e.type === 'trace') {
-            tracesRef.current = [...tracesRef.current, e.item]
-            setTraces(tracesRef.current)
+            const raw = String(e.item.output ?? e.item.text ?? '').trim()
+            if (!raw) return
+            const prefix = processTextRef.current || streamQueueRef.current.length > 0 ? '\n\n' : ''
+            enqueueStreamText(prefix + raw)
           } else if (e.type === 'done') {
             setResult({
               answer: e.answer,
@@ -143,7 +160,7 @@ export default function MultiAgent() {
     }
   }
 
-  const showProcess = loading || traces.length > 0
+  const showProcess = loading || processText.length > 0
 
   return (
     <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
@@ -160,7 +177,7 @@ export default function MultiAgent() {
             type="info"
             showIcon
             message="业务场景驱动的多智能体协作"
-            description="每个场景内部都融合 ReAct、Plan & Execute、ReWOO、Reflection 四类单智能体范式。运行后将通过流式接口实时推送「当前在做什么 / 思考 / 输出」；过程区可收起，收起时仅显示末尾 5 行摘要。"
+            description="执行过程仅展示 Task 回调中的原始输出（output.raw），并以流式文本连续追加。"
           />
           <div>
             <strong>场景选择</strong>
@@ -242,42 +259,9 @@ export default function MultiAgent() {
             }}
           >
             {processExpanded ? (
-              <List
-                size="small"
-                dataSource={traces}
-                renderItem={(t, idx) => (
-                  <List.Item key={idx} style={{ display: 'block', borderBottom: '1px solid var(--app-border, #f0f0f0)' }}>
-                    <div style={{ fontWeight: 600 }}>
-                      {t.title || t.step || '步骤'}
-                      {t.phase ? (
-                        <Tag style={{ marginLeft: 8 }} color="blue">
-                          {t.phase}
-                        </Tag>
-                      ) : null}
-                    </div>
-                    <div style={{ marginTop: 6, color: 'var(--app-text-secondary)' }}>
-                      <strong>思考过程：</strong>
-                      {t.thinking || '—'}
-                    </div>
-                    {t.crew_log_style ? (
-                      <div style={{ marginTop: 8 }}>
-                        <strong>控制台风格（与 Crew 日志一致）：</strong>
-                        <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{t.crew_log_style}</div>
-                      </div>
-                    ) : null}
-                    {t.messages_json ? (
-                      <div style={{ marginTop: 10 }}>
-                        <strong>对话消息 JSON（含下游 context）：</strong>
-                        <div style={{ whiteSpace: 'pre-wrap', marginTop: 4, fontSize: 12 }}>{t.messages_json}</div>
-                      </div>
-                    ) : null}
-                    <div style={{ marginTop: 8 }}>
-                      <strong>{t.step === 'params' ? '注入参数：' : isMetaTrace(t.step) ? '说明：' : '输出结果：'}</strong>
-                      <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{t.output ?? t.text ?? '—'}</div>
-                    </div>
-                  </List.Item>
-                )}
-              />
+              <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>
+                {processText || (loading ? '等待回调输出…' : '')}
+              </div>
             ) : (
               <span>{collapsedPreview || (loading ? '等待步骤…' : '')}</span>
             )}
