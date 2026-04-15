@@ -254,11 +254,11 @@ multi-model-rag/
 
 ## 构建镜像
 - 前端镜像：
-  cd multi-model-rag/frontend
-  docker build -t rag-frontend:v1 .
+  `cd multi-model-rag/frontend`
+  `docker build -t rag-frontend:v1 .`
 - 后端镜像：
-  cd multi-model-rag/backend
-  DOCKER_BUILDKIT=1 docker build -t rag-backend:v1 .
+  `cd multi-model-rag/backend`
+  `DOCKER_BUILDKIT=1 docker build -t rag-backend:v1 .`
 
 ## 开发、测试与部署
 

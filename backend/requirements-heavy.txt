@@ -1,5 +1,5 @@
 # 重依赖（变化频率低）：单独缓存层安装，减少后续重复构建时间
-crewai==0.118.0
+crewai
 llama-index-core==0.14.5
 llama-index-llms-openai==0.6.26
 llama-index-llms-openai-like==0.7.0

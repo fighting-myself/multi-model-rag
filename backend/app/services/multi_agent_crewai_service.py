@@ -79,7 +79,6 @@ class MultiAgentCrewAIService:
             loop.call_soon_threadsafe(q.put_nowait, {"type": "trace", "item": item})
 
         try:
-
             def output_cb(output: Any) -> None:
                 emit_trace_item(self._trace_from_crew_output(output))
 
@@ -192,7 +191,6 @@ class MultiAgentCrewAIService:
     def _import_crewai_modules(self) -> Tuple[Any, Any, Any, Any]:
         try:
             from crewai import Agent, Crew, Process, Task
-
             return Agent, Crew, Process, Task
         except Exception as e:
             logger.exception("CrewAI import failed")
@@ -249,15 +247,17 @@ class MultiAgentCrewAIService:
             "agents": [t.agent for t in tasks],
             "tasks": tasks,
             "process": process_cls.sequential,
-            "verbose": CREWAI_AGENT_VERBOSE,
+            "verbose": CREWAI_AGENT_VERBOSE,  # 👈 强制开启详细日志，0.118.0 必须
         }
+
         if per_output_callback is not None:
             sig = inspect.signature(crew_cls.__init__)
-            if "step_callback" in sig.parameters:
-                kwargs["step_callback"] = per_output_callback
+            # 👇 0.118.0 正确回调名是 task_callback，不是 step_callback
+            if "task_callback" in sig.parameters:
+                kwargs["task_callback"] = per_output_callback
             else:
                 raise MultiAgentExecutionError(
-                    "当前 CrewAI 版本不支持 step_callback，无法实时推送中间步骤；请升级到支持 step_callback 的版本。"
+                    "当前 CrewAI 版本不支持回调，请升级到 0.90+ 版本。"
                 )
         return crew_cls(**kwargs)
 
@@ -317,31 +317,32 @@ class MultiAgentCrewAIService:
 
     @staticmethod
     def _trace_from_crew_output(output: Any) -> Dict[str, Any]:
+        """
+        👈 完全适配 0.118.0 TaskOutput 结构
+        """
+        # 0.118.0 output 结构：.agent .description .raw .result
         role = "Agent"
-        agent = getattr(output, "agent", None)
-        if agent is not None:
-            role = str(getattr(agent, "role", None) or getattr(agent, "name", None) or role)
-        desc = getattr(output, "description", None) or getattr(output, "name", None)
-        title = str(desc) if desc else f"{role} 产出"
-        raw: str | None = None
-        for attr in ("raw", "exported_output", "result", "output", "final_output"):
-            v = getattr(output, attr, None)
-            if v is not None:
-                raw = str(v)
-                break
-        if raw is None:
-            raw = str(output)
+        if hasattr(output, 'agent') and output.agent:
+            role = output.agent.role
+
+        desc = getattr(output, "description", "任务执行")
+        title = f"{role}：{desc[:20]}..."
+
+        # 正确取结果
+        raw = str(output.raw) if hasattr(output, "raw") else str(output)
         if len(raw) > CREWAI_TRACE_OUTPUT_RAW_MAX:
             raw = raw[:CREWAI_TRACE_OUTPUT_RAW_MAX] + "…"
-        summary = raw[:CREWAI_TRACE_TEXT_SUMMARY_MAX] + (
-            "…" if len(raw) > CREWAI_TRACE_TEXT_SUMMARY_MAX else ""
-        )
+
+        summary = raw[:CREWAI_TRACE_TEXT_SUMMARY_MAX]
+        if len(raw) > CREWAI_TRACE_TEXT_SUMMARY_MAX:
+            summary += "…"
+
         return {
             "step": CREWAI_TRACE_STEP_CREW_STEP,
             "title": title,
             "text": summary,
             "phase": "Agent 执行",
-            "thinking": f"当前步骤由「{role}」根据任务描述与上游上下文调用大模型，得到本条结构化/文本输出。",
+            "thinking": f"「{role}」正在执行任务，生成中间结果",
             "output": raw,
         }
 
@@ -363,7 +364,9 @@ class MultiAgentCrewAIService:
         for attempt in range(1, CREWAI_KICKOFF_MAX_ATTEMPTS + 1):
             try:
                 logger.debug("crew kickoff attempt=%s/%s", attempt, CREWAI_KICKOFF_MAX_ATTEMPTS)
-                text = str(crew.kickoff(inputs)).strip()
+                # 0.118.0 支持 inputs
+                result = crew.kickoff(inputs=inputs)
+                text = str(result).strip()
                 logger.debug("crew kickoff ok attempt=%s output_len=%s", attempt, len(text))
                 return text
             except Exception as e:
