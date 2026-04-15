@@ -10,6 +10,8 @@ import logging
 import os
 from typing import Any, Dict, List, Tuple
 
+from langchain_openai import ChatOpenAI
+
 from app.core.config import settings
 from app.schemas.multi_agent import MultiAgentScene
 from app.services.multi_agent_crewai_templates import (
@@ -33,25 +35,38 @@ class MultiAgentExecutionError(RuntimeError):
 
 class MultiAgentCrewAIService:
     def __init__(self) -> None:
-        self.llm_ref = self._resolve_llm_ref()
+        pass
 
     def _ensure_crewai_env(self) -> None:
         if settings.OPENAI_API_KEY:
             os.environ["OPENAI_API_KEY"] = settings.OPENAI_API_KEY
         if settings.OPENAI_BASE_URL:
+            # LiteLLM / OpenAI SDK 各版本变量名不一致，一并写入避免落到 api.openai.com
             os.environ["OPENAI_BASE_URL"] = settings.OPENAI_BASE_URL
+            os.environ["OPENAI_API_BASE"] = settings.OPENAI_BASE_URL
 
-    def _resolve_llm_ref(self) -> str:
-        raw = (settings.LLM_MODEL or DEFAULT_LLM_REF).strip()
-        if not raw:
-            return DEFAULT_LLM_REF
-        # LiteLLM 需要 provider/model 格式。对 OpenAI 兼容端点（如 DashScope）
-        # 常见仅配置模型名（qwen3-vl-plus）时，自动补全为 openai/qwen3-vl-plus。
-        if "/" not in raw:
-            normalized = f"openai/{raw}"
-            logger.info("normalize crew llm model from=%s to=%s", raw, normalized)
-            return normalized
+    @staticmethod
+    def _resolve_crew_model_name() -> str:
+        raw = (settings.LLM_MODEL or DEFAULT_LLM_REF).strip() or DEFAULT_LLM_REF
+        if "/" in raw:
+            return raw.split("/", 1)[-1].strip()
         return raw
+
+    def _build_crew_llm(self) -> Any:
+        """
+        使用 LangChain ChatOpenAI 并显式传入 base_url，与单智能体一致；
+        避免 CrewAI 传字符串模型名时 LiteLLM 未吃到 OPENAI_BASE_URL 而请求官方 OpenAI。
+        """
+        model = self._resolve_crew_model_name()
+        base = (settings.OPENAI_BASE_URL or "").strip()
+        key = (settings.OPENAI_API_KEY or "").strip() or "dummy"
+        return ChatOpenAI(
+            model=model,
+            openai_api_key=key,
+            openai_api_base=base or None,
+            temperature=0.2,
+            max_tokens=4096,
+        )
 
     def _import_crewai(self) -> Tuple[Any, Any, Any, Any]:
         try:
@@ -61,12 +76,12 @@ class MultiAgentCrewAIService:
             logger.exception("CrewAI import failed")
             raise MultiAgentExecutionError(f"CrewAI 未安装或导入失败: {e}") from e
 
-    def _build_agent(self, Agent: Any, template: AgentTemplate) -> Any:
+    def _build_agent(self, Agent: Any, template: AgentTemplate, llm: Any) -> Any:
         return Agent(
             role=template.role,
             goal=template.goal,
             backstory=template.backstory,
-            llm=self.llm_ref,
+            llm=llm,
             allow_delegation=template.allow_delegation,
             verbose=False,
         )
@@ -116,11 +131,19 @@ class MultiAgentCrewAIService:
         Agent, Crew, Process, Task = self._import_crewai()
         self._ensure_crewai_env()
         scene_tpl = get_scene_template(scene)
-        logger.info("multi-agent run start scene=%s llm=%s", scene, self.llm_ref)
+        llm = self._build_crew_llm()
+        model_name = self._resolve_crew_model_name()
+        api_base = (settings.OPENAI_BASE_URL or "").strip()
+        logger.info(
+            "multi-agent run start scene=%s model=%s api_base=%s",
+            scene,
+            model_name,
+            api_base.split("?", 1)[0] if api_base else "(default)",
+        )
 
         agent_map: Dict[str, Any] = {}
         for template in scene_tpl.agents:
-            agent_map[template.agent_id] = self._build_agent(Agent, template)
+            agent_map[template.agent_id] = self._build_agent(Agent, template, llm)
         tasks = self._build_scene_tasks(Task, scene_tpl, agent_map)
 
         crew = Crew(
