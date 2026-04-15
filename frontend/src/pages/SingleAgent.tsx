@@ -16,6 +16,7 @@ function lastNLines(text: string, n: number): string {
 
 function traceToText(trace: Array<{ step?: string; title?: string; text?: string; data?: unknown }>): string {
   return trace
+    .filter((t) => t.step !== 'mode' && t.title !== '范式')
     .map((t) => `${t.title || t.step || '步骤'}: ${t.text || ''}`.trim())
     .filter(Boolean)
     .join('\n')
@@ -41,10 +42,8 @@ export default function SingleAgent() {
   const [paradigm, setParadigm] = useState<SingleAgentRunRequest['paradigm']>(normalizedParadigm)
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
 
-  const thinkingPreviewText = useMemo(
-    () => lastNLines(traceToText(liveTrace), THINKING_PREVIEW_LINES),
-    [liveTrace]
-  )
+  const thinkingFullText = useMemo(() => traceToText(liveTrace), [liveTrace])
+  const thinkingPreviewText = useMemo(() => lastNLines(thinkingFullText, THINKING_PREVIEW_LINES), [thinkingFullText])
 
   useEffect(() => {
     setParadigm(normalizedParadigm)
@@ -187,12 +186,6 @@ export default function SingleAgent() {
         </Space>
       </Card>
 
-      {loading && (
-        <Card style={{ marginTop: 16 }}>
-          <Spin tip="单智能体执行中..." />
-        </Card>
-      )}
-
       {(loading || liveTrace.length > 0) && (
         <Card
           title="思考区"
@@ -209,20 +202,6 @@ export default function SingleAgent() {
             </div>
           )}
           {thinkingExpanded ? (
-            <List
-              bordered
-              dataSource={liveTrace}
-              locale={{ emptyText: loading ? '等待步骤...' : '暂无思考步骤' }}
-              renderItem={(t) => (
-                <List.Item>
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{t.title || t.step || '步骤'}</div>
-                    <div style={{ whiteSpace: 'pre-wrap', color: 'var(--app-text-secondary)' }}>{t.text || ''}</div>
-                  </div>
-                </List.Item>
-              )}
-            />
-          ) : (
             <div
               style={{
                 lineHeight: 1.6,
@@ -233,18 +212,27 @@ export default function SingleAgent() {
                 minHeight: `${THINKING_PREVIEW_LINES * 1.6}em`,
               }}
             >
-              {thinkingPreviewText || (loading ? '等待步骤...' : '暂无思考步骤')}
+              {thinkingFullText || (loading ? '等待步骤...' : '暂无思考步骤')}
             </div>
-          )}
+          ) : loading ? (
+            <div
+              style={{
+                lineHeight: 1.6,
+                fontFamily: 'ui-monospace, monospace',
+                fontSize: 13,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                minHeight: `${THINKING_PREVIEW_LINES * 1.6}em`,
+              }}
+            >
+              {thinkingPreviewText || '等待步骤...'}
+            </div>
+          ) : null}
         </Card>
       )}
 
       {!loading && result && (
         <Card title="执行结果" style={{ marginTop: 16 }}>
-          <div style={{ marginBottom: 8 }}>
-            <strong>范式：</strong>
-            <Tag color="blue" style={{ marginLeft: 8 }}>{result.paradigm}</Tag>
-          </div>
           <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{result.answer}</div>
           {result.tools_used?.length > 0 && (
             <div style={{ marginTop: 12 }}>
