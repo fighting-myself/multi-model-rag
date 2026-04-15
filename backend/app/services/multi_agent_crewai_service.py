@@ -253,13 +253,11 @@ class MultiAgentCrewAIService:
         }
         if per_output_callback is not None:
             sig = inspect.signature(crew_cls.__init__)
-            if "task_callback" in sig.parameters:
-                kwargs["task_callback"] = per_output_callback
-            elif "step_callback" in sig.parameters:
+            if "step_callback" in sig.parameters:
                 kwargs["step_callback"] = per_output_callback
             else:
-                logger.warning(
-                    "当前 CrewAI 版本 Crew 无 task_callback/step_callback，过程仅含前置步骤与最终结果"
+                raise MultiAgentExecutionError(
+                    "当前 CrewAI 版本不支持 step_callback，无法实时推送中间步骤；请升级到支持 step_callback 的版本。"
                 )
         return crew_cls(**kwargs)
 

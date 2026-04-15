@@ -37,13 +37,18 @@ const SCENES: Array<{ value: MultiAgentRunRequest['scene']; label: string; desc:
 const COLLAPSED_LINE_COUNT = 5
 const LINE_HEIGHT_EM = 1.5
 
+function isMetaTrace(step?: string): boolean {
+  return step === 'scene' || step === 'paradigm' || step === 'params'
+}
+
 function traceBlockText(t: MultiAgentTraceItem): string {
   const title = t.title || t.step || '步骤'
   const phase = t.phase || ''
   const thinking = (t.thinking || '').trim()
   const raw = (t.output ?? t.text ?? '').trim()
   const oneLine = raw.replace(/\s+/g, ' ').slice(0, 400)
-  return [`【${title}】${phase ? ` ${phase}` : ''}`, `思考：${thinking}`, `结果：${oneLine}`].join('\n')
+  const resultLabel = isMetaTrace(t.step) ? '说明' : '结果'
+  return [`【${title}】${phase ? ` ${phase}` : ''}`, `思考：${thinking}`, `${resultLabel}：${oneLine}`].join('\n')
 }
 
 function buildProcessLog(traces: MultiAgentTraceItem[]): string {
@@ -266,7 +271,7 @@ export default function MultiAgent() {
                       {t.thinking || '—'}
                     </div>
                     <div style={{ marginTop: 8 }}>
-                      <strong>输出结果：</strong>
+                      <strong>{isMetaTrace(t.step) ? '说明：' : '输出结果：'}</strong>
                       <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{t.output ?? t.text ?? '—'}</div>
                     </div>
                   </List.Item>
