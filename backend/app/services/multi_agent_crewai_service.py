@@ -42,7 +42,16 @@ class MultiAgentCrewAIService:
             os.environ["OPENAI_BASE_URL"] = settings.OPENAI_BASE_URL
 
     def _resolve_llm_ref(self) -> str:
-        return settings.LLM_MODEL or DEFAULT_LLM_REF
+        raw = (settings.LLM_MODEL or DEFAULT_LLM_REF).strip()
+        if not raw:
+            return DEFAULT_LLM_REF
+        # LiteLLM 需要 provider/model 格式。对 OpenAI 兼容端点（如 DashScope）
+        # 常见仅配置模型名（qwen3-vl-plus）时，自动补全为 openai/qwen3-vl-plus。
+        if "/" not in raw:
+            normalized = f"openai/{raw}"
+            logger.info("normalize crew llm model from=%s to=%s", raw, normalized)
+            return normalized
+        return raw
 
     def _import_crewai(self) -> Tuple[Any, Any, Any, Any]:
         try:
