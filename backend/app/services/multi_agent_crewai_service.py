@@ -68,6 +68,10 @@ class MultiAgentCrewAIService:
 
             def on_crew_callback_payload(payload: Any) -> None:
                 try:
+                    logger.debug(
+                        "multi-agent stream crew payload type=%s",
+                        type(payload).__name__,
+                    )
                     item = self._trace_from_callback_payload(payload)
                     emit_trace_item(item)
                 except Exception:
@@ -213,17 +217,23 @@ class MultiAgentCrewAIService:
 
         if per_output_callback is not None:
 
-            def unified_cb(payload: Any) -> None:
-                per_output_callback(MultiAgentCrewAIService._trace_from_callback_payload(payload))
+            def unified_cb(*args: Any, **kwargs: Any) -> None:
+                payload = MultiAgentCrewAIService._pick_callback_payload(args, kwargs)
+                try:
+                    per_output_callback(payload)
+                except Exception:
+                    logger.exception("crew unified_cb dispatch failed")
 
             try:
                 sig = inspect.signature(crew_cls.__init__)
+                # 与 CrewAI task.py 一致：每个 Task 完成后会调用 crew.task_callback(TaskOutput)；
+                # step_callback 为逐步（可能更碎）。二者常同时存在，只挂其一则界面无「任务完成」轨迹。
+                if "task_callback" in sig.parameters:
+                    kwargs["task_callback"] = unified_cb
                 if "step_callback" in sig.parameters:
                     kwargs["step_callback"] = unified_cb
-                elif "task_callback" in sig.parameters:
-                    kwargs["task_callback"] = unified_cb
-                else:
-                    logger.warning("Crew.__init__ 无 step_callback/task_callback，流式中间轨迹将不可用")
+                if "task_callback" not in kwargs and "step_callback" not in kwargs:
+                    logger.warning("Crew.__init__ 无 task_callback/step_callback，流式中间轨迹将不可用")
             except (TypeError, ValueError):
                 kwargs["task_callback"] = unified_cb
 
