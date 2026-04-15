@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import re
 import time
@@ -20,11 +21,14 @@ from app.core.constants import (
     CREWAI_KICKOFF_MAX_ATTEMPTS,
     CREWAI_KICKOFF_RETRY_DELAY_SEC,
     CREWAI_TRACE_DONE_OUTPUT_PREVIEW_MAX,
+    CREWAI_TRACE_LLM_KWARGS_JSON_MAX,
     CREWAI_TRACE_MESSAGE_DONE,
+    CREWAI_TRACE_MESSAGES_JSON_MAX,
     CREWAI_TRACE_OUTPUT_RAW_MAX,
     CREWAI_TRACE_STEP_CREW_STEP,
     CREWAI_TRACE_STEP_DONE,
     CREWAI_TRACE_STEP_FINANCE_PARAMS,
+    CREWAI_TRACE_STEP_LLM_REQUEST,
     CREWAI_TRACE_STEP_ORCHESTRATION,
     CREWAI_TRACE_TEXT_SUMMARY_MAX,
     CREWAI_TRACE_TITLE_DONE,
@@ -95,11 +99,18 @@ class MultiAgentCrewAIService:
             yield {"type": "trace", "item": item}
 
         def worker() -> None:
+            restore_litellm: Callable[[], None] | None = None
             try:
+                restore_litellm = self._attach_litellm_request_tracer(emit_trace_item)
                 holder["answer"] = self._kickoff_sync_with_retry(crew, crew_inputs)
             except Exception as e:
                 holder["exc"] = e
             finally:
+                if restore_litellm is not None:
+                    try:
+                        restore_litellm()
+                    except Exception:
+                        logger.exception("litellm tracer restore failed")
                 loop.call_soon_threadsafe(q.put_nowait, None)
 
         task = asyncio.create_task(asyncio.to_thread(worker))
@@ -323,6 +334,147 @@ class MultiAgentCrewAIService:
         return str(ag)
 
     @staticmethod
+    def _stringify_message_content(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        try:
+            return json.dumps(content, ensure_ascii=False, default=str)
+        except TypeError:
+            return str(content)
+
+    @staticmethod
+    def _serialize_messages_for_trace(msgs: Any) -> str:
+        """将 Agent 侧消息列表序列化为 JSON（含传给下一步任务的 context）。"""
+        if msgs is None:
+            return ""
+        try:
+            seq = list(msgs) if isinstance(msgs, (list, tuple)) else [msgs]
+            rows: List[Dict[str, Any]] = []
+            for m in seq:
+                if isinstance(m, dict):
+                    role = m.get("role") or m.get("type") or "unknown"
+                    body = m.get("content", "")
+                    rows.append(
+                        {
+                            "role": role,
+                            "content": MultiAgentCrewAIService._stringify_message_content(body),
+                        }
+                    )
+                    continue
+                role = (
+                    getattr(m, "type", None)
+                    or getattr(m, "role", None)
+                    or getattr(m, "name", None)
+                    or "unknown"
+                )
+                body = getattr(m, "content", m)
+                rows.append(
+                    {
+                        "role": str(role),
+                        "content": MultiAgentCrewAIService._stringify_message_content(body),
+                    }
+                )
+            text = json.dumps(rows, ensure_ascii=False, default=str)
+        except Exception:
+            text = str(msgs)
+        if len(text) > CREWAI_TRACE_MESSAGES_JSON_MAX:
+            return text[:CREWAI_TRACE_MESSAGES_JSON_MAX] + "…"
+        return text
+
+    @staticmethod
+    def _deep_redact_secrets(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            out: dict[str, Any] = {}
+            for k, v in obj.items():
+                ks = str(k).lower()
+                if "api_key" in ks or ks in (
+                    "authorization",
+                    "openai_api_key",
+                    "aws_secret_access_key",
+                    "aws_access_key_id",
+                ):
+                    out[k] = "***"
+                else:
+                    out[k] = MultiAgentCrewAIService._deep_redact_secrets(v)
+            return out
+        if isinstance(obj, list):
+            return [MultiAgentCrewAIService._deep_redact_secrets(x) for x in obj]
+        return obj
+
+    @staticmethod
+    def _litellm_kwargs_for_trace(kwargs: dict[str, Any]) -> dict[str, Any]:
+        keys = (
+            "model",
+            "messages",
+            "temperature",
+            "max_tokens",
+            "max_completion_tokens",
+            "top_p",
+            "stop",
+            "stream",
+            "tools",
+            "tool_choice",
+            "response_format",
+            "api_base",
+            "base_url",
+        )
+        out: dict[str, Any] = {k: kwargs[k] for k in keys if k in kwargs}
+        if "messages" not in out and isinstance(kwargs.get("optional_params"), dict):
+            out["optional_params"] = MultiAgentCrewAIService._deep_redact_secrets(
+                kwargs["optional_params"]
+            )
+        return MultiAgentCrewAIService._deep_redact_secrets(out)
+
+    @staticmethod
+    def _attach_litellm_request_tracer(
+        emit_trace_item: Callable[[Dict[str, Any]], None],
+    ) -> Callable[[], None]:
+        """在 kickoff 期间挂上 LiteLLM success_callback，把每次 completion 的请求体推到 SSE（脱敏）。"""
+        try:
+            import litellm
+        except ImportError:
+            return lambda: None
+
+        def tracer(kwargs: Any, completion_response: Any, start_time: Any, end_time: Any) -> None:
+            try:
+                if not isinstance(kwargs, dict):
+                    return
+                safe = MultiAgentCrewAIService._litellm_kwargs_for_trace(kwargs)
+                body = json.dumps(safe, ensure_ascii=False, default=str)
+                if len(body) > CREWAI_TRACE_LLM_KWARGS_JSON_MAX:
+                    body = body[:CREWAI_TRACE_LLM_KWARGS_JSON_MAX] + "…"
+                model = str(safe.get("model") or kwargs.get("model") or "LLM")
+                item: Dict[str, Any] = {
+                    "step": CREWAI_TRACE_STEP_LLM_REQUEST,
+                    "title": f"LLM 请求（{model}）",
+                    "phase": "模型调用",
+                    "thinking": (
+                        "LiteLLM 完成一次 completion 后的请求快照（含完整 messages，"
+                        "即下游 Agent 实际看到的 user/system 内容；密钥字段已脱敏）。 "
+                        "与后台 `Request to litellm` 日志同源信息。"
+                    ),
+                    "output": body,
+                }
+                emit_trace_item(item)
+            except Exception:
+                logger.exception("litellm request trace emission failed")
+
+        prev = getattr(litellm, "success_callback", None)
+        if prev is None:
+            litellm.success_callback = [tracer]
+        elif isinstance(prev, (list, tuple)):
+            litellm.success_callback = [tracer, *list(prev)]
+        else:
+            litellm.success_callback = [tracer, prev]
+
+        def restore() -> None:
+            litellm.success_callback = prev
+
+        return restore
+
+    @staticmethod
     def _pick_callback_payload(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         for key in ("output", "task_output", "step_output", "result"):
             v = kwargs.get(key)
@@ -403,14 +555,28 @@ class MultiAgentCrewAIService:
         if len(raw) > CREWAI_TRACE_OUTPUT_RAW_MAX:
             raw = raw[:CREWAI_TRACE_OUTPUT_RAW_MAX] + "…"
 
-        thought = MultiAgentCrewAIService._extract_thought_from_raw(raw)
-        thinking = thought or (
-            f"「{role}」本步完整模型输出见下方「输出结果」"
-            f"（未匹配到 Thought/思考 分段时可全文阅读）。"
+        exp = getattr(output, "expected_output", None)
+        exp_s = str(exp).strip() if exp is not None else ""
+
+        crew_log_style = (
+            f"# Agent: {role}\n"
+            f"## Task:\n{desc_s}\n"
+            f"## Expected output:\n{exp_s}\n"
+            f"## Final Answer:\n{raw}"
         )
 
-        summary = raw[:CREWAI_TRACE_TEXT_SUMMARY_MAX]
-        if len(raw) > CREWAI_TRACE_TEXT_SUMMARY_MAX:
+        messages_json = MultiAgentCrewAIService._serialize_messages_for_trace(
+            getattr(output, "messages", None)
+        )
+
+        thought = MultiAgentCrewAIService._extract_thought_from_raw(raw)
+        thinking = thought or (
+            f"「{role}」本步完整模型输出见下方「控制台风格」与「输出结果」；"
+            f"「对话消息 JSON」含交给后续任务的上下文。"
+        )
+
+        summary = crew_log_style[:CREWAI_TRACE_TEXT_SUMMARY_MAX]
+        if len(crew_log_style) > CREWAI_TRACE_TEXT_SUMMARY_MAX:
             summary += "…"
 
         return {
@@ -420,6 +586,9 @@ class MultiAgentCrewAIService:
             "phase": "Agent 执行",
             "thinking": thinking,
             "output": raw,
+            "expected_output": exp_s,
+            "crew_log_style": crew_log_style,
+            "messages_json": messages_json,
         }
 
     @staticmethod

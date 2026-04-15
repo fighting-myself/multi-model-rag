@@ -438,6 +438,11 @@ export interface MultiAgentTraceItem {
   phase?: string
   thinking?: string
   output?: string
+  /** 与 Crew 控制台一致的块（# Agent / ## Task / ## Final Answer） */
+  crew_log_style?: string
+  /** TaskOutput.messages 序列化，含传给下一步的 context */
+  messages_json?: string
+  expected_output?: string
   data?: unknown
 }
 

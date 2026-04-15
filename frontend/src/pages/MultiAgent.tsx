@@ -47,7 +47,13 @@ function traceBlockText(t: MultiAgentTraceItem): string {
   const raw = (t.output ?? t.text ?? '').trim()
   const oneLine = raw.replace(/\s+/g, ' ').slice(0, 400)
   const resultLabel =
-    t.step === 'params' ? '注入参数' : isMetaTrace(t.step) ? '编排说明' : '输出结果'
+    t.step === 'params'
+      ? '注入参数'
+      : t.step === 'llm_request'
+        ? 'LLM 请求体'
+        : isMetaTrace(t.step)
+          ? '编排说明'
+          : '输出结果'
   return [`【${title}】${phase ? ` ${phase}` : ''}`, `思考：${thinking}`, `${resultLabel}：${oneLine}`].join('\n')
 }
 
@@ -253,6 +259,18 @@ export default function MultiAgent() {
                       <strong>思考过程：</strong>
                       {t.thinking || '—'}
                     </div>
+                    {t.crew_log_style ? (
+                      <div style={{ marginTop: 8 }}>
+                        <strong>控制台风格（与 Crew 日志一致）：</strong>
+                        <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{t.crew_log_style}</div>
+                      </div>
+                    ) : null}
+                    {t.messages_json ? (
+                      <div style={{ marginTop: 10 }}>
+                        <strong>对话消息 JSON（含下游 context）：</strong>
+                        <div style={{ whiteSpace: 'pre-wrap', marginTop: 4, fontSize: 12 }}>{t.messages_json}</div>
+                      </div>
+                    ) : null}
                     <div style={{ marginTop: 8 }}>
                       <strong>{t.step === 'params' ? '注入参数：' : isMetaTrace(t.step) ? '说明：' : '输出结果：'}</strong>
                       <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{t.output ?? t.text ?? '—'}</div>
