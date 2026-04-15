@@ -65,14 +65,19 @@ class MultiAgentCrewAIService:
             loop.call_soon_threadsafe(q.put_nowait, {"type": "trace", "item": item})
 
         try:
-            def output_cb(output: Any) -> None:
-                emit_trace_item(self._trace_from_crew_output(output))
+
+            def on_crew_callback_payload(payload: Any) -> None:
+                try:
+                    item = self._trace_from_callback_payload(payload)
+                    emit_trace_item(item)
+                except Exception:
+                    logger.exception("multi-agent stream trace callback failed")
 
             crew, crew_inputs, initial = self._prepare_run(
                 query=query,
                 scene=scene,
                 finance_params=finance_params,
-                per_output_callback=output_cb,
+                per_output_callback=on_crew_callback_payload,
             )
         except MultiAgentExecutionError as e:
             yield {"type": "error", "detail": str(e)}
@@ -306,6 +311,23 @@ class MultiAgentCrewAIService:
         if isinstance(role, str) and role.strip():
             return role.strip()
         return str(ag)
+
+    @staticmethod
+    def _pick_callback_payload(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        for key in ("output", "task_output", "step_output", "result"):
+            v = kwargs.get(key)
+            if v is not None:
+                return v
+        if not args:
+            return None
+        if len(args) == 1:
+            return args[0]
+        for a in args:
+            if a is None:
+                continue
+            if hasattr(a, "raw") or hasattr(a, "description"):
+                return a
+        return args[-1]
 
     @staticmethod
     def _extract_thought_from_raw(raw: str) -> str | None:
