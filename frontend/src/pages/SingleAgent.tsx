@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Collapse, Input, List, Segmented, Space, Spin, Tag, message } from 'antd'
+import { Button, Card, Input, List, Segmented, Space, Spin, Tag, message } from 'antd'
 import { ApiOutlined, ToolOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -8,7 +8,7 @@ import type { AgentToolItem, SingleAgentRunRequest, SingleAgentSsePayload } from
 
 const { TextArea } = Input
 const THINKING_PREVIEW_LINES = 5
-const INPUT_PANEL_MIN_HEIGHT = 620
+const INPUT_PANEL_MIN_HEIGHT = 360
 const THINKING_PANEL_MIN_HEIGHT = 220
 const RESULT_PANEL_MIN_HEIGHT = 180
 
@@ -45,6 +45,7 @@ export default function SingleAgent() {
   const [paradigm, setParadigm] = useState<SingleAgentRunRequest['paradigm']>(normalizedParadigm)
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const [hasRun, setHasRun] = useState(false)
+  const [toolsExpanded, setToolsExpanded] = useState(false)
 
   const thinkingFullText = useMemo(() => traceToText(liveTrace), [liveTrace])
   const thinkingPreviewText = useMemo(() => lastNLines(thinkingFullText, THINKING_PREVIEW_LINES), [thinkingFullText])
@@ -132,6 +133,9 @@ export default function SingleAgent() {
             <Button loading={seeding} onClick={seedTools}>
               初始化默认工具
             </Button>
+            <Button onClick={() => setToolsExpanded((v) => !v)}>
+              已注册工具 ({tools.length})
+            </Button>
           </Space>
         }
       >
@@ -160,37 +164,31 @@ export default function SingleAgent() {
             <Button type="primary" onClick={run} loading={loading}>
               运行单智能体
             </Button>
-            <Collapse
-              size="small"
-              items={[
-                {
-                  key: 'tools',
-                  label: `已注册工具 (${tools.length})`,
-                  children: (
-                    <List
-                      dataSource={tools}
-                      locale={{ emptyText: '暂无工具，请先初始化默认工具' }}
-                      renderItem={(it) => (
-                        <List.Item>
-                          <List.Item.Meta
-                            avatar={<ToolOutlined />}
-                            title={
-                              <Space>
-                                <span>{it.name}</span>
-                                <Tag>{it.code}</Tag>
-                                <Tag color={it.enabled ? 'green' : 'default'}>{it.enabled ? '启用' : '禁用'}</Tag>
-                              </Space>
-                            }
-                            description={it.description || '-'}
-                          />
-                        </List.Item>
-                      )}
-                    />
-                  ),
-                },
-              ]}
-            />
           </Space>
+          {toolsExpanded && (
+            <div style={{ marginTop: 12 }}>
+              <List
+                bordered
+                dataSource={tools}
+                locale={{ emptyText: '暂无工具，请先初始化默认工具' }}
+                renderItem={(it) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      avatar={<ToolOutlined />}
+                      title={
+                        <Space>
+                          <span>{it.name}</span>
+                          <Tag>{it.code}</Tag>
+                          <Tag color={it.enabled ? 'green' : 'default'}>{it.enabled ? '启用' : '禁用'}</Tag>
+                        </Space>
+                      }
+                      description={it.description || '-'}
+                    />
+                  </List.Item>
+                )}
+              />
+            </div>
+          )}
         </div>
       </Card>
 
