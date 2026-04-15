@@ -284,7 +284,7 @@ multi-model-rag/
      - `MINIO_SECURE=false`
      - `MINIO_BUCKET_NAME=rag-files`
   5. 启动后端：
-     `docker run -d --name backend --restart always --network rag-net -p 8000:8000 -v /etc/localtime:/etc/localtime:ro --env-file backend/.env rag-backend:v1`
+     `docker run -d --name backend --restart always --network rag-net -p 8000:8000 -v /etc/localtime:/etc/localtime:ro rag-backend:v1`
   6. 启动前端：
      `docker run -d --name rag-frontend --restart always --network rag-net -p 80:80 -v /etc/localtime:/etc/localtime:ro rag-frontend:v1`
   7. 验证：

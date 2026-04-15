@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Input, List, Select, Space, Spin, Tag, message } from 'antd'
 import { ClusterOutlined } from '@ant-design/icons'
 
-import { consumeMultiAgentRunStream } from '../services/api'
+import api, { consumeMultiAgentRunStream } from '../services/api'
 import type {
   MultiAgentRunRequest,
   MultiAgentRunResponse,
@@ -106,24 +106,40 @@ export default function MultiAgent() {
     setTraces([])
 
     try {
-      await consumeMultiAgentRunStream(payload, {
-        signal: ac.signal,
-        onEvent: (e) => {
-          if (e.type === 'trace') {
-            tracesRef.current = [...tracesRef.current, e.item]
-            setTraces(tracesRef.current)
-          } else if (e.type === 'done') {
-            setResult({
-              answer: e.answer,
-              scene: e.scene as MultiAgentRunRequest['scene'],
-              framework: e.framework,
-              traces: [...tracesRef.current],
-            })
-          } else if (e.type === 'error') {
-            message.error(e.detail)
-          }
-        },
-      })
+      let seenEvent = false
+      let seenDone = false
+      try {
+        await consumeMultiAgentRunStream(payload, {
+          signal: ac.signal,
+          onEvent: (e) => {
+            seenEvent = true
+            if (e.type === 'trace') {
+              tracesRef.current = [...tracesRef.current, e.item]
+              setTraces(tracesRef.current)
+            } else if (e.type === 'done') {
+              seenDone = true
+              setResult({
+                answer: e.answer,
+                scene: e.scene as MultiAgentRunRequest['scene'],
+                framework: e.framework,
+                traces: [...tracesRef.current],
+              })
+            } else if (e.type === 'error') {
+              message.error(e.detail)
+            }
+          },
+        })
+      } catch (streamErr: unknown) {
+        const err = streamErr as { name?: string; message?: string }
+        if (err.name === 'AbortError') throw streamErr
+      }
+      // 兼容未启用 SSE / 旧版本后端：若流式无任何事件，则自动回退普通接口，避免界面“无输出”。
+      if (!seenEvent || !seenDone) {
+        const data = await api.post<MultiAgentRunResponse>('/multi-agent/run', payload, { timeout: 300000 })
+        tracesRef.current = data.traces ?? []
+        setTraces(tracesRef.current)
+        setResult(data)
+      }
     } catch (e: unknown) {
       const err = e as { name?: string; message?: string }
       if (err.name === 'AbortError') return
