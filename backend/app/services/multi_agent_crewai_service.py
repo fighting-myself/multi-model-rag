@@ -50,20 +50,6 @@ class MultiAgentCrewAIService:
     def __init__(self, llm_factory: CrewAiLlmFactory | None = None) -> None:
         self._llm_factory = llm_factory or CrewAiLlmFactory()
 
-    async def run(
-        self,
-        query: str,
-        scene: MultiAgentScene,
-        finance_params: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
-        try:
-            return await self._run_scene(query=query, scene=scene, finance_params=finance_params)
-        except MultiAgentExecutionError:
-            raise
-        except Exception as e:
-            logger.exception("multi-agent unexpected error scene=%s", scene)
-            raise MultiAgentExecutionError(f"多智能体执行失败: {e}") from e
-
     async def run_stream_events(
         self,
         query: str,
@@ -129,36 +115,6 @@ class MultiAgentCrewAIService:
             "framework": CREWAI_FRAMEWORK_NAME,
         }
         logger.info("multi-agent stream success scene=%s answer_len=%s", scene, len(answer))
-
-    async def _run_scene(
-        self,
-        *,
-        query: str,
-        scene: MultiAgentScene,
-        finance_params: Dict[str, Any] | None,
-    ) -> Dict[str, Any]:
-        step_items: List[Dict[str, Any]] = []
-
-        def output_cb(output: Any) -> None:
-            step_items.append(self._trace_from_crew_output(output))
-
-        crew, crew_inputs, traces = self._prepare_run(
-            query=query,
-            scene=scene,
-            finance_params=finance_params,
-            per_output_callback=output_cb,
-        )
-
-        answer = await self._kickoff_with_retry(crew, crew_inputs)
-        traces.extend(step_items)
-        traces.append(self._done_trace_item(answer))
-        logger.info("multi-agent success scene=%s answer_len=%s", scene, len(answer))
-        return {
-            "answer": answer,
-            "scene": scene,
-            "framework": CREWAI_FRAMEWORK_NAME,
-            "traces": traces,
-        }
 
     def _prepare_run(
         self,
@@ -376,6 +332,3 @@ class MultiAgentCrewAIService:
                     time.sleep(CREWAI_KICKOFF_RETRY_DELAY_SEC)
         logger.error("crew kickoff exhausted retries last_error=%s", last_error)
         raise MultiAgentExecutionError(f"Crew 执行失败: {last_error}") from last_error
-
-    async def _kickoff_with_retry(self, crew: Any, inputs: Dict[str, Any]) -> str:
-        return await asyncio.to_thread(self._kickoff_sync_with_retry, crew, inputs)
