@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Any, List
 
@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     EMBEDDING_MODEL: str = "qwen3-vl-embedding"
     LLM_MODEL: str = "qwen3-vl-plus"
+    # 多智能体（CrewAI → LiteLLM）单次补全的 max_tokens；长文档/多步报告易触顶，默认 16k，受模型与网关实际上限约束
+    CREWAI_LLM_MAX_TOKENS: int = Field(default=16384, ge=512, le=32768)
     VISION_MODEL: str = ""  # 视觉模型（截图分析等），为空则使用 LLM_MODEL
     RERANK_MODEL: str = "qwen3-rerank"  # Rerank模型
     OCR_MODEL: str = "qwen-vl-ocr-2025-11-20"  # 图片 OCR 模型（阿里百炼）

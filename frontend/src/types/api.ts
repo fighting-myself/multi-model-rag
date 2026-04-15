@@ -430,9 +430,26 @@ export interface MultiAgentRunRequest {
   }
 }
 
+/** 单条执行轨迹（含思考过程与输出，供流式与最终结果共用） */
+export interface MultiAgentTraceItem {
+  step?: string
+  title?: string
+  text?: string
+  phase?: string
+  thinking?: string
+  output?: string
+  data?: unknown
+}
+
 export interface MultiAgentRunResponse {
   answer: string
   scene: 'finance_research' | 'market_ops' | 'compliance_risk' | 'product_strategy'
   framework: string
-  traces: Array<{ step?: string; title?: string; text?: string; data?: unknown }>
+  traces: MultiAgentTraceItem[]
 }
+
+/** SSE：`POST /multi-agent/run/stream` 解析后的载荷 */
+export type MultiAgentSsePayload =
+  | { type: 'trace'; item: MultiAgentTraceItem }
+  | { type: 'done'; answer: string; scene: string; framework: string }
+  | { type: 'error'; detail: string }

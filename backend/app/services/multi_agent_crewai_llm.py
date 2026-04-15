@@ -1,5 +1,5 @@
 """
-CrewAI 所用 LLM 的构建与环境同步（LiteLLM + DashScope / OpenAI 兼容）。
+CrewAI 所用 LLM 的构建与环境同步（LiteLLM + OpenAI 兼容网关，含百炼 compatible-mode）。
 """
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 from app.core.constants import (
     CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID,
     CREWAI_LLM_API_KEY_PLACEHOLDER,
-    CREWAI_LLM_MAX_TOKENS,
     CREWAI_LLM_TEMPERATURE,
     ENV_DASHSCOPE_API_BASE,
     ENV_DASHSCOPE_API_KEY,
@@ -31,11 +30,10 @@ logger = logging.getLogger(__name__)
 
 class CrewAiLlmFactory:
     """
-    根据应用配置解析 LiteLLM 模型串、密钥与 base_url，并同步子进程可见的环境变量。
+    解析 LiteLLM 所需的 model 串、api_key、base_url，并同步当前进程环境变量。
 
-    百炼 ``compatible-mode/v1`` 为 OpenAI 兼容协议：CrewAI 经 LiteLLM 调用时须使用
-    ``openai/<模型 id>`` + ``base_url`` 指向 DashScope（与 ``ChatOpenAI`` 一致）。
-    部分 LiteLLM 版本未注册 ``dashscope/`` 提供方，使用 ``dashscope/qwen-...`` 会报 Provider NOT provided。
+    百炼 ``compatible-mode/v1`` 与 OpenAI SDK 兼容：使用 ``openai/<模型 id>`` + ``base_url`` 指向 DashScope，
+    避免部分 LiteLLM 版本未注册 ``dashscope/`` 提供方的问题。
     """
 
     def __init__(self, app_settings: Settings | None = None) -> None:
@@ -44,7 +42,7 @@ class CrewAiLlmFactory:
         self._s = app_settings or default_settings
 
     def is_dashscope_route(self) -> bool:
-        if getattr(self._s, "USE_DASHSCOPE", False):
+        if self._s.USE_DASHSCOPE:
             return True
         base = (self._s.OPENAI_BASE_URL or "").lower()
         if URL_SUBSTRING_DASHSCOPE in base:
@@ -70,9 +68,13 @@ class CrewAiLlmFactory:
             os.environ[ENV_DASHSCOPE_API_BASE] = api_base
         logger.debug("CrewAI env: DashScope DASHSCOPE_API_BASE set=%s", bool(api_base))
 
+    def _resolved_model_raw(self) -> str:
+        raw = (self._s.LLM_MODEL or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID).strip()
+        return raw or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID
+
     def bare_model_id(self) -> str:
         """网关请求体中的 model id（无 LiteLLM provider 前缀）。"""
-        raw = (self._s.LLM_MODEL or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID).strip() or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID
+        raw = self._resolved_model_raw()
         if "/" in raw:
             return raw.split("/", 1)[-1].strip()
         return raw
@@ -81,14 +83,13 @@ class CrewAiLlmFactory:
         """CrewAI -> LiteLLM 所需的 provider/model。"""
         if self.is_dashscope_route():
             return f"{LITELLM_PROVIDER_OPENAI}/{self.bare_model_id()}"
-
-        raw = (self._s.LLM_MODEL or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID).strip() or CREWAI_DEFAULT_FALLBACK_LLM_MODEL_ID
+        raw = self._resolved_model_raw()
         if "/" in raw:
             provider, name = raw.split("/", 1)
-            provider_l = provider.strip().lower()
+            p = provider.strip().lower()
             name = name.strip()
-            if provider_l in ("dashscope", LITELLM_PROVIDER_OPENAI):
-                return f"{provider_l}/{name}"
+            if p in ("dashscope", LITELLM_PROVIDER_OPENAI):
+                return f"{p}/{name}"
             return raw
         return f"{LITELLM_PROVIDER_OPENAI}/{raw}"
 
@@ -118,14 +119,15 @@ class CrewAiLlmFactory:
             "model": self.litellm_model_id(),
             "api_key": self.api_key_for_crew(),
             "temperature": CREWAI_LLM_TEMPERATURE,
-            "max_tokens": CREWAI_LLM_MAX_TOKENS,
+            "max_tokens": self._s.CREWAI_LLM_MAX_TOKENS,
         }
         base = self.api_base_for_crew()
         if base:
             kwargs["base_url"] = base
         logger.debug(
-            "CrewAiLlmFactory.create_llm model=%s has_base_url=%s",
+            "CrewAiLlmFactory.create_llm model=%s max_tokens=%s has_base_url=%s",
             kwargs["model"],
+            kwargs["max_tokens"],
             bool(base),
         )
         return CrewLLM(**kwargs)

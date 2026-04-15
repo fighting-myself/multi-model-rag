@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '../stores/authStore'
+import type { MultiAgentRunRequest, MultiAgentSsePayload } from '../types/api'
 
 /** 与下方响应拦截器一致：成功时 resolve 为 response.data，而非 AxiosResponse */
 export type ApiInstance = Omit<
@@ -126,12 +127,15 @@ export async function fetchWithAuth(
 export async function streamPost(
   path: string,
   body: unknown,
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; headers?: Record<string, string> }
 ): Promise<{ response: Response; reader: ReadableStreamDefaultReader<Uint8Array> }> {
   const url = resolveApiUrl(path)
   const res = await fetchWithAuth(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options?.headers ?? {}),
+    },
     body: JSON.stringify(body),
     signal: options?.signal,
   })
@@ -142,6 +146,41 @@ export async function streamPost(
   const reader = res.body?.getReader()
   if (!reader) throw new Error('无响应体')
   return { response: res, reader }
+}
+
+/**
+ * 多智能体 SSE：解析 `data: {...}\\n\\n`，按事件顺序回调。
+ */
+export async function consumeMultiAgentRunStream(
+  payload: MultiAgentRunRequest,
+  options: { signal?: AbortSignal; onEvent: (e: MultiAgentSsePayload) => void }
+): Promise<void> {
+  const { reader } = await streamPost('/multi-agent/run/stream', payload, {
+    signal: options.signal,
+    headers: { Accept: 'text/event-stream' },
+  })
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const parts = buf.split(/\r?\n\r?\n/)
+    buf = parts.pop() ?? ''
+    for (const block of parts) {
+      const line = block.split(/\r?\n/).find((l) => l.startsWith('data:'))
+      if (!line) continue
+      const json = line.replace(/^data:\s?/, '').trim()
+      if (!json) continue
+      let evt: MultiAgentSsePayload
+      try {
+        evt = JSON.parse(json) as MultiAgentSsePayload
+      } catch {
+        continue
+      }
+      options.onEvent(evt)
+    }
+  }
 }
 
 /** 智能问答：先上传文件，返回 upload_id */

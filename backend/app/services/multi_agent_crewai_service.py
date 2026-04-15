@@ -7,19 +7,26 @@ CrewAI 多智能体编排服务。
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
-from typing import Any, Dict, List, Tuple
+import time
+from collections.abc import AsyncIterator
+from typing import Any, Callable, Dict, List, Tuple
 
 from app.core.constants import (
     CREWAI_AGENT_VERBOSE,
     CREWAI_FRAMEWORK_NAME,
     CREWAI_KICKOFF_MAX_ATTEMPTS,
     CREWAI_KICKOFF_RETRY_DELAY_SEC,
+    CREWAI_TRACE_DONE_OUTPUT_PREVIEW_MAX,
     CREWAI_TRACE_MESSAGE_DONE,
+    CREWAI_TRACE_OUTPUT_RAW_MAX,
+    CREWAI_TRACE_STEP_CREW_STEP,
     CREWAI_TRACE_STEP_DONE,
     CREWAI_TRACE_STEP_FINANCE_PARAMS,
     CREWAI_TRACE_STEP_PARADIGM,
     CREWAI_TRACE_STEP_SCENE,
+    CREWAI_TRACE_TEXT_SUMMARY_MAX,
     CREWAI_TRACE_TITLE_DONE,
     CREWAI_TRACE_TITLE_FINANCE_PARAMS,
     CREWAI_TRACE_TITLE_PARADIGM,
@@ -57,6 +64,73 @@ class MultiAgentCrewAIService:
             logger.exception("multi-agent unexpected error scene=%s", scene)
             raise MultiAgentExecutionError(f"多智能体执行失败: {e}") from e
 
+    async def run_stream_events(
+        self,
+        query: str,
+        scene: MultiAgentScene,
+        finance_params: Dict[str, Any] | None = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """供 SSE 使用：先推送前置轨迹，再推送 Crew 回调产生的步骤，最后 done。"""
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue[Any] = asyncio.Queue()
+        holder: Dict[str, Any] = {}
+
+        def emit_trace_item(item: Dict[str, Any]) -> None:
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "trace", "item": item})
+
+        try:
+
+            def output_cb(output: Any) -> None:
+                emit_trace_item(self._trace_from_crew_output(output))
+
+            crew, crew_inputs, initial = self._prepare_run(
+                query=query,
+                scene=scene,
+                finance_params=finance_params,
+                per_output_callback=output_cb,
+            )
+        except MultiAgentExecutionError as e:
+            yield {"type": "error", "detail": str(e)}
+            return
+        except Exception as e:
+            logger.exception("multi-agent stream prepare failed scene=%s", scene)
+            yield {"type": "error", "detail": str(e)}
+            return
+
+        for item in initial:
+            yield {"type": "trace", "item": item}
+
+        def worker() -> None:
+            try:
+                holder["answer"] = self._kickoff_sync_with_retry(crew, crew_inputs)
+            except Exception as e:
+                holder["exc"] = e
+            finally:
+                loop.call_soon_threadsafe(q.put_nowait, None)
+
+        task = asyncio.create_task(asyncio.to_thread(worker))
+        while True:
+            msg = await q.get()
+            if msg is None:
+                break
+            yield msg
+        await task
+
+        exc = holder.get("exc")
+        if exc is not None:
+            yield {"type": "error", "detail": str(exc)}
+            return
+
+        answer = str(holder.get("answer", "")).strip()
+        yield {"type": "trace", "item": self._done_trace_item(answer)}
+        yield {
+            "type": "done",
+            "answer": answer,
+            "scene": scene,
+            "framework": CREWAI_FRAMEWORK_NAME,
+        }
+        logger.info("multi-agent stream success scene=%s answer_len=%s", scene, len(answer))
+
     async def _run_scene(
         self,
         *,
@@ -64,6 +138,37 @@ class MultiAgentCrewAIService:
         scene: MultiAgentScene,
         finance_params: Dict[str, Any] | None,
     ) -> Dict[str, Any]:
+        step_items: List[Dict[str, Any]] = []
+
+        def output_cb(output: Any) -> None:
+            step_items.append(self._trace_from_crew_output(output))
+
+        crew, crew_inputs, traces = self._prepare_run(
+            query=query,
+            scene=scene,
+            finance_params=finance_params,
+            per_output_callback=output_cb,
+        )
+
+        answer = await self._kickoff_with_retry(crew, crew_inputs)
+        traces.extend(step_items)
+        traces.append(self._done_trace_item(answer))
+        logger.info("multi-agent success scene=%s answer_len=%s", scene, len(answer))
+        return {
+            "answer": answer,
+            "scene": scene,
+            "framework": CREWAI_FRAMEWORK_NAME,
+            "traces": traces,
+        }
+
+    def _prepare_run(
+        self,
+        *,
+        query: str,
+        scene: MultiAgentScene,
+        finance_params: Dict[str, Any] | None,
+        per_output_callback: Callable[[Any], None] | None = None,
+    ) -> Tuple[Any, Dict[str, Any], List[Dict[str, Any]]]:
         agent_cls, crew_cls, process_cls, task_cls = self._import_crewai_modules()
         self._llm_factory.sync_runtime_environment()
         llm = self._llm_factory.create_llm()
@@ -79,26 +184,10 @@ class MultiAgentCrewAIService:
         scene_tpl = get_scene_template(scene)
         agent_by_id = self._build_agents(agent_cls, scene_tpl, llm)
         tasks = self._build_tasks(task_cls, scene_tpl, agent_by_id)
-        crew = self._build_crew(crew_cls, process_cls, tasks)
-
+        crew = self._build_crew(crew_cls, process_cls, tasks, per_output_callback=per_output_callback)
         crew_inputs = self._inputs_for_scene(scene, query, finance_params)
         traces = self._initial_traces(scene_tpl, scene, crew_inputs)
-
-        answer = await self._kickoff_with_retry(crew, crew_inputs)
-        traces.append(
-            {
-                "step": CREWAI_TRACE_STEP_DONE,
-                "title": CREWAI_TRACE_TITLE_DONE,
-                "text": CREWAI_TRACE_MESSAGE_DONE,
-            }
-        )
-        logger.info("multi-agent success scene=%s answer_len=%s", scene, len(answer))
-        return {
-            "answer": answer,
-            "scene": scene,
-            "framework": CREWAI_FRAMEWORK_NAME,
-            "traces": traces,
-        }
+        return crew, crew_inputs, traces
 
     def _import_crewai_modules(self) -> Tuple[Any, Any, Any, Any]:
         try:
@@ -150,13 +239,29 @@ class MultiAgentCrewAIService:
         return tasks
 
     @staticmethod
-    def _build_crew(crew_cls: Any, process_cls: Any, tasks: List[Any]) -> Any:
-        return crew_cls(
-            agents=[t.agent for t in tasks],
-            tasks=tasks,
-            process=process_cls.sequential,
-            verbose=CREWAI_AGENT_VERBOSE,
-        )
+    def _build_crew(
+        crew_cls: Any,
+        process_cls: Any,
+        tasks: List[Any],
+        per_output_callback: Callable[[Any], None] | None = None,
+    ) -> Any:
+        kwargs: Dict[str, Any] = {
+            "agents": [t.agent for t in tasks],
+            "tasks": tasks,
+            "process": process_cls.sequential,
+            "verbose": CREWAI_AGENT_VERBOSE,
+        }
+        if per_output_callback is not None:
+            sig = inspect.signature(crew_cls.__init__)
+            if "task_callback" in sig.parameters:
+                kwargs["task_callback"] = per_output_callback
+            elif "step_callback" in sig.parameters:
+                kwargs["step_callback"] = per_output_callback
+            else:
+                logger.warning(
+                    "当前 CrewAI 版本 Crew 无 task_callback/step_callback，过程仅含前置步骤与最终结果"
+                )
+        return crew_cls(**kwargs)
 
     @staticmethod
     def _inputs_for_scene(
@@ -174,39 +279,93 @@ class MultiAgentCrewAIService:
         scene: MultiAgentScene,
         crew_inputs: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
+        wf = scene_tpl.workflow
+        pm = scene_tpl.paradigm_mix
         traces: List[Dict[str, Any]] = [
             {
                 "step": CREWAI_TRACE_STEP_SCENE,
                 "title": scene_tpl.display_name,
-                "text": scene_tpl.workflow,
+                "text": wf,
+                "phase": "场景与编排",
+                "thinking": "已选定业务场景，以下为内置工作流说明（角色与任务顺序的摘要）。",
+                "output": wf,
             },
             {
                 "step": CREWAI_TRACE_STEP_PARADIGM,
                 "title": CREWAI_TRACE_TITLE_PARADIGM,
-                "text": scene_tpl.paradigm_mix,
+                "text": pm,
+                "phase": "范式融合",
+                "thinking": "本场景在单智能体层面融合了 ReAct、Plan&Execute、ReWOO、Reflection 等范式说明。",
+                "output": pm,
             },
         ]
         if scene == "finance_research":
+            param_line = (
+                f"symbol={crew_inputs.get('symbol')} | "
+                f"time_window={crew_inputs.get('time_window')} | "
+                f"risk_preference={crew_inputs.get('risk_preference')}"
+            )
             traces.append(
                 {
                     "step": CREWAI_TRACE_STEP_FINANCE_PARAMS,
                     "title": CREWAI_TRACE_TITLE_FINANCE_PARAMS,
-                    "text": (
-                        f"symbol={crew_inputs.get('symbol')} | "
-                        f"time_window={crew_inputs.get('time_window')} | "
-                        f"risk_preference={crew_inputs.get('risk_preference')}"
-                    ),
+                    "text": param_line,
+                    "phase": "参数确认",
+                    "thinking": "金融投研场景下，将用户提供的标的、时间窗口与风险偏好注入 Crew 输入。",
+                    "output": param_line,
                 }
             )
         return traces
 
-    async def _kickoff_with_retry(self, crew: Any, inputs: Dict[str, Any]) -> str:
+    @staticmethod
+    def _trace_from_crew_output(output: Any) -> Dict[str, Any]:
+        role = "Agent"
+        agent = getattr(output, "agent", None)
+        if agent is not None:
+            role = str(getattr(agent, "role", None) or getattr(agent, "name", None) or role)
+        desc = getattr(output, "description", None) or getattr(output, "name", None)
+        title = str(desc) if desc else f"{role} 产出"
+        raw: str | None = None
+        for attr in ("raw", "exported_output", "result", "output", "final_output"):
+            v = getattr(output, attr, None)
+            if v is not None:
+                raw = str(v)
+                break
+        if raw is None:
+            raw = str(output)
+        if len(raw) > CREWAI_TRACE_OUTPUT_RAW_MAX:
+            raw = raw[:CREWAI_TRACE_OUTPUT_RAW_MAX] + "…"
+        summary = raw[:CREWAI_TRACE_TEXT_SUMMARY_MAX] + (
+            "…" if len(raw) > CREWAI_TRACE_TEXT_SUMMARY_MAX else ""
+        )
+        return {
+            "step": CREWAI_TRACE_STEP_CREW_STEP,
+            "title": title,
+            "text": summary,
+            "phase": "Agent 执行",
+            "thinking": f"当前步骤由「{role}」根据任务描述与上游上下文调用大模型，得到本条结构化/文本输出。",
+            "output": raw,
+        }
+
+    @staticmethod
+    def _done_trace_item(answer: str) -> Dict[str, Any]:
+        cap = CREWAI_TRACE_DONE_OUTPUT_PREVIEW_MAX
+        preview = answer[:cap] + ("…" if len(answer) > cap else "")
+        return {
+            "step": CREWAI_TRACE_STEP_DONE,
+            "title": CREWAI_TRACE_TITLE_DONE,
+            "text": CREWAI_TRACE_MESSAGE_DONE,
+            "phase": "收尾",
+            "thinking": "Crew 顺序任务已执行完毕；下方「输出结果」为最终答案摘要，完整正文见页面「最终答案」区域。",
+            "output": preview,
+        }
+
+    def _kickoff_sync_with_retry(self, crew: Any, inputs: Dict[str, Any]) -> str:
         last_error: Exception | None = None
         for attempt in range(1, CREWAI_KICKOFF_MAX_ATTEMPTS + 1):
             try:
                 logger.debug("crew kickoff attempt=%s/%s", attempt, CREWAI_KICKOFF_MAX_ATTEMPTS)
-                result = await asyncio.to_thread(crew.kickoff, inputs)
-                text = str(result).strip()
+                text = str(crew.kickoff(inputs)).strip()
                 logger.debug("crew kickoff ok attempt=%s output_len=%s", attempt, len(text))
                 return text
             except Exception as e:
@@ -218,6 +377,9 @@ class MultiAgentCrewAIService:
                     e,
                 )
                 if attempt < CREWAI_KICKOFF_MAX_ATTEMPTS:
-                    await asyncio.sleep(CREWAI_KICKOFF_RETRY_DELAY_SEC)
+                    time.sleep(CREWAI_KICKOFF_RETRY_DELAY_SEC)
         logger.error("crew kickoff exhausted retries last_error=%s", last_error)
         raise MultiAgentExecutionError(f"Crew 执行失败: {last_error}") from last_error
+
+    async def _kickoff_with_retry(self, crew: Any, inputs: Dict[str, Any]) -> str:
+        return await asyncio.to_thread(self._kickoff_sync_with_retry, crew, inputs)
