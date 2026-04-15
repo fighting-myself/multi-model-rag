@@ -46,7 +46,8 @@ function traceBlockText(t: MultiAgentTraceItem): string {
   const thinking = (t.thinking || '').trim()
   const raw = (t.output ?? t.text ?? '').trim()
   const oneLine = raw.replace(/\s+/g, ' ').slice(0, 400)
-  const resultLabel = isMetaTrace(t.step) ? '说明' : '结果'
+  const resultLabel =
+    t.step === 'params' ? '注入参数' : isMetaTrace(t.step) ? '编排说明' : '输出结果'
   return [`【${title}】${phase ? ` ${phase}` : ''}`, `思考：${thinking}`, `${resultLabel}：${oneLine}`].join('\n')
 }
 
@@ -253,7 +254,7 @@ export default function MultiAgent() {
                       {t.thinking || '—'}
                     </div>
                     <div style={{ marginTop: 8 }}>
-                      <strong>{isMetaTrace(t.step) ? '说明：' : '输出结果：'}</strong>
+                      <strong>{t.step === 'params' ? '注入参数：' : isMetaTrace(t.step) ? '说明：' : '输出结果：'}</strong>
                       <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{t.output ?? t.text ?? '—'}</div>
                     </div>
                   </List.Item>

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any, Callable, Dict, List, Tuple
@@ -24,12 +25,11 @@ from app.core.constants import (
     CREWAI_TRACE_STEP_CREW_STEP,
     CREWAI_TRACE_STEP_DONE,
     CREWAI_TRACE_STEP_FINANCE_PARAMS,
-    CREWAI_TRACE_STEP_PARADIGM,
-    CREWAI_TRACE_STEP_SCENE,
+    CREWAI_TRACE_STEP_ORCHESTRATION,
     CREWAI_TRACE_TEXT_SUMMARY_MAX,
     CREWAI_TRACE_TITLE_DONE,
     CREWAI_TRACE_TITLE_FINANCE_PARAMS,
-    CREWAI_TRACE_TITLE_PARADIGM,
+    CREWAI_TRACE_TITLE_ORCHESTRATION,
 )
 from app.core.exceptions import MultiAgentExecutionError
 from app.prompts.multi_agent_crewai import (
@@ -203,12 +203,24 @@ class MultiAgentCrewAIService:
             "agents": [t.agent for t in tasks],
             "tasks": tasks,
             "process": process_cls.sequential,
-            "verbose": CREWAI_AGENT_VERBOSE,  # 强制详细日志
+            "verbose": CREWAI_AGENT_VERBOSE,
         }
 
-        # 👇 直接硬传 task_callback，0.118.0 100% 支持
         if per_output_callback is not None:
-            kwargs["task_callback"] = per_output_callback
+
+            def unified_cb(payload: Any) -> None:
+                per_output_callback(MultiAgentCrewAIService._trace_from_callback_payload(payload))
+
+            try:
+                sig = inspect.signature(crew_cls.__init__)
+                if "step_callback" in sig.parameters:
+                    kwargs["step_callback"] = unified_cb
+                elif "task_callback" in sig.parameters:
+                    kwargs["task_callback"] = unified_cb
+                else:
+                    logger.warning("Crew.__init__ 无 step_callback/task_callback，流式中间轨迹将不可用")
+            except (TypeError, ValueError):
+                kwargs["task_callback"] = unified_cb
 
         return crew_cls(**kwargs)
 
@@ -223,29 +235,43 @@ class MultiAgentCrewAIService:
         return {"query": query}
 
     @staticmethod
+    def _safe_format_task_description(template: str, crew_inputs: Dict[str, Any]) -> str:
+        try:
+            return template.format(**crew_inputs)
+        except (KeyError, ValueError):
+            return template
+
+    @classmethod
+    def _orchestration_body(cls, scene_tpl: SceneTemplate, crew_inputs: Dict[str, Any]) -> str:
+        agent_role: Dict[str, str] = {a.agent_id: a.role for a in scene_tpl.agents}
+        lines: List[str] = []
+        for i, tt in enumerate(scene_tpl.tasks, start=1):
+            role = agent_role.get(tt.agent_id, tt.agent_id)
+            desc = cls._safe_format_task_description(tt.description_template, crew_inputs)
+            lines.append(f"{i}. [{tt.task_id}] → {role}")
+            lines.append(f"   期望产出: {tt.expected_output}")
+            lines.append(f"   任务说明:\n{desc.strip()}")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    @staticmethod
     def _initial_traces(
         scene_tpl: SceneTemplate,
         scene: MultiAgentScene,
         crew_inputs: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        wf = scene_tpl.workflow
-        pm = scene_tpl.paradigm_mix
+        orch = MultiAgentCrewAIService._orchestration_body(scene_tpl, crew_inputs)
         traces: List[Dict[str, Any]] = [
             {
-                "step": CREWAI_TRACE_STEP_SCENE,
-                "title": scene_tpl.display_name,
-                "text": wf,
-                "phase": "场景与编排",
-                "thinking": "已选定业务场景，以下为内置工作流说明（角色与任务顺序的摘要）。",
-                "output": wf,
-            },
-            {
-                "step": CREWAI_TRACE_STEP_PARADIGM,
-                "title": CREWAI_TRACE_TITLE_PARADIGM,
-                "text": pm,
-                "phase": "范式融合",
-                "thinking": "本场景在单智能体层面融合了 ReAct、Plan&Execute、ReWOO、Reflection 等范式说明。",
-                "output": pm,
+                "step": CREWAI_TRACE_STEP_ORCHESTRATION,
+                "title": CREWAI_TRACE_TITLE_ORCHESTRATION,
+                "text": orch[:CREWAI_TRACE_TEXT_SUMMARY_MAX],
+                "phase": "编排",
+                "thinking": (
+                    "以下为当前场景在代码里组装的顺序任务（任务 ID、负责 Agent、任务说明与期望产出），"
+                    "与即将执行的 Crew.tasks 一致；随后每条「Agent 执行」来自运行时回调。"
+                ),
+                "output": orch,
             },
         ]
         if scene == "finance_research":
@@ -260,29 +286,96 @@ class MultiAgentCrewAIService:
                     "title": CREWAI_TRACE_TITLE_FINANCE_PARAMS,
                     "text": param_line,
                     "phase": "参数确认",
-                    "thinking": "金融投研场景下，将用户提供的标的、时间窗口与风险偏好注入 Crew 输入。",
+                    "thinking": "本次 kickoff(inputs) 将使用的金融参数字段（与任务描述模板占位符一致）。",
                     "output": param_line,
                 }
             )
         return traces
 
     @staticmethod
+    def _agent_label_from_output(output: Any) -> str:
+        ag = getattr(output, "agent", None)
+        if ag is None:
+            ar = getattr(output, "agent_role", None)
+            if isinstance(ar, str) and ar.strip():
+                return ar.strip()
+            return "Agent"
+        if isinstance(ag, str) and ag.strip():
+            return ag.strip()
+        role = getattr(ag, "role", None)
+        if isinstance(role, str) and role.strip():
+            return role.strip()
+        return str(ag)
+
+    @staticmethod
+    def _extract_thought_from_raw(raw: str) -> str | None:
+        if not raw or not str(raw).strip():
+            return None
+        text = str(raw)
+        patterns = [
+            r"(?is)Thought:\s*(.+?)(?=\n\s*(?:Action|Actions|Tool|Tools|Observation|Final Answer)\s*[:：]|\Z)",
+            r"(?is)###\s*Thought\s*(.+?)(?=\n\s*(?:###|Action|Final Answer)|\Z)",
+            r"(?is)思考[:：]\s*(.+?)(?=\n\s*(?:行动|动作|观察|最终答案)[:：]|\Z)",
+        ]
+        for pat in patterns:
+            m = re.search(pat, text)
+            if m:
+                chunk = m.group(1).strip()
+                if chunk:
+                    return chunk
+        return None
+
+    @staticmethod
+    def _trace_from_callback_payload(payload: Any) -> Dict[str, Any]:
+        if payload is None:
+            return {
+                "step": CREWAI_TRACE_STEP_CREW_STEP,
+                "title": "执行步骤",
+                "text": "",
+                "phase": "Agent 执行",
+                "thinking": "收到空回调载荷。",
+                "output": "",
+            }
+        if hasattr(payload, "raw") or hasattr(payload, "description"):
+            return MultiAgentCrewAIService._trace_from_crew_output(payload)
+        text = str(payload).strip()
+        cap = CREWAI_TRACE_OUTPUT_RAW_MAX
+        if len(text) > cap:
+            text = text[:cap] + "…"
+        summary = text[:CREWAI_TRACE_TEXT_SUMMARY_MAX]
+        if len(text) > CREWAI_TRACE_TEXT_SUMMARY_MAX:
+            summary += "…"
+        return {
+            "step": CREWAI_TRACE_STEP_CREW_STEP,
+            "title": "执行步骤",
+            "text": summary,
+            "phase": "Agent 执行",
+            "thinking": MultiAgentCrewAIService._extract_thought_from_raw(text)
+            or "（逐步回调；以下为该步原始文本。）",
+            "output": text,
+        }
+
+    @staticmethod
     def _trace_from_crew_output(output: Any) -> Dict[str, Any]:
-        """
-        👈 完全适配 0.118.0 TaskOutput 结构
-        """
-        # 0.118.0 output 结构：.agent .description .raw .result
-        role = "Agent"
-        if hasattr(output, 'agent') and output.agent:
-            role = output.agent.role
+        role = MultiAgentCrewAIService._agent_label_from_output(output)
 
-        desc = getattr(output, "description", "任务执行")
-        title = f"{role}：{desc[:20]}..."
+        desc = getattr(output, "description", None) or getattr(output, "name", None) or "任务执行"
+        desc_s = str(desc).strip()
+        head = desc_s.replace("\n", " ")[:80]
+        title = f"{role}：{head}" + ("…" if len(desc_s) > 80 else "")
 
-        # 正确取结果
-        raw = str(output.raw) if hasattr(output, "raw") else str(output)
+        raw = getattr(output, "raw", None)
+        if raw is None and hasattr(output, "result"):
+            raw = output.result
+        raw = str(raw) if raw is not None else str(output)
         if len(raw) > CREWAI_TRACE_OUTPUT_RAW_MAX:
             raw = raw[:CREWAI_TRACE_OUTPUT_RAW_MAX] + "…"
+
+        thought = MultiAgentCrewAIService._extract_thought_from_raw(raw)
+        thinking = thought or (
+            f"「{role}」本步完整模型输出见下方「输出结果」"
+            f"（未匹配到 Thought/思考 分段时可全文阅读）。"
+        )
 
         summary = raw[:CREWAI_TRACE_TEXT_SUMMARY_MAX]
         if len(raw) > CREWAI_TRACE_TEXT_SUMMARY_MAX:
@@ -293,7 +386,7 @@ class MultiAgentCrewAIService:
             "title": title,
             "text": summary,
             "phase": "Agent 执行",
-            "thinking": f"「{role}」正在执行任务，生成中间结果",
+            "thinking": thinking,
             "output": raw,
         }
 
