@@ -226,7 +226,7 @@ export default function MultiAgent() {
             </Button>
           }
         >
-          {loading && traces.length === 0 && (
+          {loading && processText.length === 0 && (
             <div style={{ marginBottom: 12 }}>
               <Spin size="small" /> <span style={{ marginLeft: 8 }}>正在连接并准备场景…</span>
             </div>
