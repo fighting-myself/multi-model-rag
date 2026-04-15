@@ -35,6 +35,7 @@ const LINE_HEIGHT_EM = 1.5
 const PROCESS_EXPANDED_HEIGHT_PX = 440
 const SCENE_PARAMS_FIXED_HEIGHT_PX = 120
 const SCENE_DESC_FIXED_HEIGHT_PX = 44
+const INPUT_PANEL_MIN_HEIGHT = 620
 
 function lastNLines(text: string, n: number): string {
   const lines = text.split('\n')
@@ -166,8 +167,9 @@ export default function MultiAgent() {
   const showProcess = loading || processText.length > 0
 
   return (
-    <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
+    <div style={{ padding: 24, maxWidth: 1100, width: '100%', margin: '0 auto' }}>
       <Card
+        style={{ width: '100%' }}
         title={
           <Space>
             <ClusterOutlined />
@@ -175,7 +177,7 @@ export default function MultiAgent() {
           </Space>
         }
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space direction="vertical" size={12} style={{ width: '100%', minHeight: INPUT_PANEL_MIN_HEIGHT }}>
           <Alert
             type="info"
             showIcon

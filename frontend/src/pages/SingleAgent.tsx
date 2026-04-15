@@ -8,7 +8,7 @@ import type { AgentToolItem, SingleAgentRunRequest, SingleAgentSsePayload } from
 
 const { TextArea } = Input
 const THINKING_PREVIEW_LINES = 5
-const INPUT_PANEL_MIN_HEIGHT = 420
+const INPUT_PANEL_MIN_HEIGHT = 620
 const THINKING_PANEL_MIN_HEIGHT = 220
 const RESULT_PANEL_MIN_HEIGHT = 180
 
@@ -117,8 +117,9 @@ export default function SingleAgent() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
+    <div style={{ padding: 24, maxWidth: 1100, width: '100%', margin: '0 auto' }}>
       <Card
+        style={{ width: '100%' }}
         title={
           <Space>
             <ApiOutlined />
