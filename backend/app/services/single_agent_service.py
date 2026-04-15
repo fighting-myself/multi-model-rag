@@ -19,9 +19,16 @@ from pydantic import Field, create_model
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.constants import (
+    SINGLE_AGENT_LLM_RETRY_DELAY_SEC,
+    SINGLE_AGENT_LLM_RETRY_MAX_ATTEMPTS,
+    SINGLE_AGENT_OPENAI_API_KEY_PLACEHOLDER,
+    SINGLE_AGENT_TOOL_RETRY_DELAY_SEC,
+    SINGLE_AGENT_TOOL_RETRY_MAX_ATTEMPTS,
+)
+from app.core.exceptions import SingleAgentExecutionError
 from app.models.agent_tool import AgentTool
-from app.services.agent_tool_registry_service import list_agent_tools, run_registered_tool
-from app.services.single_agent_templates import (
+from app.prompts.single_agent import (
     EXECUTE_SYSTEM_PROMPT,
     PERCEIVE_PROMPT,
     PLAN_PROMPT,
@@ -31,18 +38,10 @@ from app.services.single_agent_templates import (
     REWOO_WORKER_PROMPT,
     SUMMARIZE_PROMPT,
 )
+from app.services.agent_tool_registry_service import list_agent_tools, run_registered_tool
 
 AgentParadigm = Literal["react", "plan_execute", "reflexion", "rewoo"]
 logger = logging.getLogger(__name__)
-
-LLM_RETRY_TIMES = 2
-LLM_RETRY_WAIT_SEC = 0.6
-TOOL_RETRY_TIMES = 2
-TOOL_RETRY_WAIT_SEC = 0.4
-
-
-class SingleAgentExecutionError(RuntimeError):
-    """单智能体执行失败。"""
 
 
 class SingleAgentState(TypedDict, total=False):
@@ -63,7 +62,7 @@ class SingleAgentService:
     def _make_llm(self, *, temperature: float = 0.2, max_tokens: int = 1200) -> ChatOpenAI:
         return ChatOpenAI(
             model=settings.LLM_MODEL,
-            openai_api_key=settings.OPENAI_API_KEY or "dummy",
+            openai_api_key=settings.OPENAI_API_KEY or SINGLE_AGENT_OPENAI_API_KEY_PLACEHOLDER,
             openai_api_base=settings.OPENAI_BASE_URL,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -71,26 +70,26 @@ class SingleAgentService:
 
     async def _ainvoke_with_retry(self, llm: ChatOpenAI, messages: List[Any], *, stage: str) -> Any:
         last_error: Exception | None = None
-        for attempt in range(1, LLM_RETRY_TIMES + 1):
+        for attempt in range(1, SINGLE_AGENT_LLM_RETRY_MAX_ATTEMPTS + 1):
             try:
                 return await llm.ainvoke(messages)
             except Exception as e:
                 last_error = e
                 logger.warning("single-agent llm invoke failed stage=%s attempt=%s err=%s", stage, attempt, e)
-                if attempt < LLM_RETRY_TIMES:
-                    await asyncio.sleep(LLM_RETRY_WAIT_SEC)
+                if attempt < SINGLE_AGENT_LLM_RETRY_MAX_ATTEMPTS:
+                    await asyncio.sleep(SINGLE_AGENT_LLM_RETRY_DELAY_SEC)
         raise SingleAgentExecutionError(f"LLM 调用失败(stage={stage}): {last_error}")
 
     async def _run_tool_with_retry(self, tool: AgentTool, args: Dict[str, Any]) -> str:
         last_error: Exception | None = None
-        for attempt in range(1, TOOL_RETRY_TIMES + 1):
+        for attempt in range(1, SINGLE_AGENT_TOOL_RETRY_MAX_ATTEMPTS + 1):
             try:
                 return await run_registered_tool(tool, args)
             except Exception as e:
                 last_error = e
                 logger.warning("single-agent tool failed tool=%s attempt=%s err=%s", tool.code, attempt, e)
-                if attempt < TOOL_RETRY_TIMES:
-                    await asyncio.sleep(TOOL_RETRY_WAIT_SEC)
+                if attempt < SINGLE_AGENT_TOOL_RETRY_MAX_ATTEMPTS:
+                    await asyncio.sleep(SINGLE_AGENT_TOOL_RETRY_DELAY_SEC)
         raise SingleAgentExecutionError(f"工具执行失败(tool={tool.code}): {last_error}")
 
     @staticmethod

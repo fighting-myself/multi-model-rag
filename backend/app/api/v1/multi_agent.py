@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.v1.auth import get_current_active_user
 from app.schemas.auth import UserResponse
 from app.schemas.multi_agent import MultiAgentRunRequest, MultiAgentRunResponse
-from app.services.multi_agent_crewai_service import MultiAgentCrewAIService, MultiAgentExecutionError
+from app.core.exceptions import MultiAgentExecutionError
+from app.services.multi_agent_crewai_service import MultiAgentCrewAIService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

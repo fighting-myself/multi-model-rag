@@ -140,6 +140,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 > 说明：`backend/Dockerfile` 使用 `constraints.txt`、BuildKit pip 缓存，以及 `requirements-heavy.txt`（重依赖独立缓存层）来降低依赖回溯与重复下载耗时。
 
+后端与 Agent 相关的公共约定（避免散落在各 service）：
+
+- `app/core/exceptions.py`：单智能体 / 多智能体可预期失败异常（API 映射 502 等）
+- `app/core/constants.py`：重试次数、CrewAI/LiteLLM、轨迹字段等常量
+- `app/prompts/`：单智能体系统提示与 CrewAI 场景模板（与 `app/schemas` 中的场景枚举对齐）
+
 - 后端默认监听 `http://localhost:8000`
 - OpenAPI 文档：`http://localhost:8000/docs`
 - 部分功能（如浏览器助手、电脑管家）需要额外依赖：

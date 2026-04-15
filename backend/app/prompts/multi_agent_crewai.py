@@ -1,15 +1,15 @@
 """
-CrewAI 多智能体模板定义：
-- 场景元信息
-- 角色模板
-- 任务模板
+CrewAI 多智能体：场景元信息、角色与任务描述模板。
+
+场景枚举与 API Schema 对齐：``MultiAgentScene`` 来自 ``app.schemas.multi_agent``。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Literal
+from typing import Any, Dict, List, Literal
 
-MultiAgentScene = Literal["finance_research", "market_ops", "compliance_risk", "product_strategy"]
+from app.schemas.multi_agent import MultiAgentScene
+
 ParadigmTag = Literal["react", "plan_execute", "rewoo", "reflection", "reporting"]
 
 
@@ -175,3 +175,23 @@ def get_scene_template(scene: MultiAgentScene) -> SceneTemplate:
         return FINANCE_SCENE
     return GENERIC_SCENE_TEMPLATES[scene]
 
+
+@dataclass(frozen=True)
+class FinanceResearchParamDefaults:
+    """金融投研场景：模板化参数缺省值（与任务 description 占位符一致）。"""
+
+    symbol: str = "未指定标的"
+    time_window: str = "近30天"
+    risk_preference: str = "平衡"
+
+
+def finance_scene_inputs(query: str, finance_params: Dict[str, Any] | None) -> Dict[str, Any]:
+    """合并用户传入的金融参数与模板缺省，供 Crew 任务插值。"""
+    defaults = FinanceResearchParamDefaults()
+    params = finance_params or {}
+    return {
+        "query": query,
+        "symbol": str(params.get("symbol") or defaults.symbol),
+        "time_window": str(params.get("time_window") or defaults.time_window),
+        "risk_preference": str(params.get("risk_preference") or defaults.risk_preference),
+    }

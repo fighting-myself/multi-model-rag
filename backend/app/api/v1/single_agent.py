@@ -11,7 +11,8 @@ from app.core.database import get_db
 from app.schemas.auth import UserResponse
 from app.schemas.single_agent import AgentToolResponse, SingleAgentRunRequest, SingleAgentRunResponse
 from app.services.agent_tool_registry_service import list_agent_tools, seed_default_agent_tools
-from app.services.single_agent_service import SingleAgentExecutionError, SingleAgentService
+from app.core.exceptions import SingleAgentExecutionError
+from app.services.single_agent_service import SingleAgentService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
